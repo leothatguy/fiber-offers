@@ -156,6 +156,18 @@ h2 {
   gap: 4px;
 }
 
+.is-public-payment-page .sidebar-nav .nav-label,
+.is-public-payment-page .sidebar-nav .nav-item[data-view]:not([data-view="payments"]),
+.is-public-payment-page .demo-tools,
+.is-public-payment-page #reconciliationJsonLink,
+.is-public-payment-page #reconciliationCsvLink {
+  display: none;
+}
+
+#paymentActivityPanel[hidden] {
+  display: none;
+}
+
 .nav-label,
 .environment-label,
 .eyebrow,
@@ -617,7 +629,7 @@ dt {
 
 .offer-visual {
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 242px) minmax(0, 1fr);
   gap: 34px;
   align-items: start;
 }
@@ -625,8 +637,10 @@ dt {
 .qr-frame,
 #offerCanvas,
 #qrImage {
-  width: 216px;
-  height: 216px;
+  width: 100%;
+  max-width: 216px;
+  height: auto;
+  aspect-ratio: 1;
 }
 
 .qr-frame {
@@ -635,8 +649,12 @@ dt {
 
 .offer-share-visual {
   display: grid;
+  width: 100%;
+  max-width: 242px;
+  min-width: 0;
   gap: 12px;
   justify-items: center;
+  overflow: hidden;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -653,6 +671,7 @@ dt {
 
 #offerCanvas,
 #qrImage {
+  display: block;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 6px;
   background: #fff;
@@ -2343,15 +2362,16 @@ td {
   }
 
   .offer-visual {
-    grid-template-columns: 176px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
     gap: 24px;
   }
 
   .qr-frame,
   #offerCanvas,
   #qrImage {
-    width: 176px;
-    height: 176px;
+    width: 100%;
+    max-width: 176px;
+    height: auto;
   }
 
   .offer-facts {
@@ -2578,7 +2598,7 @@ td {
   }
 
   .offer-share-visual {
-    width: fit-content;
+    width: min(100%, 254px);
     max-width: 100%;
   }
 

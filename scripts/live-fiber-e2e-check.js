@@ -6,6 +6,7 @@ const payerRpcUrls = csvList(process.env.PAYER_FIBER_RPC_URLS);
 if (payerRpcUrls.length === 0) payerRpcUrls.push(payerRpcUrl);
 const resolverUrl = trimTrailingSlash(process.env.RESOLVER_URL ?? "http://127.0.0.1:8787");
 const apiKey = process.env.RESOLVER_API_KEY;
+const configuredOfferId = optionalOfferId(process.env.FIBER_E2E_OFFER_ID);
 const amount = process.env.FIBER_E2E_AMOUNT ?? "100000000";
 const timeoutSeconds = Number(process.env.FIBER_E2E_TIMEOUT_SECONDS ?? 60);
 const pollMs = Number(process.env.FIBER_E2E_POLL_MS ?? 1000);
@@ -14,6 +15,7 @@ const trampolineHops = csvList(process.env.FIBER_E2E_TRAMPOLINE_HOPS);
 const maxFeeAmount = process.env.FIBER_E2E_MAX_FEE_AMOUNT;
 const maxFeeRate = process.env.FIBER_E2E_MAX_FEE_RATE;
 const paymentCount = positiveInteger(process.env.FIBER_E2E_PAYMENT_COUNT, 2);
+const runId = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
 
 let stage = "init";
 let latestDiagnostics;
@@ -48,16 +50,19 @@ try {
     });
   }
 
-  stage = "create_offer";
-  const offer = await resolverRequest("/demo/offers", {
-    method: "POST",
-    body: {
-      username: `e2e-${Date.now().toString(36)}`,
-      amount_min: amount,
-      amount_max: amount,
-      description: "Fiber Offers live payer e2e check"
-    }
-  });
+  stage = configuredOfferId ? "load_offer" : "create_offer";
+  const offer = configuredOfferId
+    ? await resolverRequest(`/offers/${configuredOfferId}`)
+    : await resolverRequest("/demo/offers", {
+        method: "POST",
+        body: {
+          username: `e2e-${Date.now().toString(36)}`,
+          amount_min: amount,
+          amount_max: amount,
+          description: "Fiber Offers live payer e2e check"
+        }
+      });
+  validateOfferForPayment(offer, amount);
   latestOffer = offer;
 
   const sessions = [];
@@ -69,7 +74,7 @@ try {
     stage = `${sessionId}:request_invoice`;
     const invoice = await resolverRequest(`/offers/${offer.offer_id}/invoice`, {
       method: "POST",
-      headers: { "idempotency-key": `${offer.offer_id}:${sessionId}` },
+      headers: { "idempotency-key": `${offer.offer_id}:${runId}:${sessionId}` },
       body: {
         amount,
         asset: { asset_type: "ckb", symbol: "CKB" }
@@ -384,6 +389,7 @@ function printResult(result) {
         amount,
         payment_count: paymentCount,
         resolver_url: resolverUrl,
+        offer_source: configuredOfferId ? "existing" : "created",
         offer_id: result.offer.offer_id,
         distinct_invoices: result.distinctInvoices,
         distinct_payment_hashes: result.distinctPaymentHashes,
@@ -462,6 +468,40 @@ function hexString(value) {
 function hexToDecimal(value) {
   if (typeof value !== "string" || !value.startsWith("0x")) return value;
   return BigInt(value).toString();
+}
+
+function optionalOfferId(value) {
+  if (!value) return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error("FIBER_E2E_OFFER_ID must be a 0x-prefixed 64-character offer ID");
+  }
+  return normalized;
+}
+
+function validateOfferForPayment(response, requestedAmount) {
+  const offer = response?.offer;
+  if (!offer) throw checkError("resolver did not return a valid offer", { offer_id: response?.offer_id });
+  if (response.disabled || response.revoked_at) {
+    throw checkError("the selected offer is not active", { offer_id: response.offer_id });
+  }
+  if (!offer.assets?.some((asset) => asset.asset_type === "ckb")) {
+    throw checkError("the selected offer does not accept CKB", { offer_id: response.offer_id });
+  }
+
+  const value = BigInt(requestedAmount);
+  if (offer.amount_min !== undefined && value < BigInt(offer.amount_min)) {
+    throw checkError("FIBER_E2E_AMOUNT is below the selected offer minimum", {
+      amount: requestedAmount,
+      amount_min: offer.amount_min
+    });
+  }
+  if (offer.amount_max !== undefined && value > BigInt(offer.amount_max)) {
+    throw checkError("FIBER_E2E_AMOUNT is above the selected offer maximum", {
+      amount: requestedAmount,
+      amount_max: offer.amount_max
+    });
+  }
 }
 
 function csvList(value) {

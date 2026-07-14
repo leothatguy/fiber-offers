@@ -5,7 +5,7 @@
 - [x] Add repository URL to [submission.md](submission.md).
 - [ ] Add hosted demo URL to [submission.md](submission.md), if available.
 - [x] Add team member names to [submission.md](submission.md).
-- [ ] Record demo video using [demo-script.md](demo-script.md).
+- [ ] Record demo video.
 - [x] Run `npm test` (105 passing, 4 environment-gated infrastructure checks skipped on 2026-07-14).
 - [x] Run `npm run test:infra` against PostgreSQL and Redis (4 passing on 2026-07-14).
 - [x] Run `npm run smoke` (passed on 2026-07-14).
@@ -32,5 +32,4 @@
 - Future roadmap: see [submission.md](submission.md).
 - Runnable instructions: see [README.md](../README.md).
 - Deployment notes: see [deployment.md](deployment.md).
-- Demo script: see [demo-script.md](demo-script.md).
 - Prior art comparison: see [prior-art-and-positioning.md](prior-art-and-positioning.md).

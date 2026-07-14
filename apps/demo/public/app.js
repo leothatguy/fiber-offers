@@ -26,6 +26,8 @@ window.addEventListener("DOMContentLoaded", init);
 async function init() {
   bindElements();
   bindEvents();
+  const paymentOfferId = location.pathname.match(/^\/pay\/(0x[0-9a-f]{64})$/)?.[1];
+  configurePageContext(paymentOfferId);
   els.webhookUrlInput.value = `${location.origin}/demo/webhook-receiver`;
   drawEmptyFingerprint();
   updateExportLinks();
@@ -37,7 +39,6 @@ async function init() {
   renderOfferDirectory();
   renderOverview();
   showView(viewFromLocationHash(), { updateLocation: false });
-  const paymentOfferId = location.pathname.match(/^\/pay\/(0x[0-9a-f]{64})$/)?.[1];
   const health = await loadHealth();
   if (!paymentOfferId && health?.auth_required) {
     const session = await api("/operator/session");
@@ -58,6 +59,16 @@ async function init() {
     showView(workspaceViews.has(selectedView) ? selectedView : "offers", { updateLocation: false });
     await loadOffer(selectedOfferId, { updateLocation: false, silent: true });
   }
+}
+
+function configurePageContext(paymentOfferId) {
+  if (!paymentOfferId) return;
+  document.body.classList.add("is-public-payment-page");
+  document.getElementById("paymentViewEyebrow").textContent = "Fiber payment";
+  document.getElementById("paymentViewTitle").textContent = "Review and request an invoice";
+  document.getElementById("paymentViewNote").textContent = "A fresh Fiber invoice is created for this payment attempt.";
+  els.paymentActivityEyebrow.textContent = "This session";
+  els.logTitle.textContent = "Current payment attempt";
 }
 
 function bindElements() {
@@ -84,6 +95,7 @@ function bindElements() {
     "minAmountInput",
     "minAmountLabel",
     "maxAmountInput",
+    "maxAmountLabel",
     "maxAmountField",
     "assetInput",
     "pricingTypeInput",
@@ -94,6 +106,7 @@ function bindElements() {
     "recurrenceIntervalInput",
     "recurrenceCyclesInput",
     "recurrenceCapInput",
+    "recurrenceCapLabel",
     "recurrenceSecondsField",
     "recurrenceSecondsInput",
     "webhookUrlInput",
@@ -165,6 +178,9 @@ function bindElements() {
     "paymentBriefRange",
     "reconciliationJsonLink",
     "reconciliationCsvLink",
+    "paymentActivityPanel",
+    "paymentActivityEyebrow",
+    "logTitle",
     "webhookEventsLink",
     "deliverWebhooksButton",
     "operatorRefreshButton",
@@ -240,6 +256,7 @@ function bindEvents() {
   els.offerSearchInput.addEventListener("input", renderOfferDirectory);
   els.assetInput.addEventListener("change", () => {
     els.typeHashField.classList.toggle("is-hidden", els.assetInput.value === "ckb");
+    updateAmountUnitLabels();
     renderOfferDraft();
   });
   els.pricingTypeInput.addEventListener("change", applyPricingMode);
@@ -536,7 +553,7 @@ function renderOfferDirectory() {
     meta.className = "offer-list-meta";
     const amount = document.createElement("span");
     amount.className = "offer-list-amount";
-    amount.textContent = offerAmountRange(offer);
+    amount.textContent = offerAmountRange(offer, asset);
     const assetBadge = document.createElement("span");
     assetBadge.className = "offer-list-asset";
     assetBadge.textContent = asset?.symbol ?? "Asset";
@@ -594,14 +611,20 @@ async function createOffer() {
   setBusy(true);
   try {
     const pricingMode = selectedPricingMode();
+    const asset = selectedAsset();
+    const recurrence = recurrenceDraft(asset);
     const payload = {
       username: els.usernameInput.value,
       description: els.descriptionInput.value,
       pricing_type: pricingMode,
-      ...(pricingMode === "fixed" ? { amount: els.minAmountInput.value } : { amount_min: els.minAmountInput.value }),
-      ...(pricingMode === "range" ? { amount_max: els.maxAmountInput.value } : {}),
-      assets: [selectedAsset()],
-      ...(recurrenceDraft() ? { recurrence: recurrenceDraft() } : {})
+      ...(pricingMode === "fixed"
+        ? { amount: inputAmountToProtocol(els.minAmountInput.value, asset) }
+        : { amount_min: inputAmountToProtocol(els.minAmountInput.value, asset) }),
+      ...(pricingMode === "range"
+        ? { amount_max: inputAmountToProtocol(els.maxAmountInput.value, asset) }
+        : {}),
+      assets: [asset],
+      ...(recurrence ? { recurrence } : {})
     };
     const created = await api("/demo/offers", {
       method: "POST",
@@ -636,7 +659,7 @@ async function loadOffer(offerId, options = {}) {
   setBusy(true);
   try {
     state.offerResponse = await api(`/offers/${offerId}`);
-    await refreshOperatorData();
+    await refreshCurrentOfferData();
     renderOffer();
     resetReadiness();
     setOfferSurface("detail");
@@ -656,7 +679,7 @@ async function resolveAddress() {
     const username = els.lookupInput.value.trim();
     const resolved = await api(`/.well-known/fiberoffer/${encodeURIComponent(username)}`);
     state.offerResponse = resolved;
-    await refreshOperatorData();
+    await refreshCurrentOfferData();
     renderOffer();
     resetReadiness();
     renderOfferDirectory();
@@ -685,7 +708,7 @@ async function requestInvoice() {
     const item = resolutionFromInvoiceResponse(resolution);
     state.resolutions.unshift(item);
     renderLog();
-    await refreshOperatorData();
+    await refreshCurrentOfferData();
     await loadDiagnostics();
     toast("Invoice created");
     return resolution;
@@ -757,7 +780,7 @@ async function refreshStatus() {
 
   setBusy(true);
   try {
-    await refreshOperatorData();
+    await refreshCurrentOfferData();
     await loadDiagnostics();
     toast("Statuses refreshed");
   } catch (error) {
@@ -768,7 +791,25 @@ async function refreshStatus() {
 }
 
 async function refreshResolutions() {
-  await refreshOperatorData();
+  await refreshCurrentOfferData();
+}
+
+async function refreshCurrentOfferData() {
+  if (!location.pathname.startsWith("/pay/")) return refreshOperatorData();
+
+  state.webhooks = [];
+  state.webhookEvents = [];
+  if (state.resolutions.length > 0) {
+    const records = await Promise.all(
+      state.resolutions.map((resolution) => api(
+        `/offers/${state.offerResponse.offer_id}/resolutions/${resolution.id}`
+      ))
+    );
+    state.resolutions = records.map((record) => resolutionFromRecord(record));
+  }
+  renderLog();
+  renderWebhookSubscriptions();
+  renderOperatorConsole();
 }
 
 async function refreshOperatorData() {
@@ -810,7 +851,7 @@ function startLiveActivityPolling() {
 
     state.activityRefreshInFlight = true;
     try {
-      await refreshOperatorData();
+      await refreshCurrentOfferData();
     } catch {
       // Background refresh is best effort; explicit actions still surface API errors.
     } finally {
@@ -889,9 +930,17 @@ function renderOfferDraft() {
 function applyPricingMode() {
   const pricingMode = selectedPricingMode();
   els.maxAmountField.classList.toggle("is-hidden", pricingMode !== "range");
-  els.minAmountLabel.textContent = pricingMode === "fixed" ? "Amount" : "Minimum amount";
   els.minAmountInput.name = pricingMode === "fixed" ? "amount" : "amount_min";
+  updateAmountUnitLabels();
   renderOfferDraft();
+}
+
+function updateAmountUnitLabels() {
+  const unit = els.assetInput.value === "ckb" ? "CKB" : "UDT units";
+  const amountLabel = selectedPricingMode() === "fixed" ? "Amount" : "Minimum amount";
+  els.minAmountLabel.textContent = `${amountLabel} (${unit})`;
+  els.maxAmountLabel.textContent = `Maximum amount (${unit})`;
+  els.recurrenceCapLabel.textContent = `Total spending cap (${unit})`;
 }
 
 function applyRecurrenceMode() {
@@ -903,13 +952,13 @@ function applyRecurrenceMode() {
   );
 }
 
-function recurrenceDraft() {
+function recurrenceDraft(asset = selectedAsset()) {
   if (!els.recurrenceEnabledInput.checked) return undefined;
   return {
     interval: els.recurrenceIntervalInput.value,
-    amount: els.minAmountInput.value,
+    amount: inputAmountToProtocol(els.minAmountInput.value, asset),
     cap_cycles: els.recurrenceCyclesInput.value,
-    spending_cap_total: els.recurrenceCapInput.value,
+    spending_cap_total: inputAmountToProtocol(els.recurrenceCapInput.value, asset),
     ...(els.recurrenceIntervalInput.value === "custom_seconds"
       ? { custom_seconds: els.recurrenceSecondsInput.value }
       : {})
@@ -924,11 +973,12 @@ function renderRecurrenceApproval(offer) {
     els.requestInvoiceButton.disabled = false;
     return;
   }
+  const asset = offer.assets?.[0];
   const caps = [
     terms.cap_cycles === undefined ? undefined : `${terms.cap_cycles} cycles`,
-    terms.spending_cap_total === undefined ? undefined : `${terms.spending_cap_total} total`
+    terms.spending_cap_total === undefined ? undefined : `${formatAssetAmount(terms.spending_cap_total, asset)} total`
   ].filter(Boolean).join(" / ");
-  els.recurrenceApprovalTerms.textContent = `${terms.amount} ${offer.assets?.[0]?.symbol ?? ""} · ${terms.interval} · cap ${caps}`;
+  els.recurrenceApprovalTerms.textContent = `${formatAssetAmount(terms.amount, asset)} · ${terms.interval} · cap ${caps}`;
   const approved = state.recurringApproval?.offer_id === offer.offer_id;
   els.recurrenceApprovalButton.textContent = approved ? "Revoke approval" : "Approve recurring payment";
   els.requestInvoiceButton.disabled = !approved;
@@ -960,10 +1010,41 @@ function pricingModeLabel(mode) {
 function offerAmountRange(offer, asset) {
   const minimum = offer.amount_min ?? "0";
   const maximum = offer.amount_max ?? "Open";
+  if (offer.amount_max !== undefined && String(minimum) === String(maximum)) return formatAssetAmount(minimum, asset);
+  if (offer.amount_max === undefined) return `From ${formatAssetAmount(minimum, asset)}`;
+  return `${formatAssetAmount(minimum, asset)} - ${formatAssetAmount(maximum, asset)}`;
+}
+
+function formatAssetAmount(value, asset, includeSymbol = true) {
   const symbol = asset?.symbol ?? "";
-  if (offer.amount_max !== undefined && String(minimum) === String(maximum)) return `${minimum} ${symbol}`.trim();
-  if (offer.amount_max === undefined) return `From ${minimum} ${symbol}`.trim();
-  return `${minimum} - ${maximum} ${symbol}`.trim();
+  const formatted = asset?.asset_type === "ckb" ? formatShannons(value) : String(value);
+  return includeSymbol && symbol ? `${formatted} ${symbol}` : formatted;
+}
+
+function inputAmountToProtocol(value, asset) {
+  return asset?.asset_type === "ckb" ? ckbToShannons(value) : String(value).trim();
+}
+
+function ckbToShannons(value) {
+  const normalized = String(value).trim();
+  if (!/^\d+(?:\.\d{1,8})?$/.test(normalized)) {
+    throw new Error("CKB amounts must be positive numbers with no more than 8 decimal places");
+  }
+  const [whole, fraction = ""] = normalized.split(".");
+  const shannons = BigInt(whole) * 100000000n + BigInt(fraction.padEnd(8, "0") || "0");
+  if (shannons <= 0n) throw new Error("CKB amount must be greater than zero");
+  return shannons.toString();
+}
+
+function formatShannons(value) {
+  try {
+    const shannons = BigInt(String(value));
+    const whole = shannons / 100000000n;
+    const remainder = (shannons % 100000000n).toString().padStart(8, "0").replace(/0+$/, "");
+    return remainder ? `${whole}.${remainder}` : whole.toString();
+  } catch {
+    return String(value);
+  }
 }
 
 function fixedOfferAmount(offer) {
@@ -973,34 +1054,33 @@ function fixedOfferAmount(offer) {
 
 function applyPaymentAmountMode(offer = undefined, asset = undefined) {
   const fixedAmount = fixedOfferAmount(offer);
-  const symbol = asset?.symbol ?? offer?.assets?.[0]?.symbol ?? "";
-  const suffix = symbol ? ` ${symbol}` : "";
+  const selectedAsset = asset ?? offer?.assets?.[0];
   const selectionChanged = offer?.offer_id !== state.paymentAmountOfferId;
   state.paymentAmountOfferId = offer?.offer_id;
 
   if (fixedAmount) {
-    els.payAmountInput.value = fixedAmount;
+    els.payAmountInput.value = formatAssetAmount(fixedAmount, selectedAsset, false);
     els.payAmountInput.readOnly = true;
     els.payAmountInput.classList.add("is-fixed-amount");
-    els.payAmountLabel.textContent = "Fixed amount";
-    els.payAmountHint.textContent = `This offer always requests ${fixedAmount}${suffix}.`;
+    els.payAmountLabel.textContent = `Fixed amount${selectedAsset?.symbol ? ` (${selectedAsset.symbol})` : ""}`;
+    els.payAmountHint.textContent = `This offer always requests ${formatAssetAmount(fixedAmount, selectedAsset)}.`;
     return;
   }
 
   els.payAmountInput.readOnly = false;
   els.payAmountInput.classList.remove("is-fixed-amount");
-  els.payAmountLabel.textContent = "Amount";
+  els.payAmountLabel.textContent = `Amount${selectedAsset?.symbol ? ` (${selectedAsset.symbol})` : ""}`;
 
   if (selectionChanged && offer?.amount_min !== undefined) {
-    els.payAmountInput.value = offer.amount_min;
+    els.payAmountInput.value = formatAssetAmount(offer.amount_min, selectedAsset, false);
   }
 
   if (!offer) {
     els.payAmountHint.textContent = "Resolve an offer to see its pricing rules.";
   } else if (offer.amount_max !== undefined) {
-    els.payAmountHint.textContent = `Enter an amount from ${offer.amount_min ?? "0"} to ${offer.amount_max}${suffix}.`;
+    els.payAmountHint.textContent = `Enter an amount from ${formatAssetAmount(offer.amount_min ?? "0", selectedAsset)} to ${formatAssetAmount(offer.amount_max, selectedAsset)}.`;
   } else if (offer.amount_min !== undefined) {
-    els.payAmountHint.textContent = `Enter an amount of at least ${offer.amount_min}${suffix}.`;
+    els.payAmountHint.textContent = `Enter an amount of at least ${formatAssetAmount(offer.amount_min, selectedAsset)}.`;
   } else {
     els.payAmountHint.textContent = "Enter the amount to pay.";
   }
@@ -1594,6 +1674,7 @@ function setTone(element, tone) {
 }
 
 function renderLog() {
+  els.paymentActivityPanel.hidden = document.body.classList.contains("is-public-payment-page") && state.resolutions.length === 0;
   els.logCount.textContent = `${state.resolutions.length} invoice${state.resolutions.length === 1 ? "" : "s"}`;
   els.resolutionRows.replaceChildren();
 
@@ -1617,7 +1698,7 @@ function renderLog() {
     row.setAttribute("role", "button");
     row.setAttribute("aria-label", `View invoice ${shortHash(item.payment_hash)} details`);
     row.append(tableCell(new Date(item.created_at).toLocaleTimeString()));
-    row.append(tableCell(item.amount));
+    row.append(tableCell(formatAssetAmount(item.amount, item.asset, false)));
     row.append(tableCell(item.asset.symbol));
     row.append(statusCell(item.status));
     row.append(tableCell(shortHash(item.payment_hash)));
@@ -1657,7 +1738,9 @@ function renderInvoiceDetails() {
   els.invoiceDetailsStatus.className = `status-chip ${status.replaceAll("_", "-")}`;
   els.invoiceDetailsStatus.textContent = status.replace("invoice_", "");
   els.invoiceDetailsAddress.textContent = state.offerResponse?.fiber_address ?? "-";
-  els.invoiceDetailsAmount.textContent = resolution.amount ?? "-";
+  els.invoiceDetailsAmount.textContent = resolution.amount === undefined
+    ? "-"
+    : formatAssetAmount(resolution.amount, resolution.asset, false);
   els.invoiceDetailsAsset.textContent = resolution.asset?.symbol ?? "-";
   els.invoiceDetailsMode.textContent = resolution.invoice_mode ?? resolution.mode ?? "-";
   els.invoiceDetailsCreated.textContent = formatDateTime(resolution.created_at);
@@ -1797,9 +1880,10 @@ function resolutionFromRecord(record) {
 }
 
 function currentPaymentRequest(options = {}) {
+  const asset = state.offerResponse.offer.assets[0];
   const request = {
-    amount: els.payAmountInput.value,
-    asset: state.offerResponse.offer.assets[0]
+    amount: inputAmountToProtocol(els.payAmountInput.value, asset),
+    asset
   };
   if (state.offerResponse.offer.recurrence) {
     request.recurrence_cycle = state.resolutions.filter((resolution) => resolution.recurrence).length + 1;

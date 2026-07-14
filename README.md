@@ -29,7 +29,6 @@ docs/
   prior-art-and-positioning.md
   submission.md
   spec-v1.md
-  demo-script.md
   nestjs-migration.md
   requirements-errata.md
 ```

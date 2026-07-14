@@ -195,15 +195,15 @@
                       <label class="pricing-type-field"><span>Pricing type</span><select id="pricingTypeInput" name="pricing_type"><option value="fixed">Fixed amount</option><option value="open">Customer chooses amount</option><option value="range">Amount range</option></select></label>
                       <label><span>Fiber Address</span><input id="usernameInput" name="username" value="coffee" autocomplete="off" /></label>
                       <label><span>Description</span><input id="descriptionInput" name="description" value="Coffee checkout" /></label>
-                      <label><span id="minAmountLabel">Amount</span><input id="minAmountInput" name="amount_min" value="1000" inputmode="numeric" /></label>
-                      <label id="maxAmountField" class="is-hidden"><span>Maximum amount</span><input id="maxAmountInput" name="amount_max" value="50000" inputmode="numeric" /></label>
+                      <label><span id="minAmountLabel">Amount (CKB)</span><input id="minAmountInput" name="amount_min" value="1" inputmode="decimal" /></label>
+                      <label id="maxAmountField" class="is-hidden"><span id="maxAmountLabel">Maximum amount (CKB)</span><input id="maxAmountInput" name="amount_max" value="5" inputmode="decimal" /></label>
                       <label><span>Asset</span><select id="assetInput" name="asset"><option value="ckb">CKB</option><option value="udt">UDT</option></select></label>
                       <label id="typeHashField" class="is-hidden"><span>Type Script Hash</span><input id="typeHashInput" name="type_script_hash" placeholder="0x..." /></label>
                       <label class="recurrence-toggle"><span>Recurring payment</span><input id="recurrenceEnabledInput" type="checkbox" /></label>
                       <div id="recurrenceFields" class="recurrence-fields is-hidden">
                         <label><span>Interval</span><select id="recurrenceIntervalInput"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="daily">Daily</option><option value="custom_seconds">Demo seconds</option></select></label>
                         <label><span>Maximum cycles</span><input id="recurrenceCyclesInput" value="3" inputmode="numeric" /></label>
-                        <label><span>Total spending cap</span><input id="recurrenceCapInput" value="3000" inputmode="numeric" /></label>
+                        <label><span id="recurrenceCapLabel">Total spending cap (CKB)</span><input id="recurrenceCapInput" value="3" inputmode="decimal" /></label>
                         <label id="recurrenceSecondsField" class="is-hidden"><span>Interval seconds</span><input id="recurrenceSecondsInput" value="10" inputmode="numeric" /></label>
                       </div>
                       <div class="form-actions"><button id="cancelOfferCreateButton" class="secondary" type="button">Cancel</button><button class="primary" type="submit">Create signed offer</button></div>
@@ -213,7 +213,7 @@
                   <aside class="offer-preview" aria-label="Live offer preview">
                     <p class="eyebrow">Live preview</p><span id="offerPreviewAsset" class="asset-seal">CKB</span><h3 id="offerPreviewDescription">Coffee checkout</h3><strong id="offerPreviewAddress">coffee@localhost</strong>
                     <div class="preview-rule"></div>
-                    <dl class="preview-facts"><div><dt>Amount</dt><dd id="offerPreviewRange">1000 CKB</dd></div><div><dt>Pricing</dt><dd id="offerPreviewPricing">Fixed amount</dd></div><div><dt>Offer mode</dt><dd>Signed static endpoint</dd></div></dl>
+                    <dl class="preview-facts"><div><dt>Amount</dt><dd id="offerPreviewRange">1 CKB</dd></div><div><dt>Pricing</dt><dd id="offerPreviewPricing">Fixed amount</dd></div><div><dt>Offer mode</dt><dd>Signed static endpoint</dd></div></dl>
                   </aside>
                 </div>
               </div>
@@ -223,10 +223,10 @@
           <section class="workspace-view" data-workspace-view="payments" hidden>
             <div class="view-heading">
               <div>
-                <p class="eyebrow">Payments</p>
-                <h2>Test payment readiness and review activity</h2>
+                <p id="paymentViewEyebrow" class="eyebrow">Payments</p>
+                <h2 id="paymentViewTitle">Test payment readiness and review activity</h2>
               </div>
-              <span class="view-note">The payment sandbox is for integration testing, not a payer-facing checkout.</span>
+              <span id="paymentViewNote" class="view-note">The payment sandbox is for integration testing, not a payer-facing checkout.</span>
             </div>
 
             <div class="payments-layout">
@@ -243,7 +243,7 @@
                 </div>
                 <label>
                   <span id="payAmountLabel">Amount</span>
-                  <input id="payAmountInput" value="1200" inputmode="numeric" aria-describedby="payAmountHint" />
+                  <input id="payAmountInput" value="1" inputmode="decimal" aria-describedby="payAmountHint" />
                   <small id="payAmountHint" class="field-hint">Resolve an offer to see its pricing rules.</small>
                 </label>
                 <div class="button-row">
@@ -293,10 +293,10 @@
                 </dl>
               </aside>
 
-              <section class="panel log-panel" aria-labelledby="logTitle">
+              <section id="paymentActivityPanel" class="panel log-panel" aria-labelledby="logTitle">
                 <div class="panel-heading">
                   <div>
-                    <p class="eyebrow">Activity</p>
+                    <p id="paymentActivityEyebrow" class="eyebrow">Activity</p>
                     <h2 id="logTitle">Payment resolutions</h2>
                   </div>
                   <div class="panel-actions">

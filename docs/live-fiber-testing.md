@@ -226,6 +226,11 @@ PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
 npm run fiber:e2e-check
 ```
 
+Set `FIBER_E2E_OFFER_ID=0x...` to pay an offer already created by the merchant
+CLI. When it is unset, the check creates a disposable E2E offer. Each run uses
+fresh idempotency keys, so rerunning against the same reusable offer still
+creates new invoices.
+
 Set `FIBER_E2E_PAYMENT_COUNT` to change the number of independent client
 sessions. When multiple funded payer nodes are available, provide their RPC URLs
 through `PAYER_FIBER_RPC_URLS` as a comma-separated list; otherwise each session

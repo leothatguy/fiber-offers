@@ -186,23 +186,6 @@ https://github.com/leothatguy/fiber-offers
 Leo (Dilamme / Independent)
 ```
 
-## Video Demonstration
-
-Use [demo-script.md](demo-script.md).
-
-Suggested video structure:
-
-1. Explain invoice-specific UX problem.
-2. Create one reusable Fiber Offer.
-3. Show stable offer ID, QR, payment link, and Fiber Address.
-4. Run readiness check.
-5. Run the two-session E2E check against the same offer.
-6. Show two distinct invoices and two paid resolver records.
-7. Show reconciliation JSON/CSV.
-8. Register webhook and drain signed delivery.
-9. Show diagnostics and Fiber RPC path.
-10. Mention API-key protected mode and Docker deployment path.
-
 ## Future Roadmap
 
 1. Deploy the final HTTPS demo with managed secrets, backups, metrics, and alerting.
