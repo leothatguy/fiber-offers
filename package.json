@@ -1,0 +1,46 @@
+{
+  "name": "fiber-offers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reusable static payment offers for Fiber Network.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node apps/resolver/src/server.js",
+    "dev:resolver": "node apps/resolver/src/server.js",
+    "dev:fiber:local": "FIBER_RPC_URL=http://127.0.0.1:8227 RESOLVER_WORKERS_ENABLED=true RESOLVER_WORKERS_RUN_ON_START=true node apps/resolver/src/server.js",
+    "dev:fiber:pair": "FIBER_RPC_URL=http://127.0.0.1:8227 MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 RESOLVER_WORKERS_ENABLED=true RESOLVER_WORKERS_RUN_ON_START=true node apps/resolver/src/server.js",
+    "dev:mock": "FIBER_INVOICE_MODE=mock RESOLVER_WORKERS_ENABLED=false node apps/resolver/src/server.js",
+    "db:migrate": "node apps/resolver/src/migrate.js",
+    "worker": "node apps/resolver/src/queue-worker.js",
+    "stack:up": "docker compose up --build",
+    "stack:down": "docker compose down",
+    "cli": "node apps/cli/src/index.js",
+    "fiber:check": "node scripts/live-fiber-check.js",
+    "fiber:invoice-check": "node scripts/live-fiber-invoice-check.js",
+    "fiber:route-check": "node scripts/fiber-route-check.js",
+    "fiber:topology-check": "node scripts/fiber-topology-check.js",
+    "fiber:direct-channel-fixture": "node scripts/fiber-direct-channel-fixture.js",
+    "fiber:sync-check": "node scripts/live-fiber-sync-check.js",
+    "fiber:e2e-check": "node scripts/live-fiber-e2e-check.js",
+    "example:wallet": "node examples/wallet-payment-flow.mjs",
+    "example:merchant": "node examples/merchant-operator.mjs",
+    "example:topology": "node examples/topology-readiness.mjs",
+    "verify": "npm test && npm run smoke",
+    "test": "node --test packages/protocol/test/*.test.js packages/sdk/test/*.test.js apps/resolver/test/*.test.js apps/cli/test/*.test.js",
+    "test:infra": "node --test apps/resolver/test/postgres-store.test.js apps/resolver/test/redis-rate-limiter.test.js",
+    "smoke": "node scripts/smoke-demo.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bullmq": "^5.80.2",
+    "ioredis": "^5.11.1",
+    "pg": "^8.22.0",
+    "qrcode": "^1.5.4"
+  }
+}

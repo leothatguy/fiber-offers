@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers merchant, webhook and reconciliation guide" />
+    <title>Merchant Operations | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a class="is-active" href="/docs/merchants" aria-current="page">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Build</div>
+          <h1>Merchant operations</h1>
+          <p class="docs-lead">Merchants publish one signed offer, then use resolutions, webhooks, receipts, and reconciliation records to operate the many payment attempts that offer may produce.</p>
+
+          <section id="checkout">
+            <h2>Merchant checkout model</h2>
+            <p>For a fixed-price checkout, create an offer with <code>pricing_type: "fixed"</code> and one <code>amount</code>. Share its payment link or link QR at checkout. The merchant does not need to generate a one-time invoice before the payer begins.</p>
+            <pre><code>POST /demo/offers
+
+{
+  "username": "coffee",
+  "description": "Coffee checkout",
+  "pricing_type": "fixed",
+  "amount": "1000",
+  "assets": [{ "asset_type": "ckb", "symbol": "CKB" }]
+}</code></pre>
+            <div class="scenario"><p class="scenario-label">Scenario: a physical checkout counter</p><p>The merchant displays the stable payment link QR. Every customer scans the same code, selects the expected amount in their wallet, and receives a fresh invoice only after readiness succeeds. The merchant tracks individual resolution IDs, not a constantly replaced QR.</p></div>
+          </section>
+
+          <section id="lifecycle">
+            <h2>Resolution lifecycle</h2>
+            <p>Every successful invoice request creates one resolution. A resolution records the amount, asset, invoice data, history, settlement metadata, and associated webhook events.</p>
+            <table>
+              <thead><tr><th>Status</th><th>Meaning</th><th>Merchant action</th></tr></thead>
+              <tbody>
+                <tr><td><code>invoice_created</code></td><td>The resolver issued an invoice.</td><td>Await payer and payment status.</td></tr>
+                <tr><td><code>invoice_received</code></td><td>The invoice lifecycle advanced at its source.</td><td>Keep waiting or show pending confirmation.</td></tr>
+                <tr><td><code>invoice_paid</code></td><td>Payment was settled.</td><td>Fulfill the order and persist the receipt.</td></tr>
+                <tr><td><code>invoice_expired</code>, <code>invoice_failed</code>, <code>invoice_cancelled</code></td><td>The attempt is terminal without settlement.</td><td>Keep the record; allow a new valid payment attempt where appropriate.</td></tr>
+              </tbody>
+            </table>
+            <pre><code>GET  /offers/:offer_id/resolutions
+GET  /offers/:offer_id/resolutions/:resolution_id
+POST /offers/:offer_id/resolutions/:resolution_id/sync</code></pre>
+          </section>
+
+          <section id="webhooks">
+            <h2>Subscribe to webhooks</h2>
+            <p>Register an HTTPS endpoint per offer. An omitted event list subscribes to all supported invoice events. The resolver generates a high-entropy signing secret and returns it only in the creation response; store it immediately in your secret manager.</p>
+            <pre><code>curl -X POST https://resolver.example/offers/0x.../webhooks \
+  -H 'content-type: application/json' \
+  -H 'Authorization: Bearer change-me' \
+  -d '{
+    "url": "https://merchant.example/webhooks/fiber",
+    "events": ["invoice.paid", "invoice.failed"]
+  }'</code></pre>
+            <pre><code>{
+  "id": "wh_...",
+  "url": "https://merchant.example/webhooks/fiber",
+  "events": ["invoice.paid", "invoice.failed"],
+  "disabled": false,
+  "secret_hint": "whsec...9Kp2",
+  "signing_secret": "whsec_..."
+}</code></pre>
+            <p>Each POST includes <code>x-fiber-offers-event-id</code>, <code>x-fiber-offers-delivery-id</code>, <code>x-fiber-offers-event-type</code>, <code>x-fiber-offers-timestamp</code>, and <code>x-fiber-offers-signature</code>. A successful <code>2xx</code> response marks the attempt delivered.</p>
+          </section>
+
+          <section id="manage-webhooks">
+            <h2>Manage endpoints</h2>
+            <table>
+              <thead><tr><th>Operation</th><th>Endpoint</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>List</td><td><code>GET /offers/:offer_id/webhooks</code></td><td>Returns URLs, event filters, status, secret hints, and timestamps. Secrets are never returned.</td></tr>
+                <tr><td>Test</td><td><code>POST /offers/:offer_id/webhooks/:webhook_id/test</code></td><td>Sends a signed <code>webhook.test</code> event to one active endpoint.</td></tr>
+                <tr><td>Pause or resume</td><td><code>PATCH /offers/:offer_id/webhooks/:webhook_id</code></td><td>Set <code>{ "disabled": true }</code> to stop future events without losing configuration or history.</td></tr>
+                <tr><td>Rotate secret</td><td><code>POST /offers/:offer_id/webhooks/:webhook_id/rotate-secret</code></td><td>Invalidates the old secret immediately and returns the replacement once.</td></tr>
+                <tr><td>Delete</td><td><code>DELETE /offers/:offer_id/webhooks/:webhook_id</code></td><td>Permanently removes the subscription. Historical delivery records remain.</td></tr>
+              </tbody>
+            </table>
+            <p>The local console defaults to <code>/demo/webhook-receiver</code>. It is an inspectable development inbox, not a production receiver: use <code>GET /demo/webhook-receiver</code> to see what arrived, but deploy your own HTTPS endpoint with signature verification for real payments.</p>
+          </section>
+
+          <section id="verify-webhook">
+            <h2>Receive and verify events</h2>
+            <p>The signature is <code>sha256=HMAC(secret, timestamp + "." + rawBody)</code>. Read the untouched request bytes, reject stale timestamps, compare signatures safely, and deduplicate by event ID before queuing work.</p>
+            <pre><code>import { createHmac, timingSafeEqual } from "node:crypto";
+import { createServer } from "node:http";
+
+const secret = process.env.FIBER_OFFERS_WEBHOOK_SECRET;
+const processedEventIds = new Set(); // Use a database uniqueness constraint in production.
+
+createServer(async (request, response) => {
+  if (request.method !== "POST" || request.url !== "/webhooks/fiber") {
+    response.writeHead(404).end();
+    return;
+  }
+
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const rawBody = Buffer.concat(chunks);
+  const timestamp = request.headers["x-fiber-offers-timestamp"];
+  const signature = request.headers["x-fiber-offers-signature"];
+
+  if (!verifySignature(secret, timestamp, rawBody, signature)) {
+    response.writeHead(401).end();
+    return;
+  }
+
+  const event = JSON.parse(rawBody.toString("utf8"));
+  if (processedEventIds.has(event.id)) {
+    response.writeHead(204).end();
+    return;
+  }
+  processedEventIds.add(event.id);
+
+  response.writeHead(204).end(); // Acknowledge before fulfillment work.
+  queueMicrotask(() => handleEvent(event));
+}).listen(3000);
+
+function verifySignature(secret, timestamp, rawBody, signature) {
+  if (!secret || !timestamp || !signature) return false;
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
+
+  const expected = `sha256=${createHmac("sha256", secret)
+    .update(`${timestamp}.`)
+    .update(rawBody)
+    .digest("hex")}`;
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(signature);
+  return expectedBytes.length === receivedBytes.length && timingSafeEqual(expectedBytes, receivedBytes);
+}
+
+async function handleEvent(event) {
+  if (event.type === "invoice.paid") {
+    // Fulfill once using event.id or payload.resolution.id as an idempotency key.
+  }
+}</code></pre>
+            <div class="callout callout-warning"><strong>Delivery semantics</strong><span>Events can be duplicated, delayed, or arrive out of order. Treat the webhook as a notification, make fulfillment idempotent, and query the resolution when current state matters.</span></div>
+          </section>
+
+          <section id="reconciliation">
+            <h2>Receipts and reconciliation</h2>
+            <pre><code>GET /offers/:offer_id/resolutions/:resolution_id/receipt.json
+GET /offers/:offer_id/reconciliation.json
+GET /offers/:offer_id/reconciliation.csv</code></pre>
+            <p>Use the receipt as the individual settlement record and the reconciliation export for accounting, support, or close-of-day reporting. The output deliberately keeps offer ID, resolution ID, status, amount, asset, and settlement context together.</p>
+            <div class="scenario"><p class="scenario-label">Scenario: fulfillment after webhook delay</p><p>A merchant receives a successful webhook but its order system is temporarily unavailable. The webhook is redelivered or the merchant calls the resolution endpoint and receipt endpoint later. The resolution ID gives both systems a stable reference for idempotent fulfillment.</p></div>
+          </section>
+
+          <section id="workers">
+            <h2>Manual and background delivery</h2>
+            <p>During development, operators can inspect and deliver the outbox manually. In a live deployment, enable workers to poll invoice settlement state and retry pending webhook deliveries.</p>
+            <pre><code>POST /offers/:offer_id/webhook-events/deliver
+POST /offers/:offer_id/webhook-events/:event_id/deliver
+
+RESOLVER_WORKERS_ENABLED=true \
+RESOLVER_PUBLIC_URL=https://resolver.example \
+FIBER_RPC_URL=http://127.0.0.1:8227 \
+npm run dev</code></pre>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/wallets"><span>Previous</span><strong>Wallet payments</strong></a><a href="/docs/fiber"><span>Next</span><strong>Fiber integration</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Merchant sections"><a href="#checkout">Checkout model</a><a href="#lifecycle">Lifecycle</a><a href="#webhooks">Subscribe</a><a href="#manage-webhooks">Manage endpoints</a><a href="#verify-webhook">Receive events</a><a href="#reconciliation">Reconciliation</a><a href="#workers">Workers</a></nav></aside>
+    </div>
+  </body>
+</html>

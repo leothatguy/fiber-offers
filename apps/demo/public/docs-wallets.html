@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers wallet payment integration guide" />
+    <title>Wallet Payments | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a class="is-active" href="/docs/wallets" aria-current="page">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Build</div>
+          <h1>Wallet payment flows</h1>
+          <p class="docs-lead">A wallet consumes an offer as a payment intent, verifies it, validates the payer's intended request, resolves it into one new invoice, then sends that invoice through Fiber only after the user confirms.</p>
+
+          <section id="responsibilities">
+            <h2>Wallet responsibilities</h2>
+            <div class="concept-grid">
+              <div><h3>Discover</h3><p>Accept a payment link, an encoded offer, a QR payload, or a Fiber Address. Fetch current resolver metadata when the user chooses to continue.</p></div>
+              <div><h3>Verify</h3><p>Decode the offer and verify its Ed25519 signature. Do not treat resolver transport alone as proof of merchant intent.</p></div>
+              <div><h3>Check</h3><p>Call resolver readiness with the exact amount and asset. Render offer or merchant-node failures before requesting an invoice.</p></div>
+              <div><h3>Execute explicitly</h3><p>Request an invoice with an idempotency key, show the final amount, and call Fiber payment only after explicit user approval.</p></div>
+            </div>
+          </section>
+
+          <section id="flow">
+            <h2>Recommended payment sequence</h2>
+            <ol>
+              <li>Resolve the payment link, address, or encoded offer into a signed offer.</li>
+              <li>Verify the offer signature and show the merchant, asset, and price semantics.</li>
+              <li>Collect an amount only for customer-chosen or range pricing.</li>
+              <li>Call <code>POST /offers/:offer_id/check</code> with the selected amount and asset.</li>
+              <li>Use the same checkout attempt ID as the idempotency key for <code>invoice</code>.</li>
+              <li>Show the returned invoice summary and ask for confirmation.</li>
+              <li>Dry-run the invoice through the payer's Fiber node, then send only when the route is payable.</li>
+              <li>Retain the resolution ID for status and receipt lookup.</li>
+            </ol>
+            <div class="callout"><strong>Do not pre-create invoices</strong><span>The offer is the reusable object. An invoice is for a specific attempt. Creating invoices only after readiness keeps route and invoice data fresh and avoids stale payment requests.</span></div>
+          </section>
+
+          <section id="sdk-flow">
+            <h2>SDK payment preparation</h2>
+            <p><code>FiberPaymentFlowClient</code> composes resolver readiness, invoice resolution, and payer-side route confidence. Its <code>preparePayment</code> method does not execute payment.</p>
+            <pre><code>import {
+  FiberOffersClient,
+  FiberPaymentClient,
+  FiberPaymentFlowClient
+} from "@fiber-offers/sdk";
+
+const resolver = new FiberOffersClient({
+  resolverUrl: "https://resolver.example"
+});
+
+const payer = new FiberPaymentClient({
+  url: "http://127.0.0.1:8229"
+});
+
+const flow = new FiberPaymentFlowClient({
+  resolverClient: resolver,
+  paymentClient: payer
+});
+
+const request = {
+  amount: "1000",
+  asset: { asset_type: "ckb", symbol: "CKB" }
+};
+
+const prepared = await flow.preparePayment(offerId, request, {
+  idempotencyKey: "checkout-order-42"
+});
+
+if (!prepared.ok) {
+  showPaymentProblem(prepared.failure, prepared.readiness?.next_actions);
+  return;
+}
+
+showConfirmation(prepared.invoice.invoice);</code></pre>
+            <p>After confirmation, opt into actual payment. This explicit flag protects application code from accidentally sending funds while it is only testing readiness.</p>
+            <pre><code>const result = await flow.payOffer(offerId, request, {
+  idempotencyKey: "checkout-order-42",
+  execute: true
+});
+
+if (result.status === "payment_sent") {
+  showSuccess(result.payment_hash, result.fee);
+}</code></pre>
+          </section>
+
+          <section id="pricing-cases">
+            <h2>Pricing cases to render clearly</h2>
+            <div class="scenario"><p class="scenario-label">Fixed amount</p><p>Do not show an amount editor. The wallet requests the one fixed amount from the offer and rejects any attempt to substitute a different amount.</p></div>
+            <div class="scenario"><p class="scenario-label">Customer chooses amount</p><p>Show an amount input with the offer minimum. Call readiness again whenever the selected value changes before enabling the confirmation path.</p></div>
+            <div class="scenario"><p class="scenario-label">Amount range</p><p>Show both the minimum and maximum. Keep the selected amount visible through invoice confirmation, because that is the value the resolver validates and records.</p></div>
+          </section>
+
+          <section id="failure-handling">
+            <h2>Failure and retry handling</h2>
+            <p>Readiness results carry a structured <code>code</code>, <code>summary</code>, <code>blockers</code>, <code>warnings</code>, and <code>next_actions</code>. Prefer these to raw RPC error messages in the wallet UI.</p>
+            <table>
+              <thead><tr><th>Situation</th><th>Wallet behavior</th></tr></thead>
+              <tbody>
+                <tr><td>Offer signature invalid</td><td>Stop. Do not request an invoice and show that the payment intent could not be verified.</td></tr>
+                <tr><td>Amount or asset rejected</td><td>Return to amount or asset selection. The offer remains usable if the new request is valid.</td></tr>
+                <tr><td>Route or liquidity blocker</td><td>Show the normalized summary and next actions. Do not imply a payment will succeed.</td></tr>
+                <tr><td>Invoice request timeout</td><td>Retry with the same idempotency key and payment request.</td></tr>
+                <tr><td>Fiber send failure</td><td>Keep the raw node error for diagnostics, but present the normalized failure and suggest the next action.</td></tr>
+              </tbody>
+            </table>
+            <p>A single-use offer is also safe under concurrent use: if another payer already caused an invoice to be created, the resolver rejects subsequent attempts with <code>OFFER_ALREADY_USED</code>.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/api"><span>Previous</span><strong>Resolver API</strong></a><a href="/docs/merchants"><span>Next</span><strong>Merchant operations</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Wallet flow sections"><a href="#responsibilities">Responsibilities</a><a href="#flow">Payment sequence</a><a href="#sdk-flow">SDK preparation</a><a href="#pricing-cases">Pricing cases</a><a href="#failure-handling">Failure handling</a></nav></aside>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "@fiber-offers/resolver",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.js"
+}

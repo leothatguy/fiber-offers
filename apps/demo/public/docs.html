@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers documentation" />
+    <title>Fiber Offers Documentation</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar">
+      <a class="docs-brand" href="/" aria-label="Fiber Offers application">
+        <span class="docs-brand-mark">F</span>
+        <strong>Fiber Offers</strong>
+      </a>
+      <nav aria-label="Documentation navigation">
+        <a href="/">Console</a>
+        <a href="/docs" aria-current="page">Documentation</a>
+        <a href="/docs/quickstart">Quickstart</a>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <p class="sidebar-label">Documentation</p>
+        <nav aria-label="Documentation pages">
+          <p class="docs-nav-group">Getting started</p>
+          <a class="is-active" href="/docs" aria-current="page">Overview</a>
+          <a href="/docs/quickstart">Quickstart</a>
+          <p class="docs-nav-group">Foundations</p>
+          <a href="/docs/concepts">Concepts and offers</a>
+          <a href="/docs/api">Resolver API</a>
+          <p class="docs-nav-group">Build</p>
+          <a href="/docs/wallets">Wallet payments</a>
+          <a href="/docs/merchants">Merchant operations</a>
+          <a href="/docs/fiber">Fiber integration</a>
+          <p class="docs-nav-group">Reference</p>
+          <a href="/docs/sdk">SDK</a>
+          <a href="/docs/production">Production and security</a>
+        </nav>
+      </aside>
+
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Fiber Offers / Documentation</div>
+          <h1>Reusable payment offers for Fiber</h1>
+          <p class="docs-lead">
+            Fiber Offers is reusable payment infrastructure for merchants, wallets, and services. A signed offer stays stable while the resolver creates a new Fiber invoice for each payment attempt.
+          </p>
+          <div class="callout callout-note">
+            <strong>What this project is</strong>
+            <span>It is an integration layer around Fiber Network: signed payment intents, invoice resolution, readiness diagnostics, receipts, webhooks, and operator tooling. It does not replace a Fiber node or change Fiber consensus.</span>
+          </div>
+
+          <section id="how-it-works">
+            <h2>How it works</h2>
+            <ol>
+              <li>A merchant signs and publishes a reusable offer containing the accepted asset and price constraints.</li>
+              <li>A wallet discovers the offer through a payment link, QR code, Fiber Address, or encoded payload and verifies its signature.</li>
+              <li>The wallet checks readiness, requests a fresh invoice with an idempotency key, and sends the invoice through Fiber only after confirmation.</li>
+              <li>The resolver records the resolution and lets merchant systems observe lifecycle changes through webhooks, receipts, and reconciliation exports.</li>
+            </ol>
+            <p>Follow the separate <a href="/docs/quickstart">Quickstart</a> to run this flow against the local two-node Fiber testnet fixture.</p>
+          </section>
+
+          <section id="choose-path">
+            <h2>Choose your integration path</h2>
+            <div class="docs-card-grid">
+              <a class="docs-card" href="/docs/concepts">
+                <h3>Understand the offer</h3>
+                <p>Learn the signed format, pricing constraints, Fiber Addresses, and QR payloads before creating an integration.</p>
+              </a>
+              <a class="docs-card" href="/docs/api">
+                <h3>Use the HTTP API</h3>
+                <p>Register offers, resolve invoices, check readiness, inspect resolutions, and retrieve reconciliation exports.</p>
+              </a>
+              <a class="docs-card" href="/docs/wallets">
+                <h3>Build a wallet flow</h3>
+                <p>Verify an offer, present readiness feedback, use idempotency, and explicitly execute a Fiber payment.</p>
+              </a>
+              <a class="docs-card" href="/docs/merchants">
+                <h3>Operate merchant payments</h3>
+                <p>Set up webhooks, settlement tracking, receipts, reconciliation, and background workers.</p>
+              </a>
+              <a class="docs-card" href="/docs/fiber">
+                <h3>Connect Fiber nodes</h3>
+                <p>Run live RPC checks, topology diagnostics, route dry-runs, and guarded direct-channel fixtures.</p>
+              </a>
+              <a class="docs-card" href="/docs/sdk">
+                <h3>Integrate the SDK</h3>
+                <p>Use the Node SDK to compose resolver, readiness, topology, and payer-side payment behavior.</p>
+              </a>
+            </div>
+          </section>
+
+          <section id="local-and-live">
+            <h2>Live Fiber by default</h2>
+            <p>The standard runtime creates real Fiber invoices and automatically polls settlement state. An explicit mock adapter remains available only for automated tests and isolated UI development through <code>npm run dev:mock</code>.</p>
+            <p>Set <code>FIBER_RPC_URL</code> when the resolver should request and poll actual invoices from a Fiber node. Configure payer and merchant RPC URLs to add topology and route diagnostics.</p>
+            <div class="callout callout-warning">
+              <strong>Before accepting live payments</strong>
+              <span>Use the live Fiber checks, a database-backed store, encrypted webhook secret storage, HTTPS, scoped API credentials, and a monitored worker deployment. See <a href="/docs/production">production and security</a> for the implementation checklist.</span>
+            </div>
+          </section>
+
+          <div class="docs-pagination">
+            <a href="/docs/concepts">
+              <span>Next</span>
+              <strong>Concepts and offers</strong>
+            </a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="docs-toc">
+        <p class="toc-label">On this page</p>
+        <nav aria-label="Overview sections">
+          <a class="is-active" href="#how-it-works">How it works</a>
+          <a href="#choose-path">Integration paths</a>
+          <a href="#local-and-live">Mock and live mode</a>
+        </nav>
+      </aside>
+    </div>
+  </body>
+</html>

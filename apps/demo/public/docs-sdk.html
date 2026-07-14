@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers SDK integration reference" />
+    <title>SDK Integration | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a class="is-active" href="/docs/sdk" aria-current="page">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Reference</div>
+          <h1>SDK integration</h1>
+          <p class="docs-lead">The ESM SDK gives applications one consistent interface for protocol operations, resolver calls, readiness, Fiber RPC, topology analysis, route checks, and deliberate payment execution.</p>
+
+          <section id="install">
+            <h2>Packages and imports</h2>
+            <p>The monorepo exposes the protocol and SDK packages with TypeScript declarations. Import only the layer your application needs.</p>
+            <pre><code>import {
+  createSignedOffer,
+  decodeOffer,
+  verifyOffer
+} from "@fiber-offers/protocol";
+
+import {
+  createOffer,
+  FiberOffersClient,
+  FiberPaymentClient,
+  FiberPaymentFlowClient,
+  FiberRecurringPaymentScheduler,
+  FiberTopologyClient
+} from "@fiber-offers/sdk";</code></pre>
+            <table>
+              <thead><tr><th>Client</th><th>Use it for</th></tr></thead>
+              <tbody>
+                <tr><td><code>FiberOffersClient</code></td><td>Resolver offers, readiness, invoices, addresses, resolutions, webhooks, receipts, and reconciliation.</td></tr>
+                <tr><td><code>FiberPaymentClient</code></td><td>Payer-side Fiber <code>send_payment</code>, dry-runs, and payment status calls.</td></tr>
+                <tr><td><code>FiberPaymentFlowClient</code></td><td>The composed wallet path from readiness to invoice to route confidence to explicitly opted-in payment.</td></tr>
+                <tr><td><code>FiberTopologyClient</code></td><td>Merchant and payer node pair inspection plus direct-channel diagnostics.</td></tr>
+                <tr><td><code>FiberRecurringPaymentScheduler</code></td><td>Payer-owned capped approvals, due-cycle execution, retries, and revocation.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="merchant-sdk">
+            <h2>Merchant offer registration</h2>
+            <pre><code>import { createOffer, FiberOffersClient } from "@fiber-offers/sdk";
+
+const created = await createOffer({
+  network: "testnet",
+  resolver_url: "https://resolver.example",
+  description: "Coffee checkout",
+  assets: [{ asset_type: "ckb", symbol: "CKB" }],
+  amount_min: "1000",
+  amount_max: "1000"
+}, { fiberRpcUrl: "http://127.0.0.1:8227" });
+
+const resolver = new FiberOffersClient({
+  resolverUrl: "https://resolver.example",
+  apiKey: process.env.RESOLVER_API_KEY
+});
+
+const registered = await resolver.registerOffer(created.offer, {
+  username: "coffee"
+});</code></pre>
+            <p>Keep <code>created.offer_private_key_pem</code> under merchant control. The resolver verifies that the signed <code>node_id</code> matches its configured Fiber node before registration and invoice minting.</p>
+          </section>
+
+          <section id="wallet-sdk">
+            <h2>Wallet readiness and invoice calls</h2>
+            <pre><code>const resolver = new FiberOffersClient({
+  resolverUrl: "https://resolver.example"
+});
+
+const offer = await resolver.resolveFiberAddress("coffee@example.com");
+const request = {
+  amount: "1000",
+  asset: { asset_type: "ckb", symbol: "CKB" }
+};
+
+const readiness = await resolver.checkPayment(offer.offer_id, request);
+if (!readiness.ready) {
+  throw new Error(readiness.summary);
+}
+
+const invoice = await resolver.requestInvoice(offer.offer_id, request, {
+  idempotencyKey: "checkout-order-42"
+});</code></pre>
+            <p>Use the resolution ID returned by invoice creation when retrieving receipts, status, or reconciliation. Do not create a new idempotency key when retrying the same network request.</p>
+          </section>
+
+          <section id="operator-sdk">
+            <h2>Operator helpers</h2>
+            <pre><code>const created = await resolver.createWebhook(offerId, {
+  url: "https://merchant.example/webhooks/fiber",
+  events: ["invoice.paid", "invoice.failed"]
+});
+storeSecret(created.signing_secret); // Returned only now.
+
+const subscriptions = await resolver.getWebhooks(offerId);
+await resolver.testWebhook(offerId, created.id);
+await resolver.updateWebhook(offerId, created.id, { disabled: true });
+
+const rotated = await resolver.rotateWebhookSecret(offerId, created.id);
+storeSecret(rotated.signing_secret);
+
+const events = await resolver.getWebhookEvents(offerId);
+const delivery = await resolver.deliverWebhookEvents(offerId, {
+  retryFailed: true
+});
+
+const updated = await resolver.syncResolutions(offerId, {
+  includeTerminal: false
+});
+
+const csv = await resolver.getReconciliationCsv(offerId);</code></pre>
+            <p>These operations use the resolver's protected write endpoints when an API key is configured. Treat them as merchant or operator tasks, not wallet-facing payment actions.</p>
+          </section>
+
+          <section id="topology-sdk">
+            <h2>Topology and payer helpers</h2>
+            <pre><code>const topology = new FiberTopologyClient({
+  merchant: "http://127.0.0.1:8227",
+  payer: "http://127.0.0.1:8229"
+});
+
+const report = await topology.inspectPair();
+const payer = new FiberPaymentClient({
+  url: "http://127.0.0.1:8229"
+});
+
+const route = await payer.checkPaymentRoute(invoice.invoice, {
+  maxFeeAmount: 100000,
+  diagnostics: report.diagnostics
+});</code></pre>
+            <p><code>checkPaymentRoute</code> performs a dry-run. Use <code>sendPayment</code> only after application confirmation logic has explicitly approved the payment.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/fiber"><span>Previous</span><strong>Fiber integration</strong></a><a href="/docs/production"><span>Next</span><strong>Production and security</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="SDK sections"><a href="#install">Packages</a><a href="#merchant-sdk">Merchant registration</a><a href="#wallet-sdk">Wallet calls</a><a href="#operator-sdk">Operator helpers</a><a href="#topology-sdk">Topology helpers</a></nav></aside>
+    </div>
+  </body>
+</html>

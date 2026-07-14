@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title description">
+  <title id="title">Fiber Offers System Design</title>
+  <desc id="description">System design for Fiber Offers, including merchant, payer wallet, resolver components, Fiber Network, and merchant operations systems.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#52657A"/>
+    </marker>
+    <marker id="arrow-start" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 10 0 L 0 5 L 10 10 z" fill="#52657A"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #16324F; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #52657A; }
+      .section { font: 700 15px Arial, sans-serif; fill: #52657A; letter-spacing: 1.2px; }
+      .box-title { font: 700 21px Arial, sans-serif; fill: #16324F; }
+      .box-copy { font: 400 16px Arial, sans-serif; fill: #35516D; }
+      .label { font: 700 14px Arial, sans-serif; fill: #35516D; }
+      .step { font: 700 13px Arial, sans-serif; fill: #FFFFFF; }
+      .flow { fill: none; stroke: #52657A; stroke-width: 3; marker-end: url(#arrow); }
+      .flow-two-way { fill: none; stroke: #52657A; stroke-width: 3; marker-start: url(#arrow-start); marker-end: url(#arrow); }
+      .flow-label { font: 700 14px Arial, sans-serif; fill: #35516D; }
+      .note { font: 400 14px Arial, sans-serif; fill: #52657A; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1120" fill="#F7FAFC"/>
+  <rect width="1600" height="112" fill="#FFFFFF"/>
+  <rect y="108" width="1600" height="4" fill="#13A8A0"/>
+  <text x="80" y="55" class="title">Fiber Offers System Design</text>
+  <text x="80" y="84" class="subtitle">Reusable signed payment offers that resolve into fresh Fiber invoices</text>
+
+  <text x="80" y="156" class="section">INTEGRATORS</text>
+  <text x="670" y="156" class="section">FIBER OFFERS INFRASTRUCTURE</text>
+  <text x="1220" y="156" class="section">FIBER NETWORK AND OPERATIONS</text>
+
+  <!-- Merchant -->
+  <rect x="80" y="235" width="245" height="185" rx="8" fill="#FFFFFF" stroke="#13A8A0" stroke-width="3"/>
+  <rect x="80" y="235" width="245" height="42" rx="8" fill="#DDF7F2"/>
+  <text x="104" y="262" class="box-title">Merchant / Service</text>
+  <text x="104" y="309" class="box-copy">Checkout, tip jar, subscription,</text>
+  <text x="104" y="333" class="box-copy">or API-metering integration</text>
+  <text x="104" y="378" class="label">Uses the SDK and resolver API</text>
+
+  <!-- Protocol -->
+  <rect x="395" y="235" width="215" height="185" rx="8" fill="#FFFFFF" stroke="#7A68C4" stroke-width="3"/>
+  <rect x="395" y="235" width="215" height="42" rx="8" fill="#EEEAFE"/>
+  <text x="419" y="262" class="box-title">SDK + Protocol</text>
+  <text x="419" y="309" class="box-copy">Signs a static</text>
+  <text x="419" y="333" class="box-copy">fbroffer1... payload</text>
+  <text x="419" y="378" class="label">Ed25519 + canonical offer ID</text>
+
+  <!-- Payer -->
+  <rect x="80" y="570" width="245" height="195" rx="8" fill="#FFFFFF" stroke="#E76F51" stroke-width="3"/>
+  <rect x="80" y="570" width="245" height="42" rx="8" fill="#FDE8E2"/>
+  <text x="104" y="597" class="box-title">Payer Wallet / App</text>
+  <text x="104" y="644" class="box-copy">Scans a QR, opens a pay link,</text>
+  <text x="104" y="668" class="box-copy">or resolves a Fiber Address</text>
+  <text x="104" y="713" class="label">Checks readiness, then pays</text>
+
+  <!-- Resolver -->
+  <rect x="670" y="185" width="420" height="620" rx="8" fill="#FFFFFF" stroke="#2D6AA0" stroke-width="3"/>
+  <rect x="670" y="185" width="420" height="48" rx="8" fill="#E4F0FA"/>
+  <text x="696" y="216" class="box-title">Fiber Offers Resolver</text>
+  <text x="696" y="260" class="box-copy">Reusable API and integration boundary</text>
+
+  <rect x="696" y="288" width="174" height="124" rx="6" fill="#F0FAF8" stroke="#13A8A0" stroke-width="2"/>
+  <text x="714" y="320" class="label">Offer Registry</text>
+  <text x="714" y="348" class="box-copy">Signed offer storage</text>
+  <text x="714" y="372" class="box-copy">Fiber Address lookup</text>
+
+  <rect x="890" y="288" width="174" height="124" rx="6" fill="#F4F2FD" stroke="#7A68C4" stroke-width="2"/>
+  <text x="908" y="320" class="label">Readiness Service</text>
+  <text x="908" y="348" class="box-copy">Amount and asset rules</text>
+  <text x="908" y="372" class="box-copy">Optional route checks</text>
+
+  <rect x="696" y="452" width="174" height="142" rx="6" fill="#FFF5ED" stroke="#E8893B" stroke-width="2"/>
+  <text x="714" y="484" class="label">Invoice Adapter</text>
+  <text x="714" y="512" class="box-copy">New invoice for each</text>
+  <text x="714" y="536" class="box-copy">payment attempt</text>
+  <text x="714" y="567" class="note">Live Fiber RPC invoice adapter</text>
+
+  <rect x="890" y="452" width="174" height="142" rx="6" fill="#FDF0F2" stroke="#C7576B" stroke-width="2"/>
+  <text x="908" y="484" class="label">Resolution Store</text>
+  <text x="908" y="512" class="box-copy">Status history</text>
+  <text x="908" y="536" class="box-copy">Receipts and exports</text>
+  <text x="908" y="567" class="note">Per-invoice records</text>
+
+  <rect x="696" y="636" width="368" height="132" rx="6" fill="#F2F7FB" stroke="#2D6AA0" stroke-width="2"/>
+  <text x="714" y="668" class="label">Operations and Delivery</text>
+  <text x="714" y="696" class="box-copy">Settlement sync, signed webhooks, receipts,</text>
+  <text x="714" y="720" class="box-copy">and reconciliation JSON / CSV.</text>
+  <text x="714" y="748" class="note">Background workers poll live settlement automatically.</text>
+
+  <!-- Fiber -->
+  <rect x="1220" y="300" width="300" height="205" rx="8" fill="#FFFFFF" stroke="#2D6AA0" stroke-width="3"/>
+  <rect x="1220" y="300" width="300" height="42" rx="8" fill="#E4F0FA"/>
+  <text x="1244" y="327" class="box-title">Merchant Fiber Node</text>
+  <text x="1244" y="374" class="box-copy">Creates and tracks invoices</text>
+  <text x="1244" y="399" class="box-copy">Receives routed payments</text>
+  <text x="1244" y="451" class="label">Payee-only resolver RPC connection</text>
+
+  <!-- Merchant systems -->
+  <rect x="1220" y="650" width="300" height="155" rx="8" fill="#FFFFFF" stroke="#C7576B" stroke-width="3"/>
+  <rect x="1220" y="650" width="300" height="42" rx="8" fill="#FDF0F2"/>
+  <text x="1244" y="677" class="box-title">Merchant Systems</text>
+  <text x="1244" y="724" class="box-copy">Orders, accounting, dashboards,</text>
+  <text x="1244" y="748" class="box-copy">and back-office automation</text>
+  <text x="1244" y="780" class="label">Consumes webhooks and exports</text>
+
+  <!-- Clear, high-level integration flows -->
+  <path d="M 325 327 H 395" class="flow"/>
+  <circle cx="360" cy="307" r="13" fill="#13A8A0"/><text x="356" y="312" class="step">1</text>
+
+  <path d="M 610 327 H 670" class="flow"/>
+  <circle cx="640" cy="307" r="13" fill="#7A68C4"/><text x="636" y="312" class="step">2</text>
+
+  <path d="M 325 668 H 670" class="flow"/>
+  <circle cx="497" cy="647" r="13" fill="#E76F51"/><text x="493" y="652" class="step">3</text>
+  <text x="372" y="705" class="flow-label">Resolve offer and check payment readiness</text>
+
+  <path d="M 1090 412 H 1220" class="flow-two-way"/>
+  <circle cx="1155" cy="391" r="13" fill="#E8893B"/><text x="1151" y="396" class="step">4</text>
+  <text x="1103" y="442" class="flow-label">Fiber RPC</text>
+
+  <path d="M 670 752 H 325" class="flow"/>
+  <circle cx="498" cy="731" r="13" fill="#2D6AA0"/><text x="494" y="736" class="step">5</text>
+  <text x="371" y="790" class="flow-label">Return fresh invoice; wallet pays over Fiber</text>
+
+  <path d="M 1090 726 H 1220" class="flow"/>
+  <circle cx="1155" cy="705" r="13" fill="#C7576B"/><text x="1151" y="710" class="step">6</text>
+  <text x="1108" y="766" class="flow-label">Webhooks</text>
+
+  <!-- Flow summary -->
+  <rect x="80" y="865" width="1440" height="162" rx="8" fill="#FFFFFF" stroke="#D4DEE8" stroke-width="2"/>
+  <text x="108" y="900" class="section">IMPORTANT USER AND DEVELOPER FLOWS</text>
+  <text x="108" y="936" class="box-copy"><tspan font-weight="700">Publish:</tspan> an integrator signs one stable offer and exposes it as a QR code, pay link, or Fiber Address.</text>
+  <text x="108" y="965" class="box-copy"><tspan font-weight="700">Pay:</tspan> a wallet resolves the offer, validates readiness, receives a fresh invoice, and pays through Fiber Network.</text>
+  <text x="108" y="994" class="box-copy"><tspan font-weight="700">Operate:</tspan> the resolver records each attempt and provides status, receipts, reconciliation, and signed webhooks.</text>
+  <text x="80" y="1075" class="note">The standard runtime uses live Fiber RPC. The explicit mock adapter is reserved for isolated automated tests.</text>
+</svg>

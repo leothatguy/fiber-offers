@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers resolver API reference" />
+    <title>Resolver API | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a class="is-active" href="/docs/api" aria-current="page">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Foundations</div>
+          <h1>Resolver API reference</h1>
+          <p class="docs-lead">The resolver is a compact HTTP boundary for offer discovery, readiness, invoice creation, resolution records, receipts, reconciliation, and webhook operations.</p>
+
+          <section id="authentication">
+            <h2>Authentication</h2>
+            <p>Public reads and payment-critical requests remain open: offer fetches, Fiber Address lookup, QR codes, readiness, invoice resolution, receipts, reconciliation, and diagnostics. When <code>RESOLVER_API_KEY</code> is configured, offer inventory, webhook configuration and history, registration, and operator writes require a bearer token or <code>x-api-key</code>.</p>
+            <pre><code>Authorization: Bearer change-me
+# or
+x-api-key: change-me</code></pre>
+            <div class="callout"><strong>Why invoice requests stay public</strong><span>A payer must be able to resolve a signed merchant offer without possessing merchant credentials. The offer signature and request validation protect the payment semantics; API credentials protect merchant and operator mutations.</span></div>
+          </section>
+
+          <section id="endpoints">
+            <h2>Endpoint map</h2>
+            <table>
+              <thead><tr><th>Method and path</th><th>Purpose</th><th>Auth when configured</th></tr></thead>
+              <tbody>
+                <tr><td><code>GET /health</code></td><td>Resolver mode and authentication state.</td><td>No</td></tr>
+                <tr><td><code>GET /diagnostics</code>, <code>GET /topology</code></td><td>Resolver, Fiber RPC, worker, and topology health.</td><td>No</td></tr>
+                <tr><td><code>GET /offers</code></td><td>List compact offer summaries for an operator console.</td><td>Yes</td></tr>
+                <tr><td><code>POST /offers</code>, <code>POST /demo/offers</code></td><td>Register a signed offer or create a local demo offer.</td><td>Yes</td></tr>
+                <tr><td><code>GET /offers/:offer_id</code></td><td>Offer, encoded payload, links, QR URLs, and metadata.</td><td>No</td></tr>
+                <tr><td><code>POST /offers/:offer_id/check</code></td><td>Validate a payment request without creating an invoice.</td><td>No</td></tr>
+                <tr><td><code>POST /offers/:offer_id/invoice</code></td><td>Create or replay an invoice resolution.</td><td>No</td></tr>
+                <tr><td><code>GET /offers/:offer_id/resolutions</code></td><td>List resolution records.</td><td>No</td></tr>
+                <tr><td><code>GET|POST /offers/:offer_id/webhooks</code></td><td>List or register webhook endpoints.</td><td>Yes</td></tr>
+                <tr><td><code>PATCH|DELETE /offers/:offer_id/webhooks/:webhook_id</code></td><td>Pause, resume, update, or remove an endpoint.</td><td>Yes</td></tr>
+                <tr><td><code>POST /offers/:offer_id/webhooks/:webhook_id/test</code></td><td>Send a signed test event to one endpoint.</td><td>Yes</td></tr>
+                <tr><td><code>POST /offers/:offer_id/webhooks/:webhook_id/rotate-secret</code></td><td>Rotate and reveal a replacement signing secret once.</td><td>Yes</td></tr>
+                <tr><td><code>GET /offers/:offer_id/webhook-events</code></td><td>Inspect event and delivery attempt history.</td><td>Yes</td></tr>
+                <tr><td><code>GET /.well-known/fiberoffer/:username</code></td><td>Resolve a Fiber Address.</td><td>No</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="create-offer">
+            <h2>Create or register an offer</h2>
+            <p>The demo endpoint generates a key pair and signed offer for local development. Production merchants create and sign the offer using the protocol package, then send the encoded offer to <code>POST /offers</code>.</p>
+            <pre><code>curl -X POST http://localhost:8787/demo/offers \
+  -H 'content-type: application/json' \
+  -H 'Authorization: Bearer change-me' \
+  -d '{
+    "username": "coffee",
+    "description": "Coffee checkout",
+    "pricing_type": "fixed",
+    "amount": "1000",
+    "assets": [{ "asset_type": "ckb", "symbol": "CKB" }]
+  }'</code></pre>
+            <pre><code>curl -X POST https://resolver.example/offers \
+  -H 'content-type: application/json' \
+  -H 'Authorization: Bearer change-me' \
+  -d '{
+    "username": "coffee",
+    "encoded_offer": "fbroffer1..."
+  }'</code></pre>
+            <p>The registered response contains <code>offer_id</code>, <code>payment_link</code>, <code>encoded_offer</code>, <code>qr_link_url</code>, <code>qr_offer_url</code>, and the optional <code>fiber_address</code>.</p>
+          </section>
+
+          <section id="readiness">
+            <h2>Readiness before invoice creation</h2>
+            <p>Call <code>check</code> whenever the user has selected an amount and asset. It validates signature, pricing rules, assets, single-use state, and merchant invoice availability. Payer route payability remains unknown until the payer wallet dry-runs the fresh invoice using its own node.</p>
+            <pre><code>POST /offers/:offer_id/check
+
+{
+  "amount": "1200",
+  "asset": { "asset_type": "ckb", "symbol": "CKB" }
+}</code></pre>
+            <pre><code>{
+  "ready": true,
+  "confidence": "medium",
+  "next_action": "request_invoice",
+  "summary": "Request is valid; a fresh Fiber invoice can be created.",
+  "checks": [],
+  "blockers": [],
+  "warnings": []
+}</code></pre>
+            <p><code>payable</code> is omitted when the payer route is unknown. After invoice creation, the payer wallet calls <code>FiberPaymentClient.checkPaymentRoute()</code>; a successful dry-run returns <code>payable: true</code> and high confidence. A controlled pair fixture may perform this check through the resolver, but it is not required for merchant operation.</p>
+          </section>
+
+          <section id="invoice">
+            <h2>Invoice resolution and idempotency</h2>
+            <p>Invoice creation is intentionally separate from readiness. The resolver creates a fresh invoice only after it accepts the request.</p>
+            <pre><code>POST /offers/:offer_id/invoice
+Idempotency-Key: checkout-order-42
+content-type: application/json
+
+{
+  "amount": "1200",
+  "asset": { "asset_type": "ckb", "symbol": "CKB" }
+}</code></pre>
+            <p>The first successful request returns <code>201</code>. Retrying exactly the same request and idempotency key returns <code>200</code> with <code>idempotent_replay: true</code>. Reusing the key with a different amount or asset returns <code>409 IDEMPOTENCY_KEY_REUSED</code>.</p>
+            <div class="scenario"><p class="scenario-label">Scenario: mobile retry after a network timeout</p><p>The wallet sends an invoice request but loses the response. It retries with the same idempotency key. The resolver returns the original resolution and invoice, so the user never receives a second invoice for the same checkout attempt.</p></div>
+          </section>
+
+          <section id="records">
+            <h2>Records, receipts, and exports</h2>
+            <pre><code>GET  /offers/:offer_id/resolutions
+GET  /offers/:offer_id/resolutions/:resolution_id
+POST /offers/:offer_id/resolutions/:resolution_id/status
+POST /offers/:offer_id/resolutions/:resolution_id/sync
+POST /offers/:offer_id/resolutions/sync
+
+GET /offers/:offer_id/resolutions/:resolution_id/receipt.json
+GET /offers/:offer_id/reconciliation.json
+GET /offers/:offer_id/reconciliation.csv</code></pre>
+            <p>Status writes and sync operations are protected when an API key is configured. Receipts and reconciliation files are read-only views intended for merchant systems, support workflows, and accounting exports.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/concepts"><span>Previous</span><strong>Concepts and offers</strong></a><a href="/docs/wallets"><span>Next</span><strong>Wallet payments</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="API sections"><a href="#authentication">Authentication</a><a href="#endpoints">Endpoint map</a><a href="#create-offer">Create offers</a><a href="#readiness">Readiness</a><a href="#invoice">Invoice resolution</a><a href="#records">Records and exports</a></nav></aside>
+    </div>
+  </body>
+</html>

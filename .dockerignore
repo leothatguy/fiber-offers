@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.git
+apps/resolver/data
+.env
+.env.*
+coverage
+dist
+build

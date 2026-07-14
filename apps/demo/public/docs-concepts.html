@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers concepts and signed offer format" />
+    <title>Concepts and Offers | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar">
+      <a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a>
+      <nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav>
+    </header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <p class="sidebar-label">Documentation</p>
+        <nav aria-label="Documentation pages">
+          <p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a>
+          <p class="docs-nav-group">Foundations</p><a class="is-active" href="/docs/concepts" aria-current="page">Concepts and offers</a><a href="/docs/api">Resolver API</a>
+          <p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a>
+          <p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a>
+        </nav>
+      </aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Foundations</div>
+          <h1>Offers, pricing, and identity</h1>
+          <p class="docs-lead">An offer is a signed payment intent. It describes a merchant endpoint and payment constraints, while each invoice remains one-time and is generated only when a payer is ready to continue.</p>
+
+          <section id="architecture">
+            <h2>System design</h2>
+            <p>The offer is portable and verifiable. The resolver is responsible for service-side concerns such as invoice creation, lifecycle records, delivery outbox management, and diagnostics.</p>
+            <figure class="architecture-figure">
+              <img src="/docs/system-design.png" alt="Fiber Offers system design showing wallet, merchant, resolver, Fiber node, webhook and storage interactions" />
+              <figcaption>Fiber Offers separates stable payment discovery from the short-lived invoice used to execute an individual Fiber payment.</figcaption>
+            </figure>
+            <div class="concept-grid">
+              <div><h3>Offer</h3><p>A reusable, Ed25519-signed descriptor. It declares recipient identity, accepted assets, price constraints, resolver URL, and optional recurrence metadata.</p></div>
+              <div><h3>Resolver</h3><p>The HTTP service that verifies an offer, checks a request, asks its invoice source for a fresh invoice, and records a resolution.</p></div>
+              <div><h3>Resolution</h3><p>An individual invoice attempt. It stores the requested amount and asset, invoice data, lifecycle history, settlement data, receipts, and webhook events.</p></div>
+              <div><h3>Fiber Address</h3><p>A <code>username@domain</code> lookup that returns the signed offer and its shareable payment link through a well-known URL.</p></div>
+            </div>
+          </section>
+
+          <section id="signed-offer">
+            <h2>Signed offer format</h2>
+            <p>Encoded offers use bech32m with the <code>fbroffer</code> human-readable prefix and canonical JSON data. The offer ID is deterministic, and the signature covers the canonical offer including its ID.</p>
+            <pre><code>{
+  "scheme": "fiberoffer-v1",
+  "version": 1,
+  "network": "testnet",
+  "node_id": "02...",
+  "public_key": "-----BEGIN PUBLIC KEY-----...",
+  "resolver_url": "https://resolver.example",
+  "description": "Coffee checkout",
+  "assets": [{ "asset_type": "ckb", "symbol": "CKB" }],
+  "amount_min": "1000",
+  "amount_max": "1000",
+  "single_use": false,
+  "offer_id": "0x...",
+  "signature": { "scheme": "ed25519", "value": "..." }
+}</code></pre>
+            <ul>
+              <li><code>offer_id</code> is derived from the canonical unsigned offer, so a field change creates a different identity.</li>
+              <li>Amounts are integer strings. A wallet should never convert them through floating-point arithmetic.</li>
+              <li>Supported asset types are <code>ckb</code>, <code>udt</code>, and <code>rgbpp</code>. UDT and RGB++ assets require a type script hash.</li>
+              <li>Wallets should decode and verify the signature before trusting resolver-hosted metadata.</li>
+            </ul>
+          </section>
+
+          <section id="pricing">
+            <h2>Pricing types</h2>
+            <p>The console and demo API make price intent explicit with <code>pricing_type</code>. The signed protocol stores the equivalent amount constraints so existing resolver and wallet integrations remain compatible.</p>
+            <table>
+              <thead><tr><th>Pricing type</th><th>Fields on the offer</th><th>Useful for</th></tr></thead>
+              <tbody>
+                <tr><td>Fixed amount</td><td>Demo API: <code>pricing_type: "fixed"</code> with <code>amount</code>. Signed offer: equal bounds.</td><td>Checkout, a fixed service, or a subscription cycle.</td></tr>
+                <tr><td>Customer chooses amount</td><td><code>amount_min</code> only</td><td>Tips, donations, or open-value payments.</td></tr>
+                <tr><td>Amount range</td><td>Both <code>amount_min</code> and <code>amount_max</code></td><td>Metered or variable service with a hard spending limit.</td></tr>
+              </tbody>
+            </table>
+            <div class="scenario">
+              <p class="scenario-label">Scenario: a fixed coffee checkout</p>
+              <p>A merchant creates <code>pricing_type: "fixed"</code> with <code>amount: "1000"</code>. The resolver signs equal bounds internally; wallets show one fixed price and a request for <code>1200</code> fails as an exact-price mismatch, with no invoice minted.</p>
+            </div>
+            <div class="scenario">
+              <p class="scenario-label">Scenario: a bounded API charge</p>
+              <p>A service publishes a range from <code>100</code> to <code>10000</code>. The wallet can show the chosen amount before resolution; requests outside that range fail cleanly with the offer still reusable for a valid amount.</p>
+            </div>
+          </section>
+
+          <section id="discovery">
+            <h2>Discovery and QR payloads</h2>
+            <p>Offer data can be shared in three forms. Each form leads to the same signed offer and resolver contract.</p>
+            <table>
+              <thead><tr><th>Form</th><th>Example</th><th>When to use it</th></tr></thead>
+              <tbody>
+                <tr><td>Payment link</td><td><code>https://resolver.example/pay/0x...</code></td><td>Merchant checkout, browser, or app-to-app handoff.</td></tr>
+                <tr><td>Fiber Address</td><td><code>coffee@example.com</code></td><td>Human-friendly repeat payments and wallet address lookup.</td></tr>
+                <tr><td>Encoded offer</td><td><code>fbroffer1...</code></td><td>Wallet-level sharing and offline transport of the signed descriptor.</td></tr>
+              </tbody>
+            </table>
+            <pre><code>GET /.well-known/fiberoffer/coffee
+GET /offers/0x.../qr.svg?payload=link
+GET /offers/0x.../qr.svg?payload=offer</code></pre>
+            <p>The link QR is the default because it is smaller and resolves current metadata through the payment URL. The offer QR embeds the signed offer and is helpful for wallet integration testing.</p>
+          </section>
+
+          <section id="single-use">
+            <h2>Reusable and single-use behavior</h2>
+            <p>Most offers are reusable: every valid invoice request receives a newly created invoice. For a one-time authorization, set <code>single_use: true</code>. The resolver serializes invoice creation per offer so simultaneous requests cannot produce multiple invoices from a single-use offer.</p>
+            <div class="callout">
+              <strong>Recurring offers</strong>
+              <span>When recurrence metadata is used, the protocol requires either a cycle cap or a total spending cap. This prevents an unbounded authorization from being represented as a recurring offer.</span>
+            </div>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs"><span>Previous</span><strong>Overview</strong></a><a href="/docs/api"><span>Next</span><strong>Resolver API</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Concepts sections"><a href="#architecture">System design</a><a href="#signed-offer">Signed offer</a><a href="#pricing">Pricing</a><a href="#discovery">Discovery</a><a href="#single-use">Single-use behavior</a></nav></aside>
+    </div>
+  </body>
+</html>

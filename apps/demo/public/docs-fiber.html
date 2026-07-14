@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers Fiber RPC, topology and route integration guide" />
+    <title>Fiber Integration | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a class="is-active" href="/docs/fiber" aria-current="page">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Build</div>
+          <h1>Fiber node integration</h1>
+          <p class="docs-lead">The resolver uses live Fiber RPC by default for invoice creation, automatic settlement polling, topology diagnostics, and payer-side route confidence.</p>
+
+          <section id="modes">
+            <h2>Live runtime and test mode</h2>
+            <table>
+              <thead><tr><th>Mode</th><th>Use it for</th><th>What the resolver does</th></tr></thead>
+              <tbody>
+                <tr><td>Live Fiber RPC</td><td>Standard local, testnet, and production payment flows.</td><td>Probes the node, requests real invoices, polls invoice state, retries webhooks, and exposes node diagnostics.</td></tr>
+                <tr><td>Explicit mock</td><td>Automated tests or isolated UI work when no node can be used.</td><td>Runs only through <code>npm run dev:mock</code>; it is never selected as a silent fallback.</td></tr>
+              </tbody>
+            </table>
+            <p>Inspect the active mode with <code>GET /health</code>. The console and <code>GET /diagnostics</code> expose node reachability and worker status rather than silently replacing an unavailable node with simulated invoices.</p>
+          </section>
+
+          <section id="configure">
+            <h2>Configure a live invoice source</h2>
+            <pre><code>FIBER_RPC_URL=http://127.0.0.1:8227 \
+FIBER_RPC_INVOICE_METHOD=new_invoice \
+FIBER_RPC_GET_INVOICE_METHOD=get_invoice \
+FIBER_RPC_PROBE_METHOD=node_info \
+npm run dev</code></pre>
+            <p>If the Fiber RPC endpoint requires basic authentication, also set <code>FIBER_RPC_USERNAME</code> and <code>FIBER_RPC_PASSWORD</code>. Method names are configurable so the adapter can match the Fiber node version you run.</p>
+            <pre><code>FIBER_RPC_URL=http://127.0.0.1:8227 npm run fiber:check
+FIBER_RPC_URL=http://127.0.0.1:8227 npm run fiber:invoice-check</code></pre>
+            <p>The adapter uses <code>node_info</code>, <code>list_peers</code>, <code>list_channels</code>, <code>new_invoice</code>, and <code>get_invoice</code> to build diagnostics and invoice lifecycle data.</p>
+          </section>
+
+          <section id="node-ownership">
+            <h2>Merchant and payer node ownership</h2>
+            <p>The resolver connects only to the merchant node. Its address can be local, use a custom port, or be hosted behind HTTPS and authentication. Keep this endpoint in server environment configuration; never place RPC credentials in an offer or payment link.</p>
+            <pre><code>FIBER_RPC_URL=https://fiber-rpc.merchant.example \
+FIBER_RPC_USERNAME=resolver \
+FIBER_RPC_PASSWORD=secret \
+npm run dev</code></pre>
+            <p>The payer opens the stable offer link, requests a fresh invoice from the resolver, and pays that invoice using their own Fiber wallet or node. Fiber routing uses the invoice and network graph; the merchant does not need to know the payer RPC URL.</p>
+            <div class="callout callout-warning"><strong>Multi-tenant boundary</strong><span>One resolver deployment currently maps to one merchant node. A hosted multi-merchant service needs a server-side tenant connection registry with encrypted credentials and ownership checks. Never accept an arbitrary node URL from a browser request because that creates credential and SSRF risks.</span></div>
+          </section>
+
+          <section id="topology">
+            <h2>Topology and payment readiness</h2>
+            <p>For a controlled integration test, an operator may configure a known payer fixture alongside the merchant node. This is optional diagnostic tooling, not a requirement for serving offers or receiving payments from real users.</p>
+            <pre><code>MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+npm run fiber:topology-check</code></pre>
+            <p><code>GET /topology</code> and the SDK topology client inspect direct channels, shared counterparties, channel state, asset visibility, pending TLCs, and usable payer outbound capacity. The returned report includes blockers, warnings, next actions, and a fixture recommendation.</p>
+            <div class="scenario"><p class="scenario-label">Scenario: direct channel has insufficient outbound liquidity</p><p>Readiness stays false before an invoice is paid. The response points to the topology and capacity blocker instead of returning a vague payment failure. A wallet can surface the next action without pretending the merchant has rejected the offer.</p></div>
+          </section>
+
+          <section id="route-check">
+            <h2>Route dry-runs</h2>
+            <p>After an invoice exists, the payer application uses its own node through the SDK to perform a <code>send_payment</code> dry-run. This gives the payer a stronger confidence signal without disclosing its node to the merchant resolver.</p>
+            <pre><code>FIBER_INVOICE=fibt1... \
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+npm run fiber:route-check</code></pre>
+            <p>Route failures are normalized into a stable code, summary, likely causes, and next actions while the raw Fiber node error remains attached for diagnostics. This lets applications show actionable wording without discarding the source failure.</p>
+            <pre><code>const route = await payer.checkPaymentRoute(invoice, {
+  timeoutSeconds: 60,
+  maxFeeAmount: 100000,
+  maxParts: 3
+});
+
+if (!route.ok) {
+  console.log(route.failure.summary);
+  console.log(route.failure.next_actions);
+}</code></pre>
+          </section>
+
+          <section id="fixture">
+            <h2>Guarded direct-channel fixture</h2>
+            <p>The fixture command is report-only until an explicit opt-in flag is set. It compares the current topology against the desired direct channel and proposes either opening or merchant acceptance steps.</p>
+            <pre><code>MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+FIBER_DIRECT_CHANNEL_FUNDING_AMOUNT=10000000000 \
+FIBER_MERCHANT_PEER_ADDRESS=/ip4/127.0.0.1/tcp/8228/p2p/... \
+npm run fiber:direct-channel-fixture
+
+# Only after reviewing the plan:
+FIBER_FIXTURE_OPEN_DIRECT_CHANNEL=true npm run fiber:direct-channel-fixture</code></pre>
+            <div class="callout callout-warning"><strong>Keep fixtures out of merchant flows</strong><span>Channel opening is an operator action. A wallet or checkout should display readiness diagnostics and next actions, not silently mutate channel topology.</span></div>
+          </section>
+
+          <section id="e2e">
+            <h2>Live end-to-end checks</h2>
+            <pre><code>RESOLVER_URL=http://127.0.0.1:8787 \
+MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+npm run fiber:e2e-check
+
+# Use a dry-run-only path while diagnosing routes:
+FIBER_E2E_DRY_RUN_ONLY=true \
+FIBER_E2E_TRAMPOLINE_HOPS=&lt;pubkey&gt; \
+npm run fiber:e2e-check</code></pre>
+            <p>Run the unit and resolver smoke suite before live checks. The live commands are integration tools and require actual endpoints, channel state, and suitable testnet funds.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/merchants"><span>Previous</span><strong>Merchant operations</strong></a><a href="/docs/sdk"><span>Next</span><strong>SDK</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Fiber integration sections"><a href="#modes">Modes</a><a href="#configure">Live invoice source</a><a href="#node-ownership">Node ownership</a><a href="#topology">Topology</a><a href="#route-check">Route dry-runs</a><a href="#fixture">Direct channel fixture</a><a href="#e2e">E2E checks</a></nav></aside>
+    </div>
+  </body>
+</html>

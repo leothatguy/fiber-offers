@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="Fiber Offers overview">
+          <span class="brand-mark">F</span>
+          <span>
+            <strong>Fiber</strong>
+            <em>Offers</em>
+          </span>
+        </a>
+
+        <nav class="sidebar-nav" aria-label="Merchant workspace">
+          <p class="nav-label">Workspace</p>
+          <button class="nav-item is-active" type="button" data-view="overview" aria-current="page">Overview</button>
+          <button class="nav-item" type="button" data-view="offers">Offers</button>
+          <button class="nav-item" type="button" data-view="payments">Payments</button>
+          <button class="nav-item" type="button" data-view="integrations">Integrations</button>
+          <button class="nav-item is-hidden" type="button" data-view="network" data-payer-topology-control hidden>Network</button>
+          <a class="nav-item nav-link" href="/docs">Documentation</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="environment-label">Environment</span>
+          <strong>CKB Testnet</strong>
+          <span id="healthPill" class="status-pill">Resolver</span>
+        </div>
+      </aside>
+
+      <div class="app-content">
+        <main class="workspace">
+          <section class="workspace-view is-active" data-workspace-view="overview">
+            <div class="view-heading">
+              <div>
+                <p class="eyebrow">Overview</p>
+                <h2>Operations</h2>
+              </div>
+              <div class="overview-actions">
+                <button id="refreshDiagnosticsButton" class="refresh-button" type="button">Refresh status</button>
+                <button class="secondary" type="button" data-view-target="offers">Manage offers</button>
+              </div>
+            </div>
+
+            <div class="overview-metrics" aria-label="Resolver activity">
+              <div>
+                <span>Offers</span>
+                <strong id="overviewOfferTotal">0</strong>
+              </div>
+              <div>
+                <span>Invoice attempts</span>
+                <strong id="overviewResolutionTotal">0</strong>
+              </div>
+              <div>
+                <span>Webhook events</span>
+                <strong id="overviewWebhookTotal">0</strong>
+              </div>
+              <div>
+                <span>Worker mode</span>
+                <strong id="overviewWorkerMode">-</strong>
+              </div>
+            </div>
+
+            <div class="overview-grid overview-grid-general">
+              <section class="panel overview-summary" aria-labelledby="overviewSummaryTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Infrastructure</p>
+                    <h2 id="overviewSummaryTitle">Resolver health</h2>
+                  </div>
+                </div>
+                <div class="resolver-health-grid">
+                  <div>
+                    <span>Invoice mode</span>
+                    <strong id="diagnosticMode">-</strong>
+                  </div>
+                  <div>
+                    <span>Fiber RPC</span>
+                    <strong id="diagnosticRpc">-</strong>
+                  </div>
+                  <div>
+                    <span>Network</span>
+                    <strong>CKB Testnet</strong>
+                  </div>
+                </div>
+              </section>
+
+              <aside class="overview-rail" aria-label="Workspace status">
+                <section class="rail-signal">
+                  <p class="eyebrow">Selected offer</p>
+                  <strong id="overviewSelectedOffer">No offer selected</strong>
+                  <span id="overviewSelectedOfferNote">Choose an endpoint from Offers to inspect its payment link and activity.</span>
+                </section>
+                <section class="rail-ledger">
+                  <div>
+                    <span>Network</span>
+                    <strong id="overviewNetworkValue">-</strong>
+                  </div>
+                  <div>
+                    <span>Invoices</span>
+                    <strong id="overviewSelectedInvoiceCount">-</strong>
+                  </div>
+                  <div>
+                    <span>Readiness</span>
+                    <strong id="overviewReadinessValue">Not checked</strong>
+                  </div>
+                </section>
+                <section class="rail-readiness">
+                  <span>Operator state</span>
+                  <strong id="overviewOperatorValue">No offer selected</strong>
+                  <p id="overviewOperatorNote">Create or select an offer to open the payment and delivery workflows.</p>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-view="offers" hidden>
+            <div class="view-heading offer-view-heading">
+              <div>
+                <p class="eyebrow">Offers</p>
+                <h2>Payment endpoints</h2>
+              </div>
+              <button id="newOfferButton" class="primary" type="button">New offer</button>
+            </div>
+
+            <div class="offers-workspace">
+              <aside class="panel offer-directory" aria-labelledby="offerDirectoryTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Inventory</p>
+                    <h2 id="offerDirectoryTitle">All offers</h2>
+                  </div>
+                  <span id="offerCount" class="panel-kicker">0</span>
+                </div>
+                <input id="offerSearchInput" type="search" placeholder="Search name, address, or ID" aria-label="Search offers" />
+                <div id="offerList" class="offer-list" aria-live="polite"></div>
+              </aside>
+
+              <div class="offer-stage">
+                <section id="offerEmptyState" class="panel offer-empty" aria-live="polite">
+                  <p class="eyebrow">Offer details</p>
+                  <h2>Select an offer</h2>
+                  <p>Choose an endpoint from the directory to view its payment link, QR payloads, and developer data.</p>
+                </section>
+
+                <section id="offerDetailSurface" class="panel offer-panel" hidden aria-labelledby="offerTitle">
+                  <div class="panel-heading offer-detail-heading">
+                    <div>
+                      <p class="eyebrow">Selected offer</p>
+                      <h2 id="offerTitle">Offer details</h2>
+                      <p id="offerDetailSubtitle" class="offer-detail-subtitle">Signed payment endpoint</p>
+                    </div>
+                    <span id="offerState" class="panel-kicker">No offer</span>
+                  </div>
+                  <div class="panel-actions offer-detail-actions">
+                    <button id="copyLinkButton" class="primary" type="button">Copy payment link</button>
+                    <button class="secondary" type="button" data-view-target="payments">Test in payments</button>
+                    <a id="paymentPageLink" class="secondary action-link" href="#">Open payment page</a>
+                  </div>
+                  <div class="offer-visual">
+                    <div class="offer-share-visual">
+                      <div id="qrFrame" class="qr-frame">
+                        <img id="qrImage" alt="Payment link QR code" />
+                        <canvas id="offerCanvas" width="168" height="168" aria-label="Offer fingerprint"></canvas>
+                      </div>
+                      <span>Payment link QR</span>
+                    </div>
+                    <dl class="offer-facts">
+                      <div><dt>Fiber Address</dt><dd id="fiberAddressValue">-</dd></div>
+                      <div><dt>Payment link</dt><dd id="paymentLinkValue">-</dd></div>
+                      <div><dt>Offer ID</dt><dd id="offerIdValue">-</dd></div>
+                      <div><dt>QR payloads</dt><dd><a id="qrLinkValue" href="#">Payment link</a><span class="link-separator">/</span><a id="qrOfferValue" href="#">Encoded offer</a></dd></div>
+                    </dl>
+                  </div>
+                  <details class="encoded-block">
+                    <summary>Developer payload</summary>
+                    <label><span>Encoded offer</span><textarea id="encodedOfferValue" readonly rows="7"></textarea></label>
+                  </details>
+                </section>
+
+                <div id="offerCreateSurface" class="offer-create-layout" hidden>
+                  <section class="panel merchant-panel" aria-labelledby="merchantTitle">
+                    <div class="panel-heading">
+                      <div><p class="eyebrow">New offer</p><h2 id="merchantTitle">Merchant settings</h2></div>
+                    </div>
+                    <form id="offerForm" class="form-grid">
+                      <label class="pricing-type-field"><span>Pricing type</span><select id="pricingTypeInput" name="pricing_type"><option value="fixed">Fixed amount</option><option value="open">Customer chooses amount</option><option value="range">Amount range</option></select></label>
+                      <label><span>Fiber Address</span><input id="usernameInput" name="username" value="coffee" autocomplete="off" /></label>
+                      <label><span>Description</span><input id="descriptionInput" name="description" value="Coffee checkout" /></label>
+                      <label><span id="minAmountLabel">Amount</span><input id="minAmountInput" name="amount_min" value="1000" inputmode="numeric" /></label>
+                      <label id="maxAmountField" class="is-hidden"><span>Maximum amount</span><input id="maxAmountInput" name="amount_max" value="50000" inputmode="numeric" /></label>
+                      <label><span>Asset</span><select id="assetInput" name="asset"><option value="ckb">CKB</option><option value="udt">UDT</option></select></label>
+                      <label id="typeHashField" class="is-hidden"><span>Type Script Hash</span><input id="typeHashInput" name="type_script_hash" placeholder="0x..." /></label>
+                      <label class="recurrence-toggle"><span>Recurring payment</span><input id="recurrenceEnabledInput" type="checkbox" /></label>
+                      <div id="recurrenceFields" class="recurrence-fields is-hidden">
+                        <label><span>Interval</span><select id="recurrenceIntervalInput"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="daily">Daily</option><option value="custom_seconds">Demo seconds</option></select></label>
+                        <label><span>Maximum cycles</span><input id="recurrenceCyclesInput" value="3" inputmode="numeric" /></label>
+                        <label><span>Total spending cap</span><input id="recurrenceCapInput" value="3000" inputmode="numeric" /></label>
+                        <label id="recurrenceSecondsField" class="is-hidden"><span>Interval seconds</span><input id="recurrenceSecondsInput" value="10" inputmode="numeric" /></label>
+                      </div>
+                      <div class="form-actions"><button id="cancelOfferCreateButton" class="secondary" type="button">Cancel</button><button class="primary" type="submit">Create signed offer</button></div>
+                    </form>
+                  </section>
+
+                  <aside class="offer-preview" aria-label="Live offer preview">
+                    <p class="eyebrow">Live preview</p><span id="offerPreviewAsset" class="asset-seal">CKB</span><h3 id="offerPreviewDescription">Coffee checkout</h3><strong id="offerPreviewAddress">coffee@localhost</strong>
+                    <div class="preview-rule"></div>
+                    <dl class="preview-facts"><div><dt>Amount</dt><dd id="offerPreviewRange">1000 CKB</dd></div><div><dt>Pricing</dt><dd id="offerPreviewPricing">Fixed amount</dd></div><div><dt>Offer mode</dt><dd>Signed static endpoint</dd></div></dl>
+                  </aside>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-view="payments" hidden>
+            <div class="view-heading">
+              <div>
+                <p class="eyebrow">Payments</p>
+                <h2>Test payment readiness and review activity</h2>
+              </div>
+              <span class="view-note">The payment sandbox is for integration testing, not a payer-facing checkout.</span>
+            </div>
+
+            <div class="payments-layout">
+              <section class="panel payer-panel" aria-labelledby="payerTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Payment sandbox</p>
+                    <h2 id="payerTitle">Resolve an offer</h2>
+                  </div>
+                </div>
+                <div class="lookup-row">
+                  <input id="lookupInput" value="coffee" aria-label="Fiber Address username" />
+                  <button id="resolveAddressButton" class="secondary" type="button">Resolve</button>
+                </div>
+                <label>
+                  <span id="payAmountLabel">Amount</span>
+                  <input id="payAmountInput" value="1200" inputmode="numeric" aria-describedby="payAmountHint" />
+                  <small id="payAmountHint" class="field-hint">Resolve an offer to see its pricing rules.</small>
+                </label>
+                <div class="button-row">
+                  <button id="checkReadinessButton" class="secondary" type="button">Check readiness</button>
+                  <button id="requestInvoiceButton" class="primary" type="button">Request invoice</button>
+                </div>
+                <section id="recurrenceApprovalBox" class="recurrence-approval is-hidden" aria-label="Recurring payment approval">
+                  <span>Standing approval</span>
+                  <strong id="recurrenceApprovalTerms">-</strong>
+                  <button id="recurrenceApprovalButton" class="secondary" type="button">Approve recurring payment</button>
+                </section>
+                <div id="readinessBox" class="readiness-box">
+                  <span>Payment readiness</span>
+                  <strong id="readinessSummary">Not checked</strong>
+                  <ul id="readinessList"></ul>
+                </div>
+                <details class="demo-tools">
+                  <summary>Demo tools</summary>
+                  <div class="button-row">
+                    <button id="markPaidButton" class="secondary" type="button">Mark latest paid</button>
+                    <button id="refreshStatusButton" class="secondary" type="button">Refresh invoice status</button>
+                  </div>
+                </details>
+              </section>
+
+              <aside class="panel payment-brief" aria-label="Selected offer brief">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Selected offer</p>
+                    <h2>Payment brief</h2>
+                  </div>
+                  <span id="paymentBriefAsset" class="panel-kicker">-</span>
+                </div>
+                <dl class="brief-facts">
+                  <div>
+                    <dt>Fiber Address</dt>
+                    <dd id="paymentBriefAddress">Resolve an offer to begin</dd>
+                  </div>
+                  <div>
+                    <dt>Description</dt>
+                    <dd id="paymentBriefDescription">-</dd>
+                  </div>
+                  <div>
+                    <dt id="paymentBriefAmountLabel">Accepted range</dt>
+                    <dd id="paymentBriefRange">-</dd>
+                  </div>
+                </dl>
+              </aside>
+
+              <section class="panel log-panel" aria-labelledby="logTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Activity</p>
+                    <h2 id="logTitle">Payment resolutions</h2>
+                  </div>
+                  <div class="panel-actions">
+                    <a id="reconciliationJsonLink" class="link-button" href="#">JSON</a>
+                    <a id="reconciliationCsvLink" class="link-button" href="#">CSV</a>
+                    <span id="logCount" class="panel-kicker">0 invoices</span>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Amount</th>
+                        <th>Asset</th>
+                        <th>Status</th>
+                        <th>Hash</th>
+                        <th>Mode</th>
+                      </tr>
+                    </thead>
+                    <tbody id="resolutionRows">
+                      <tr>
+                        <td colspan="6" class="empty-cell">No invoices yet</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-view="integrations" hidden>
+            <div class="view-heading">
+              <div>
+                <p class="eyebrow">Integrations</p>
+                <h2>Automate merchant operations</h2>
+              </div>
+              <span class="view-note">Delivery events stay inspectable while background workers handle retries.</span>
+            </div>
+
+            <div class="integrations-layout">
+              <section class="panel webhook-subscriptions-panel" aria-labelledby="webhookSubscriptionsTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Destinations</p>
+                    <h2 id="webhookSubscriptionsTitle">Webhook endpoints</h2>
+                  </div>
+                  <div class="panel-actions">
+                    <button id="refreshWebhooksButton" class="secondary compact-button" type="button">Refresh</button>
+                    <button id="openWebhookRegisterButton" class="primary compact-button" type="button">New endpoint</button>
+                    <span id="webhookCount" class="panel-kicker">0 endpoints</span>
+                  </div>
+                </div>
+                <div id="webhookList" class="webhook-list" aria-live="polite"></div>
+              </section>
+
+              <section class="panel operator-panel" aria-labelledby="operatorTitle">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">Operations</p>
+                    <h2 id="operatorTitle">Settlement and delivery</h2>
+                  </div>
+                  <div class="panel-actions">
+                    <span id="operatorState" class="panel-kicker">No offer</span>
+                    <details class="action-menu operator-action-menu">
+                      <summary aria-label="Settlement and delivery actions">⋮</summary>
+                      <div class="action-menu-items">
+                        <button id="operatorRefreshButton" class="action-menu-item" type="button">Refresh</button>
+                        <button id="operatorSyncButton" class="action-menu-item" type="button">Sync now</button>
+                        <button id="deliverWebhooksButton" class="action-menu-item" type="button">Deliver pending</button>
+                        <button id="operatorRetryWebhooksButton" class="action-menu-item" type="button">Retry failed</button>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <div class="operator-grid">
+                  <div>
+                    <span>Workers</span>
+                    <strong id="operatorWorkersValue">-</strong>
+                  </div>
+                  <div>
+                    <span>Settlement sync</span>
+                    <strong id="operatorSettlementValue">-</strong>
+                  </div>
+                  <div>
+                    <span>Webhook delivery</span>
+                    <strong id="operatorWebhookValue">-</strong>
+                  </div>
+                  <div>
+                    <span>Last operation</span>
+                    <strong id="operatorLastRunValue">-</strong>
+                  </div>
+                </div>
+                <div class="operator-columns">
+                  <div>
+                    <div class="operator-subhead">
+                      <span>Status timeline</span>
+                      <strong id="operatorTimelineState">-</strong>
+                    </div>
+                    <ul id="operatorTimelineList" class="operator-list"></ul>
+                  </div>
+                  <div>
+                    <div class="operator-subhead">
+                      <span>Webhook outbox</span>
+                      <strong id="operatorOutboxState">-</strong>
+                    </div>
+                    <ul id="operatorWebhookList" class="operator-list"></ul>
+                    <a id="webhookEventsLink" class="text-link" href="#">View raw event log</a>
+                  </div>
+                </div>
+                <div class="operator-result">
+                  <span>Latest result</span>
+                  <code id="operatorResultValue">-</code>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-view="network" hidden>
+            <div class="view-heading">
+              <div>
+                <p class="eyebrow">Network</p>
+                <h2>Fiber route and topology diagnostics</h2>
+              </div>
+              <span class="view-note">Optional diagnostics for a controlled payer fixture; merchant operation requires only the payee node.</span>
+            </div>
+
+            <section class="panel topology-panel" aria-labelledby="topologyTitle">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Optional pair diagnostics</p>
+                  <h2 id="topologyTitle">Fiber topology fixture</h2>
+                </div>
+                <span id="topologyState" class="panel-kicker">Not checked</span>
+              </div>
+              <div class="topology-grid">
+                <div class="topology-summary">
+                  <span>Summary</span>
+                  <strong id="topologySummary">-</strong>
+                </div>
+                <div>
+                  <span>Direct channel</span>
+                  <strong id="topologyDirect">-</strong>
+                </div>
+                <div>
+                  <span>Shared peers</span>
+                  <strong id="topologyShared">-</strong>
+                </div>
+                <div>
+                  <span>Payer channels</span>
+                  <strong id="topologyPayerChannels">-</strong>
+                </div>
+                <div>
+                  <span>Merchant channels</span>
+                  <strong id="topologyMerchantChannels">-</strong>
+                </div>
+              </div>
+              <div class="topology-lists">
+                <div>
+                  <span>Blockers</span>
+                  <ul id="topologyBlockers"></ul>
+                </div>
+                <div>
+                  <span>Next actions</span>
+                  <ul id="topologyActions"></ul>
+                </div>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+    <dialog id="invoiceDetailsDialog" class="invoice-details-drawer" aria-labelledby="invoiceDetailsTitle">
+      <div class="invoice-drawer-shell">
+        <header class="invoice-drawer-header">
+          <div>
+            <p class="eyebrow">Invoice details</p>
+            <h2 id="invoiceDetailsTitle">Payment invoice</h2>
+          </div>
+          <button id="closeInvoiceDetailsButton" class="dialog-close" type="button" aria-label="Close invoice details">×</button>
+        </header>
+
+        <div class="invoice-drawer-body">
+          <div class="invoice-drawer-identity">
+            <span id="invoiceDetailsStatus" class="status-chip">Unknown</span>
+            <div class="invoice-address-block">
+              <span>Fiber address</span>
+              <div>
+                <strong id="invoiceDetailsAddress">-</strong>
+                <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsAddress" data-copy-label="Fiber address" aria-label="Copy Fiber address">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <dl class="invoice-details-facts">
+            <div><dt>Amount</dt><dd id="invoiceDetailsAmount">-</dd></div>
+            <div><dt>Asset</dt><dd id="invoiceDetailsAsset">-</dd></div>
+            <div><dt>Invoice mode</dt><dd id="invoiceDetailsMode">-</dd></div>
+            <div><dt>Created</dt><dd id="invoiceDetailsCreated">-</dd></div>
+            <div><dt>Updated</dt><dd id="invoiceDetailsUpdated">-</dd></div>
+            <div><dt>Expires</dt><dd id="invoiceDetailsExpiry">-</dd></div>
+          </dl>
+
+          <section class="invoice-copy-list" aria-label="Invoice identifiers">
+            <div class="invoice-copy-row">
+              <div><span>Fiber invoice</span><code id="invoiceDetailsInvoice">-</code></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsInvoice" data-copy-label="Fiber invoice" aria-label="Copy Fiber invoice">Copy</button>
+            </div>
+            <div class="invoice-copy-row">
+              <div><span>Payment hash</span><code id="invoiceDetailsPaymentHash">-</code></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsPaymentHash" data-copy-label="Payment hash" aria-label="Copy payment hash">Copy</button>
+            </div>
+            <div class="invoice-copy-row">
+              <div><span>Resolution ID</span><code id="invoiceDetailsResolutionId">-</code></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsResolutionId" data-copy-label="Resolution ID" aria-label="Copy resolution ID">Copy</button>
+            </div>
+            <div class="invoice-copy-row">
+              <div><span>Offer ID</span><code id="invoiceDetailsOfferId">-</code></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsOfferId" data-copy-label="Offer ID" aria-label="Copy offer ID">Copy</button>
+            </div>
+            <div class="invoice-copy-row">
+              <div><span>Resolution URL</span><a id="invoiceDetailsResolutionUrl" href="#" target="_blank" rel="noreferrer">-</a></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsResolutionUrl" data-copy-label="Resolution URL" aria-label="Copy resolution URL">Copy</button>
+            </div>
+            <div class="invoice-copy-row">
+              <div><span>Receipt JSON</span><a id="invoiceDetailsReceipt" href="#" target="_blank" rel="noreferrer">-</a></div>
+              <button class="invoice-copy-button" type="button" data-copy-target="invoiceDetailsReceipt" data-copy-label="Receipt URL" aria-label="Copy receipt URL">Copy</button>
+            </div>
+          </section>
+
+          <section class="invoice-settlement-section" aria-labelledby="invoiceSettlementTitle">
+            <div class="invoice-section-heading">
+              <span>Settlement</span>
+              <strong id="invoiceSettlementTitle">Payment result</strong>
+            </div>
+            <dl id="invoiceDetailsSettlement" class="invoice-settlement-list"></dl>
+          </section>
+
+          <section class="invoice-history-section" aria-labelledby="invoiceHistoryTitle">
+            <div class="invoice-section-heading">
+              <span>Lifecycle</span>
+              <strong id="invoiceHistoryTitle">Status history</strong>
+            </div>
+            <ul id="invoiceDetailsHistory" class="invoice-history-list"></ul>
+          </section>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="webhookDeleteDialog" class="confirm-dialog" aria-labelledby="webhookDeleteTitle">
+      <form method="dialog">
+        <p class="eyebrow">Delete endpoint</p>
+        <h2 id="webhookDeleteTitle">Permanently remove this webhook?</h2>
+        <p>Future events will not be sent to this endpoint. Existing delivery history will remain available.</p>
+        <div class="form-actions">
+          <button id="cancelWebhookDeleteButton" class="secondary" value="cancel">Cancel</button>
+          <button id="confirmWebhookDeleteButton" class="danger-button" value="confirm">Delete endpoint</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="webhookRegisterDialog" class="form-dialog" aria-labelledby="webhookTitle">
+      <form id="webhookForm" class="webhook-box">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">New endpoint</p>
+            <h2 id="webhookTitle">Register webhook</h2>
+          </div>
+          <button id="closeWebhookRegisterButton" class="dialog-close" type="button" aria-label="Close">×</button>
+        </div>
+        <label>
+          <span>Endpoint URL</span>
+          <input id="webhookUrlInput" name="url" type="url" required />
+        </label>
+        <fieldset class="webhook-event-picker">
+          <legend>Events</legend>
+          <label><input type="checkbox" name="webhook_event" value="invoice.created" checked /><span>Invoice created</span></label>
+          <label><input type="checkbox" name="webhook_event" value="invoice.received" checked /><span>Invoice received</span></label>
+          <label><input type="checkbox" name="webhook_event" value="invoice.paid" checked /><span>Invoice paid</span></label>
+          <label><input type="checkbox" name="webhook_event" value="invoice.expired" checked /><span>Invoice expired</span></label>
+          <label><input type="checkbox" name="webhook_event" value="invoice.failed" checked /><span>Invoice failed</span></label>
+          <label><input type="checkbox" name="webhook_event" value="invoice.cancelled" checked /><span>Invoice cancelled</span></label>
+        </fieldset>
+        <div class="webhook-form-actions">
+          <a href="/docs/merchants#webhooks">Receiver guide</a>
+          <button id="registerWebhookButton" class="primary" type="submit">Register endpoint</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="webhookDetailsDialog" class="webhook-details-dialog" aria-labelledby="webhookDetailsTitle">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Signing credentials</p>
+          <h2 id="webhookDetailsTitle">Webhook registered</h2>
+        </div>
+        <button id="closeWebhookDetailsButton" class="dialog-close" type="button" aria-label="Close">×</button>
+      </div>
+      <dl class="webhook-details-list">
+        <div><dt>Webhook ID</dt><dd id="webhookDetailsId">-</dd></div>
+        <div><dt>Endpoint</dt><dd id="webhookDetailsUrl">-</dd></div>
+        <div><dt>Events</dt><dd id="webhookDetailsEvents">-</dd></div>
+        <div class="webhook-secret-row"><dt>Signing secret · shown once</dt><dd><code id="webhookSecretValue">-</code></dd></div>
+      </dl>
+      <div class="dialog-actions">
+        <button id="copyWebhookSecretButton" class="secondary" type="button">Copy secret</button>
+        <button id="doneWebhookDetailsButton" class="primary" type="button">Done</button>
+      </div>
+    </dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

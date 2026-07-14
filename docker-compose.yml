@@ -1,0 +1,139 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-54320}:5432"
+    environment:
+      POSTGRES_DB: fiber_offers
+      POSTGRES_USER: fiber_offers
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fiber_offers_dev}
+    volumes:
+      - fiber-offers-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fiber_offers -d fiber_offers"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-63790}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - fiber-offers-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["npm", "run", "db:migrate"]
+    environment: &resolver-environment
+      NODE_ENV: production
+      DATABASE_URL: postgresql://fiber_offers:${POSTGRES_PASSWORD:-fiber_offers_dev}@postgres:5432/fiber_offers
+      REDIS_URL: redis://redis:6379
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fiber-offers}
+      FIBER_INVOICE_MODE: ${FIBER_INVOICE_MODE:-fiber-rpc}
+      FIBER_RPC_URL: ${FIBER_RPC_URL:-http://fiber-rpc-proxy:18227}
+      RESOLVER_API_KEY: ${RESOLVER_API_KEY:-local-dev-api-key}
+      RESOLVER_SECRET_ENCRYPTION_KEY: ${RESOLVER_SECRET_ENCRYPTION_KEY:-local-dev-encryption-key-change-me}
+      RESOLVER_ALLOW_PRIVATE_WEBHOOKS: "false"
+      RESOLVER_PUBLIC_URL: ${RESOLVER_PUBLIC_URL:-http://localhost:8787}
+      RESOLVER_WORKERS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fiber-offers:
+    build: .
+    expose:
+      - "8787"
+    environment:
+      <<: *resolver-environment
+      PORT: "8787"
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      fiber-rpc-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      replicas: 2
+
+  worker:
+    build: .
+    command: ["npm", "run", "worker"]
+    environment:
+      <<: *resolver-environment
+      RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS: ${RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS:-30000}
+      RESOLVER_WEBHOOK_RETRY_INTERVAL_MS: ${RESOLVER_WEBHOOK_RETRY_INTERVAL_MS:-30000}
+      RESOLVER_WEBHOOK_MAX_ATTEMPTS: ${RESOLVER_WEBHOOK_MAX_ATTEMPTS:-8}
+      RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS: ${RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS:-30000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      fiber-rpc-proxy:
+        condition: service_healthy
+
+  fiber-rpc-proxy:
+    build: .
+    command: ["node", "apps/resolver/src/tcp-proxy.js"]
+    environment:
+      PROXY_LISTEN_HOST: 0.0.0.0
+      PROXY_LISTEN_PORT: "18227"
+      PROXY_TARGET_PATH: /run/fiber-rpc/merchant.sock
+    volumes:
+      - fiber-rpc-socket:/run/fiber-rpc
+    depends_on:
+      fiber-rpc-host-relay:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:net').connect(18227,'127.0.0.1',()=>{s.end();process.exit(0)});s.setTimeout(2000,()=>process.exit(1));s.on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  fiber-rpc-host-relay:
+    build: .
+    command: ["node", "apps/resolver/src/tcp-proxy.js"]
+    network_mode: host
+    environment:
+      PROXY_LISTEN_PATH: /run/fiber-rpc/merchant.sock
+      PROXY_TARGET_HOST: ${FIBER_RPC_HOST:-127.0.0.1}
+      PROXY_TARGET_PORT: ${FIBER_RPC_PORT:-8227}
+    volumes:
+      - fiber-rpc-socket:/run/fiber-rpc
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('node:net').connect('/run/fiber-rpc/merchant.sock',()=>{s.end();process.exit(0)});s.setTimeout(2000,()=>process.exit(1));s.on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8787:8080"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      fiber-offers:
+        condition: service_healthy
+
+volumes:
+  fiber-offers-postgres:
+  fiber-offers-redis:
+  fiber-rpc-socket:

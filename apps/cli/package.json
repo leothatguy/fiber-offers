@@ -1,0 +1,14 @@
+{
+  "name": "@fiber-offers/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "fiber-offers": "src/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@fiber-offers/sdk": "0.1.0"
+  }
+}

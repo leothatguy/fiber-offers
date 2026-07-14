@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers local quickstart" />
+    <title>Quickstart | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar">
+      <a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a>
+      <nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs">Documentation</a><a href="/docs/quickstart" aria-current="page">Quickstart</a></nav>
+    </header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <p class="sidebar-label">Documentation</p>
+        <nav aria-label="Documentation pages">
+          <p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a class="is-active" href="/docs/quickstart" aria-current="page">Quickstart</a>
+          <p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a>
+          <p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a>
+          <p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a>
+        </nav>
+      </aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Getting started</div>
+          <h1>Quickstart</h1>
+          <p class="docs-lead">Run a complete offer, readiness, and live invoice-resolution flow against a merchant Fiber node. Payers bring their own wallet or node.</p>
+
+          <section id="requirements">
+            <h2>Requirements</h2>
+            <ul>
+              <li>Node.js 20 or newer.</li>
+              <li>The repository dependencies installed with npm.</li>
+              <li>Docker and the sibling Loavix workspace, which provides a merchant Fiber testnet node.</li>
+              <li>A terminal and a browser.</li>
+            </ul>
+          </section>
+
+          <section id="run-resolver">
+            <h2>Run the resolver</h2>
+            <pre><code>cd ../loavix
+docker compose --profile fiber up -d fiber
+
+cd ../fiber-offers
+npm install
+npm run verify
+npm run dev</code></pre>
+            <p>Open the <a href="/">console</a> at <code>http://localhost:8787</code>. The status should report Fiber RPC, and diagnostics should show automatic workers enabled.</p>
+          </section>
+
+          <section id="create-offer">
+            <h2>Create a test offer</h2>
+            <pre><code>curl -X POST http://localhost:8787/demo/offers \
+  -H 'content-type: application/json' \
+  -d '{
+    "username": "coffee",
+    "description": "Coffee checkout",
+    "pricing_type": "fixed",
+    "amount": "1000",
+    "assets": [{ "asset_type": "ckb", "symbol": "CKB" }]
+  }'</code></pre>
+            <p>Copy the <code>offer_id</code> from the response. The resolver also returns a payment link, two QR URLs, an encoded offer, and the Fiber Address <code>coffee@localhost:8787</code>.</p>
+          </section>
+
+          <section id="check-payment">
+            <h2>Check payment readiness</h2>
+            <p>Readiness validates the exact amount and asset without creating an invoice. Call it before enabling the final wallet confirmation step.</p>
+            <pre><code>curl -X POST http://localhost:8787/offers/0x.../check \
+  -H 'content-type: application/json' \
+  -d '{
+    "amount": "1000",
+    "asset": { "asset_type": "ckb", "symbol": "CKB" }
+  }'</code></pre>
+            <p>A ready response includes <code>next_action: "request_invoice"</code> and live merchant-node details. Route confidence belongs in the payer wallet, which can dry-run the returned invoice against its own node before sending.</p>
+          </section>
+
+          <section id="request-invoice">
+            <h2>Request a fresh invoice</h2>
+            <pre><code>curl -X POST http://localhost:8787/offers/0x.../invoice \
+  -H 'content-type: application/json' \
+  -H 'Idempotency-Key: checkout-order-42' \
+  -d '{
+    "amount": "1000",
+    "asset": { "asset_type": "ckb", "symbol": "CKB" }
+  }'</code></pre>
+            <p>The response contains a new invoice and resolution ID. Repeat the same request with the same idempotency key to prove it returns the original resolution instead of issuing another invoice.</p>
+            <div class="callout"><strong>Next step</strong><span>Move to <a href="/docs/wallets">Wallet payments</a> for payer confirmation and Fiber execution, or <a href="/docs/fiber">Fiber integration</a> for topology, route checks, and operational diagnostics.</span></div>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs"><span>Previous</span><strong>Overview</strong></a><a href="/docs/concepts"><span>Next</span><strong>Concepts and offers</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Quickstart sections"><a class="is-active" href="#requirements">Requirements</a><a href="#run-resolver">Run resolver</a><a href="#create-offer">Create offer</a><a href="#check-payment">Readiness</a><a href="#request-invoice">Request invoice</a></nav></aside>
+    </div>
+  </body>
+</html>

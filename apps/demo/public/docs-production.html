@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Fiber Offers production, security and troubleshooting guide" />
+    <title>Production and Security | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a class="is-active" href="/docs/production" aria-current="page">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Reference</div>
+          <h1>Production and security</h1>
+          <p class="docs-lead">The included resolver is deliberately local-first so teams can build against a small, inspectable surface. A public payment deployment needs durable data, authenticated operations, secure key handling, monitoring, and real Fiber-node validation.</p>
+
+          <section id="deployment">
+            <h2>Deployment baseline</h2>
+            <pre><code>RESOLVER_API_KEY=change-me \
+RESOLVER_PUBLIC_URL=https://resolver.example \
+FIBER_RPC_URL=http://127.0.0.1:8227 \
+npm run dev</code></pre>
+            <ul>
+              <li>Terminate TLS at a trusted reverse proxy and expose the resolver only through HTTPS.</li>
+              <li>Set <code>RESOLVER_PUBLIC_URL</code> to the externally reachable origin so links and webhooks use the correct address.</li>
+              <li>Protect operator inventory, webhook configuration and history, and merchant write endpoints with <code>RESOLVER_API_KEY</code>.</li>
+              <li>Store API keys and Fiber RPC credentials in a secret manager, not source files or browser code.</li>
+              <li>Run the PostgreSQL migration service before accepting live payments and use Redis/BullMQ for distributed maintenance work.</li>
+            </ul>
+            <p>Each resolver deployment currently maps to one merchant node configured through <code>FIBER_RPC_URL</code>. The endpoint may use a custom port or hosted private URL. Do not configure customer payer nodes in the resolver and do not accept RPC URLs from public requests.</p>
+          </section>
+
+          <section id="workers">
+            <h2>Settlement and webhook workers</h2>
+            <p>The Docker deployment runs BullMQ workers against Redis. The interval-based worker remains a single-process development fallback.</p>
+            <pre><code>RESOLVER_WORKERS_ENABLED=true
+RESOLVER_WORKERS_RUN_ON_START=true
+RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=30000
+RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
+RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
+RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000
+RESOLVER_WEBHOOK_TIMEOUT_MS=10000</code></pre>
+            <p>Monitor the worker state reported by <code>GET /diagnostics</code>. The delivery timeout defaults to 10 seconds, and failed webhook events retain their delivery history so operators can inspect and retry them without losing context.</p>
+          </section>
+
+          <section id="auth-boundaries">
+            <h2>Security boundaries</h2>
+            <table>
+              <thead><tr><th>Boundary</th><th>Required control</th><th>Reason</th></tr></thead>
+              <tbody>
+                <tr><td>Offer lifecycle key</td><td>Merchant-owned encrypted key storage and rotation plan.</td><td>The signature protects offer content and revocation; the resolver separately verifies the Fiber node identity.</td></tr>
+                <tr><td>Resolver API key</td><td>Scoped per merchant or service, rotated, and never exposed to wallets.</td><td>Protects registration, status updates, syncs, and webhook operations.</td></tr>
+                <tr><td>Webhook secret</td><td>Encrypted storage, HMAC verification, event ID deduplication, timestamp tolerance.</td><td>Protects fulfillment from forged or replayed delivery requests.</td></tr>
+                <tr><td>Fiber RPC</td><td>Private network access or authenticated RPC access.</td><td>Prevents an untrusted party from controlling invoice or node diagnostics calls.</td></tr>
+                <tr><td>Offer and request data</td><td>Rate limits, request-size limits, structured validation, and observability.</td><td>Protects the public resolver surface from abuse and makes failures diagnosable.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="operations">
+            <h2>Operational checklist</h2>
+            <ol>
+              <li>Run <code>npm run verify</code> and review the resolver smoke flow on every release candidate.</li>
+              <li>Probe the live node with <code>npm run fiber:check</code> before deploying a live invoice source.</li>
+              <li>Probe the merchant node from the resolver. Run route dry-runs in the payer application against its own node; use pair topology only when both endpoints are controlled test fixtures.</li>
+              <li>Alert on resolver reachability, worker failures, high webhook failure rates, and failed invoice syncs.</li>
+              <li>Back up durable resolution and webhook event data. Reconciliation records are business records, not transient UI state.</li>
+              <li>Log offer ID, resolution ID, webhook event ID, and delivery ID together so an operator can trace a payment attempt end to end.</li>
+            </ol>
+            <div class="callout callout-info"><strong>Independent merchant deployment</strong><span>Run <code>npm run cli -- init</code> before the first Docker startup, then use <code>npm run cli -- doctor</code> to prove that the resolver and merchant CLI are connected to the same FNN. PostgreSQL is authoritative in Docker; the JSON adapter remains a local single-process fallback.</span></div>
+          </section>
+
+          <section id="troubleshooting">
+            <h2>Troubleshooting guide</h2>
+            <h3>The Fiber RPC endpoint is unavailable</h3>
+            <p>Run <code>npm run fiber:check</code> and inspect <code>GET /diagnostics</code>. The resolver reports the node failure and does not silently replace live invoices with simulated ones.</p>
+            <h3>Readiness is blocked</h3>
+            <p>Read <code>summary</code>, <code>blockers</code>, and <code>next_actions</code>. Merchant readiness checks node reachability and offer validity. The payer wallet should inspect its own outbound liquidity and route dry-run result.</p>
+            <h3>The same checkout received an unexpected response</h3>
+            <p>Retry the invoice request with the original idempotency key and identical amount and asset. A changed request with the same key is rejected with <code>IDEMPOTENCY_KEY_REUSED</code> by design.</p>
+            <h3>A webhook is pending or failed</h3>
+            <p>Inspect the event outbox and delivery response. Verify the receiver returns a 2xx status quickly, validates the HMAC against the raw body, and deduplicates event IDs. Retry explicitly or enable the worker after the receiver is healthy.</p>
+            <h3>A live payment does not route</h3>
+            <p>Run a dry-run from the payer's own node. Use the optional pair topology report only in a controlled environment where the operator owns both endpoints. Keep the raw Fiber error for debugging, but communicate the normalized failure summary and next action to the user.</p>
+          </section>
+
+          <section id="release">
+            <h2>Release readiness</h2>
+            <div class="scenario"><p class="scenario-label">Before a testnet merchant pilot</p><p>Use HTTPS, real Fiber RPC endpoints, a persistent data store, scoped API credentials, a verified webhook receiver, background worker monitoring, and live topology and route checks.</p></div>
+            <p>Fiber Offers is built to be useful infrastructure in the wider Fiber stack. Treat the documented interfaces as integration contracts and keep deployment hardening in step with the value being moved through them.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/sdk"><span>Previous</span><strong>SDK</strong></a><a href="/docs"><span>Back to start</span><strong>Documentation overview</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Production sections"><a href="#deployment">Deployment baseline</a><a href="#workers">Workers</a><a href="#auth-boundaries">Security boundaries</a><a href="#operations">Checklist</a><a href="#troubleshooting">Troubleshooting</a><a href="#release">Release readiness</a></nav></aside>
+    </div>
+  </body>
+</html>
