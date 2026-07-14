@@ -10,7 +10,24 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   setupDocumentationScrollSpy();
+  setupMobileSidebarActiveLink();
 });
+
+function setupMobileSidebarActiveLink() {
+  const sidebar = document.querySelector(".docs-sidebar");
+  const activeLink = sidebar?.querySelector('a[aria-current="page"]');
+  if (!sidebar || !activeLink) return;
+
+  const revealActiveLink = () => {
+    if (!window.matchMedia("(max-width: 760px)").matches) return;
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const linkRect = activeLink.getBoundingClientRect();
+    sidebar.scrollLeft += linkRect.left - sidebarRect.left - (sidebar.clientWidth - linkRect.width) / 2;
+  };
+
+  requestAnimationFrame(revealActiveLink);
+  window.addEventListener("resize", revealActiveLink);
+}
 
 function setupDocumentationScrollSpy() {
   const toc = document.querySelector(".docs-toc");

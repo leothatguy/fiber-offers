@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Self-host Fiber Offers with an independently owned Fiber node" />
+    <title>Self-hosting | Fiber Offers</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/docs.css" />
+    <script src="/docs-highlight.js" defer></script>
+  </head>
+  <body>
+    <header class="docs-topbar"><a class="docs-brand" href="/" aria-label="Fiber Offers application"><span class="docs-brand-mark">F</span><strong>Fiber Offers</strong></a><nav aria-label="Documentation navigation"><a href="/">Console</a><a href="/docs" aria-current="page">Documentation</a><a href="/docs/quickstart">Quickstart</a></nav></header>
+    <div class="docs-shell">
+      <aside class="docs-sidebar"><p class="sidebar-label">Documentation</p><nav aria-label="Documentation pages"><p class="docs-nav-group">Getting started</p><a href="/docs">Overview</a><a href="/docs/quickstart">Quickstart</a><a class="is-active" href="/docs/self-hosting" aria-current="page">Self-hosting</a><p class="docs-nav-group">Foundations</p><a href="/docs/concepts">Concepts and offers</a><a href="/docs/api">Resolver API</a><p class="docs-nav-group">Build</p><a href="/docs/wallets">Wallet payments</a><a href="/docs/merchants">Merchant operations</a><a href="/docs/fiber">Fiber integration</a><p class="docs-nav-group">Reference</p><a href="/docs/sdk">SDK</a><a href="/docs/production">Production and security</a></nav></aside>
+      <main class="docs-main">
+        <article>
+          <div class="docs-breadcrumb">Documentation / Getting started</div>
+          <h1>Self-host Fiber Offers</h1>
+          <p class="docs-lead">Each merchant can run an independent Fiber Offers deployment connected to a Fiber node they own. There is no required central Fiber Offers account, shared platform key, or hosted control plane.</p>
+
+          <section id="ownership">
+            <h2>What you operate</h2>
+            <table>
+              <thead><tr><th>Component</th><th>Location</th><th>Responsibility</th></tr></thead>
+              <tbody>
+                <tr><td>Merchant Fiber node</td><td>Private server process</td><td>Owns funds and keys, creates invoices, and receives Fiber payments.</td></tr>
+                <tr><td>Resolver and dashboard</td><td>Docker, exposed through HTTPS for public use</td><td>Publishes offers, requests invoices from the merchant node, and exposes payment state.</td></tr>
+                <tr><td>PostgreSQL</td><td>Private Docker network or managed database</td><td>Stores offers, resolutions, webhooks, and reconciliation records.</td></tr>
+                <tr><td>Redis and worker</td><td>Private Docker network</td><td>Coordinates rate limits, settlement polling, and webhook delivery across replicas.</td></tr>
+                <tr><td>CLI</td><td>Merchant computer or server</td><td>Generates lifecycle keys locally and manages offers.</td></tr>
+                <tr><td>Payer wallet or SDK</td><td>Payer device</td><td>Requests an invoice and pays it through the payer's own Fiber node.</td></tr>
+              </tbody>
+            </table>
+            <div class="callout callout-note"><strong>Do you need to host it?</strong><span>Local development needs no public host. Payment links for other people require the resolver and dashboard on a reachable HTTPS URL. The Fiber RPC, PostgreSQL, and Redis endpoints stay private.</span></div>
+          </section>
+
+          <section id="bridge">
+            <h2>The node-to-resolver bridge</h2>
+            <p>The resolver is the application bridge to the merchant node. It calls <code>node_info</code>, <code>new_invoice</code>, and <code>get_invoice</code> over the node's private JSON-RPC endpoint. It never receives the Fiber node seed or private key.</p>
+            <pre><code>Merchant Fiber node (127.0.0.1:8227)
+  -> host relay
+  -> private Unix socket
+  -> Fiber RPC proxy
+  -> resolver replicas
+  -> public dashboard, API, CLI, and SDK clients</code></pre>
+            <p>The included Docker relay lets the Fiber node remain bound to host loopback. For a remote private RPC endpoint, configure <code>FIBER_RPC_URL</code> directly and add RPC credentials when required.</p>
+          </section>
+
+          <section id="initialize">
+            <h2>Initialize a merchant deployment</h2>
+            <p>Start and fund the merchant Fiber node first. Its RPC defaults to <code>http://127.0.0.1:8227</code>.</p>
+            <pre><code>npm install
+
+npm run cli -- init \
+  --resolver-url https://offers.merchant.example \
+  --fiber-rpc-url http://127.0.0.1:8227</code></pre>
+            <p>The command creates a mode-<code>0600</code> <code>.env</code> with random values and a mode-<code>0700</code> lifecycle-key directory. Run it before the first Docker startup because PostgreSQL applies its configured password when initializing a new volume.</p>
+            <table>
+              <thead><tr><th>Setting</th><th>Purpose</th><th>Where it belongs</th></tr></thead>
+              <tbody>
+                <tr><td><code>RESOLVER_API_KEY</code></td><td>Authorizes merchant registration and operator actions.</td><td>Server, trusted CLI, or merchant backend only.</td></tr>
+                <tr><td><code>RESOLVER_SECRET_ENCRYPTION_KEY</code></td><td>Encrypts persisted webhook secrets.</td><td>All API and worker replicas; never a browser bundle.</td></tr>
+                <tr><td><code>POSTGRES_PASSWORD</code></td><td>Protects the merchant database.</td><td>Database and resolver deployment only.</td></tr>
+                <tr><td><code>FIBER_RPC_HOST</code> / <code>FIBER_RPC_PORT</code></td><td>Selects the private merchant node endpoint used by the Docker relay.</td><td>Server environment only.</td></tr>
+                <tr><td><code>RESOLVER_PUBLIC_URL</code></td><td>Sets the public origin embedded in offers and payment links.</td><td>Server environment; must be the final HTTPS origin.</td></tr>
+              </tbody>
+            </table>
+            <div class="callout callout-warning"><strong>Development defaults</strong><span>The fallback Docker secrets are for local demonstration. Run <code>cli init</code> or use a secret manager before exposing a deployment publicly. Preserve the encryption key while encrypted records exist.</span></div>
+          </section>
+
+          <section id="start">
+            <h2>Start and prove the connection</h2>
+            <pre><code>docker compose up -d --build
+npm run cli -- doctor</code></pre>
+            <p><code>doctor</code> verifies resolver health, calls the host-reachable Fiber node, and confirms that the CLI and resolver report the same node public key. Open the resolver URL and unlock the dashboard with <code>RESOLVER_API_KEY</code>; the browser exchanges it for a signed <code>HttpOnly</code> session cookie.</p>
+            <pre><code>npm run cli -- create \
+  --description "Merchant checkout" \
+  --amount 100000000 \
+  --username merchant
+
+npm run cli -- list</code></pre>
+            <p>The CLI signs the offer locally, stores its lifecycle private key, registers the public offer with the resolver, and prints the offer ID and payment URL.</p>
+          </section>
+
+          <section id="payment-flow">
+            <h2>What happens when someone pays</h2>
+            <ol>
+              <li>The payer opens the public offer link or resolves the offer with the SDK.</li>
+              <li>The resolver validates the request and calls <code>new_invoice</code> on the merchant Fiber node.</li>
+              <li>The payer sends that invoice through their own Fiber wallet or node. Payment funds do not pass through the resolver.</li>
+              <li>The worker polls <code>get_invoice</code> on the merchant node every three seconds by default.</li>
+              <li>The resolver updates PostgreSQL, the dashboard, receipts, reconciliation records, and webhooks.</li>
+            </ol>
+            <p>A payer needs only the public resolver URL plus a Fiber-capable wallet or node. The payer never receives the merchant API key, encryption key, database password, lifecycle key, or Fiber RPC credentials.</p>
+          </section>
+
+          <section id="scale">
+            <h2>Horizontal Docker deployment</h2>
+            <p>The supplied Compose stack runs two resolver replicas behind Nginx. Both replicas use the same PostgreSQL database, Redis namespace, API key, encryption key, public URL, and merchant Fiber RPC endpoint. A separate worker owns settlement polling and webhook retries so API replicas do not duplicate background work.</p>
+            <pre><code>resolver-1 --\
+              +-> PostgreSQL
+resolver-2 --/ +-> Redis -> worker
+       |                   |
+       +-> Fiber RPC proxy-+-> merchant Fiber node</code></pre>
+            <p>Back up the PostgreSQL volume, <code>.env</code> or secret-manager entries, and <code>.fiber-offers/keys</code> together. Redis append-only data is operational state, but PostgreSQL and lifecycle keys are authoritative business records.</p>
+          </section>
+
+          <section id="public-checklist">
+            <h2>Public deployment checklist</h2>
+            <ul>
+              <li>Point a domain at the server and terminate TLS at a trusted ingress.</li>
+              <li>Expose only the HTTPS resolver gateway; keep Fiber RPC, PostgreSQL, and Redis private.</li>
+              <li>Set the final <code>RESOLVER_PUBLIC_URL</code> before publishing offers.</li>
+              <li>Use generated production secrets and keep the same encryption key on every API and worker replica.</li>
+              <li>Run <code>doctor</code>, <code>npm run smoke</code>, and the live Fiber E2E check before accepting payments.</li>
+              <li>Monitor <code>GET /health</code> and <code>GET /diagnostics</code>, worker failures, and webhook delivery failures.</li>
+            </ul>
+            <p>See <a href="/docs/production">Production and security</a> for hardening and troubleshooting, and <a href="/docs/fiber">Fiber integration</a> for topology and live route checks.</p>
+          </section>
+
+          <div class="docs-pagination"><a href="/docs/quickstart"><span>Previous</span><strong>Quickstart</strong></a><a href="/docs/concepts"><span>Next</span><strong>Concepts and offers</strong></a></div>
+        </article>
+      </main>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Self-hosting sections"><a class="is-active" href="#ownership">Ownership</a><a href="#bridge">Node bridge</a><a href="#initialize">Initialize</a><a href="#start">Start and verify</a><a href="#payment-flow">Payment flow</a><a href="#scale">Horizontal deployment</a><a href="#public-checklist">Public checklist</a></nav></aside>
+    </div>
+  </body>
+</html>

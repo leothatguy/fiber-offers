@@ -2099,6 +2099,8 @@ async function serveStatic(pathname, response, staticRoot) {
     filePath = join(staticRoot, "docs-concepts.html");
   } else if (pathname === "/docs/quickstart") {
     filePath = join(staticRoot, "docs-quickstart.html");
+  } else if (pathname === "/docs/self-hosting") {
+    filePath = join(staticRoot, "docs-self-hosting.html");
   } else if (pathname === "/docs/api") {
     filePath = join(staticRoot, "docs-api.html");
   } else if (pathname === "/docs/wallets") {

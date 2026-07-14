@@ -69,6 +69,17 @@ test("lists offer inventory with compact operator summaries", async () => {
   });
 });
 
+test("serves the self-hosting guide from the documentation route", async () => {
+  await withServer(async (baseUrl) => {
+    const guide = await getText(`${baseUrl}/docs/self-hosting`);
+
+    assert.equal(guide.status, 200);
+    assert.match(guide.contentType, /^text\/html/);
+    assert.match(guide.body, /<h1>Self-host Fiber Offers<\/h1>/);
+    assert.match(guide.body, /aria-current="page">Self-hosting<\/a>/);
+  });
+});
+
 test("creates fixed pricing from one amount and rejects non-exact invoice requests", async () => {
   await withServer(async (baseUrl) => {
     const created = await postJson(`${baseUrl}/demo/offers`, {
