@@ -21,7 +21,7 @@
 
           <section id="authentication">
             <h2>Authentication</h2>
-            <p>Public reads and payment-critical requests remain open: offer fetches, Fiber Address lookup, QR codes, readiness, invoice resolution, receipts, reconciliation, and diagnostics. When <code>RESOLVER_API_KEY</code> is configured, offer inventory, webhook configuration and history, registration, and operator writes require a bearer token or <code>x-api-key</code>.</p>
+            <p>Public reads and payment-critical requests remain open: offer fetches, Fiber Address lookup, QR codes, readiness, invoice resolution, receipts, reconciliation, and diagnostics. When <code>RESOLVER_API_KEY</code> is configured, offer inventory, webhook configuration and history, registration, and operator writes require a bearer token, <code>x-api-key</code>, or a signed operator session established through <code>POST /operator/session</code>.</p>
             <pre><code>Authorization: Bearer change-me
 # or
 x-api-key: change-me</code></pre>
@@ -34,6 +34,7 @@ x-api-key: change-me</code></pre>
               <thead><tr><th>Method and path</th><th>Purpose</th><th>Auth when configured</th></tr></thead>
               <tbody>
                 <tr><td><code>GET /health</code></td><td>Resolver mode and authentication state.</td><td>No</td></tr>
+                <tr><td><code>GET|POST|DELETE /operator/session</code></td><td>Inspect, establish, or clear the browser operator session.</td><td>POST validates the API key</td></tr>
                 <tr><td><code>GET /diagnostics</code>, <code>GET /topology</code></td><td>Resolver, Fiber RPC, worker, and topology health.</td><td>No</td></tr>
                 <tr><td><code>GET /offers</code></td><td>List compact offer summaries for an operator console.</td><td>Yes</td></tr>
                 <tr><td><code>POST /offers</code>, <code>POST /demo/offers</code></td><td>Register a signed offer or create a local demo offer.</td><td>Yes</td></tr>

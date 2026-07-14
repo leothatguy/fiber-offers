@@ -20,7 +20,12 @@ self-hosted workflow and secret ownership model.
 GET /health
 GET /diagnostics
 GET /topology
+GET|POST|DELETE /operator/session
 ```
+
+`POST /operator/session` exchanges `{ "api_key": "..." }` for a signed,
+short-lived, `HttpOnly`, same-site dashboard cookie. CLI and backend clients use
+the bearer or `x-api-key` header instead.
 
 `GET /diagnostics` includes resolver health, store counts, Fiber RPC reachability, peer count, enabled channel count, inbound/outbound capacity totals, offline channel counterparties, readiness warnings, and background worker status.
 

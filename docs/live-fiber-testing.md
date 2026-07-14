@@ -212,7 +212,12 @@ fnn-cli -u "$MERCHANT_FIBER_RPC_URL" channel accept_channel \
 
 ## 8. Run A Payer-To-Merchant E2E Check
 
-With two Fiber nodes available, the e2e check creates a live resolver invoice, asks the payer node to dry-run the route through `FiberPaymentClient.checkPaymentRoute()`, sends the payment if the route is available, polls `get_payment`, polls merchant `get_invoice`, and syncs the resolver status.
+With merchant and payer Fiber nodes available, the E2E check creates one static
+offer and, by default, constructs two independent payer client sessions. Each
+session requests its own invoice, dry-runs the route, sends payment, polls
+`get_payment`, polls merchant `get_invoice`, and syncs the resolver status. The
+check fails unless both invoices and payment hashes are distinct and both
+resolver records reach `invoice_paid`.
 
 ```bash
 RESOLVER_URL=http://127.0.0.1:8787 \
@@ -220,6 +225,11 @@ MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
 PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
 npm run fiber:e2e-check
 ```
+
+Set `FIBER_E2E_PAYMENT_COUNT` to change the number of independent client
+sessions. When multiple funded payer nodes are available, provide their RPC URLs
+through `PAYER_FIBER_RPC_URLS` as a comma-separated list; otherwise each session
+uses a fresh client instance against `PAYER_FIBER_RPC_URL`.
 
 To only test route construction without sending a payment:
 
@@ -235,6 +245,7 @@ Optional route parameters:
 
 ```bash
 FIBER_E2E_AMOUNT=1000 \
+FIBER_E2E_PAYMENT_COUNT=2 \
 FIBER_E2E_TRAMPOLINE_HOPS=<comma-separated-pubkeys> \
 FIBER_E2E_MAX_FEE_AMOUNT=100000 \
 FIBER_E2E_DRY_RUN_ONLY=true \

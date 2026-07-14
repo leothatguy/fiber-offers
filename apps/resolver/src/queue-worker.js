@@ -26,7 +26,7 @@ const queue = new Queue(queueName, {
 await Promise.all([
   queue.upsertJobScheduler(
     "settlement-sync",
-    { every: interval("RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS", 30000) },
+    { every: interval("RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS", 3000) },
     { name: "settlement-sync", opts: jobOptions() }
   ),
   queue.upsertJobScheduler(

@@ -22,6 +22,12 @@ or:
 x-api-key: change-me
 ```
 
+The browser operator workspace exchanges this key at `POST /operator/session`
+for a signed, short-lived, `HttpOnly`, same-site cookie. The key is held only in
+the login form long enough to complete that exchange and is never written to
+browser storage. CLI and backend integrations continue to use bearer or
+`x-api-key` authentication.
+
 Public read endpoints such as payment links, QR codes, readiness checks, receipts, and reconciliation reads remain open.
 
 ## Docker
@@ -170,7 +176,7 @@ Useful controls:
 
 ```text
 RESOLVER_WORKERS_RUN_ON_START=true
-RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=30000
+RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=3000
 RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
 RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
 RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000
@@ -190,6 +196,7 @@ For a public demo:
 
 - deploy behind HTTPS;
 - set `RESOLVER_API_KEY`;
+- enter that key only in the dashboard unlock dialog or a trusted CLI/backend;
 - set `RESOLVER_SECRET_ENCRYPTION_KEY` so webhook secrets are encrypted with AES-256-GCM on disk;
 - keep `RESOLVER_ALLOW_PRIVATE_WEBHOOKS=false` to reject loopback, link-local, and private-network webhook targets;
 - keep the Fiber RPC endpoint private and continuously monitored;

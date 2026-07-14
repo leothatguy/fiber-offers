@@ -31,6 +31,7 @@ docs/
   spec-v1.md
   demo-script.md
   nestjs-migration.md
+  requirements-errata.md
 ```
 
 The monorepo is intentional: the protocol, SDK, resolver, and demo are separate deliverables, but they need to evolve together during the hackathon.
@@ -53,6 +54,10 @@ npm run dev
 Open `http://localhost:8787`.
 
 The standard runtime uses live Fiber RPC invoices and starts automatic settlement polling and webhook delivery. Use `npm run dev:mock` only for isolated UI development when a Fiber node is intentionally unavailable.
+
+The offer itself is offline-stable: it can be printed, cached, decoded, and
+verified without regeneration. Creating a fresh invoice still requires the
+merchant FNN; downtime produces an explicit `503 RECIPIENT_UNAVAILABLE` response.
 
 ## Independent Merchant Quickstart
 
@@ -89,6 +94,7 @@ Runnable SDK examples are available for wallet, merchant/operator, and topology 
 ```bash
 npm run example:wallet
 npm run example:merchant
+RESOLVER_URL=http://127.0.0.1:8787 PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 FIBER_RECURRING_OFFER=0x... npm run example:recurrence
 MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 npm run example:topology
 ```
 
@@ -145,7 +151,7 @@ FIBER_RPC_PROBE_METHOD=node_info
 FIBER_INVOICE_MODE=fiber-rpc
 RESOLVER_WORKERS_ENABLED=true
 RESOLVER_WORKERS_RUN_ON_START=true
-RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=30000
+RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=3000
 RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
 RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
 RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000
@@ -163,6 +169,9 @@ The adapter is isolated in `apps/resolver/src/invoice-adapter.js` so node-versio
 GET  /health
 GET  /diagnostics
 GET  /topology
+GET  /operator/session
+POST /operator/session
+DELETE /operator/session
 POST /demo/offers
 POST /offers
 GET  /offers/:offer_id
@@ -209,7 +218,7 @@ Working:
 - Payer-side SDK payment flow for offer readiness, fresh invoice creation, route dry-run, and explicit payment execution.
 - Node-backed SDK offer creation and scanned encoded-offer resolution.
 - React and React Native QR/link and capped recurrence approval components.
-- Payer-owned automatic recurrence scheduler with cap enforcement and revocation.
+- Payer-owned automatic recurrence scheduler with durable browser/Node stores, retry backoff, cap enforcement, and revocation.
 - TypeScript declaration files for the protocol and SDK public surfaces.
 - Runnable SDK examples for wallet payment flow, merchant/operator reconciliation, and read-only topology readiness.
 - Resolver diagnostics with Fiber RPC peer/channel capacity summaries.
@@ -232,13 +241,15 @@ Working:
 - Live Fiber invoice creation and status synchronization, with an explicit mock adapter reserved for automated tests.
 - Fiber RPC adapter boundary.
 - Browser demo and Node SDK.
+- Signed `HttpOnly` operator sessions for API-key-protected dashboard deployments.
 
 Not production-ready yet:
 
 - Production-grade liquidity policy engine.
-- Authenticated merchant dashboard.
+- Merchant accounts and merchant-scoped dashboard authorization beyond the current single-deployment operator session.
 - Managed production secrets, backups, metrics, TLS, and alerting.
 
 See [docs/spec-v1.md](docs/spec-v1.md) for the protocol details.
 See [docs/requirements-traceability.md](docs/requirements-traceability.md) for PRD/FRD/TRD acceptance mapping.
+See [docs/requirements-errata.md](docs/requirements-errata.md) for implementation-time clarifications to the draft PDFs.
 See [docs/live-fiber-testing.md](docs/live-fiber-testing.md) for the live Fiber node path.

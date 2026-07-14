@@ -6,6 +6,7 @@ export {
   FiberRecurringPaymentScheduler,
   FiberTopologyClient,
   InMemoryRecurringApprovalStore,
+  WebStorageRecurringApprovalStore,
   analyzeFiberTopology,
   analyzePaymentReadiness,
   createOffer,

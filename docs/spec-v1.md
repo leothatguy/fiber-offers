@@ -62,7 +62,15 @@ In live mode, the resolver calls Fiber `node_info` and requires the returned com
 
 Recurring invoice attempts carry `recurrence_cycle`, `approval_id`, and `scheduled_for`. The resolver enforces sequential cycles, the signed per-cycle amount, `cap_cycles`, and `spending_cap_total`.
 
-`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. Status is available from `GET /offers/:offer_id/recurrence-status`.
+`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles from its internal timer, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. Browser wallets can use `WebStorageRecurringApprovalStore`; Node wallet services can use the private atomic `JsonFileRecurringApprovalStore` export from `@fiber-offers/sdk/node`. Status is available from `GET /offers/:offer_id/recurrence-status`.
+
+## Availability Boundary
+
+An encoded offer remains portable and verifiable while the merchant node is
+offline, but invoice creation does not. The resolver returns
+`503 RECIPIENT_UNAVAILABLE` when its configured merchant FNN cannot mint a fresh
+invoice. V1 does not queue an invoice request that lacks a current FNN-generated
+invoice.
 
 ## Resolution Flow
 

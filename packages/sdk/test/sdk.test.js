@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   FiberOffersClient,
   FiberNodeDiagnosticsClient,
@@ -9,6 +11,7 @@ import {
   FiberRecurringPaymentScheduler,
   FiberRpcClient,
   FiberTopologyClient,
+  WebStorageRecurringApprovalStore,
   analyzeFiberTopology,
   analyzePaymentReadiness,
   createOffer,
@@ -21,6 +24,7 @@ import {
   toFiberDecimalQuantity,
   toFiberHexQuantity
 } from "../src/index.js";
+import { JsonFileRecurringApprovalStore } from "../src/node.js";
 import {
   createSignedOffer,
   encodeOffer,
@@ -37,6 +41,7 @@ test("packages advertise TypeScript declarations for SDK adopters", async () => 
   assert.equal(sdkPackage.types, "src/index.d.ts");
   assert.equal(sdkPackage.exports["."].types, "./src/index.d.ts");
   assert.equal(sdkPackage.exports["./browser"].types, "./src/browser.d.ts");
+  assert.equal(sdkPackage.exports["./node"].types, "./src/node.d.ts");
   assert.equal(sdkPackage.exports["./react"].types, "./src/react.d.ts");
   assert.equal(sdkPackage.exports["./react-native"].types, "./src/react-native.d.ts");
   assert.equal(protocolPackage.types, "src/index.d.ts");
@@ -137,6 +142,96 @@ test("runs capped recurring payments and supports one-tap revocation", async () 
   assert.equal(revoked.status, "revoked");
   assert.ok(revoked.revoked_at);
   assert.match(approval.id, /^approval_/);
+});
+
+test("automatically runs due recurring payments and persists approvals privately", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fiber-offers-recurrence-"));
+  const path = join(directory, "approvals.json");
+  const keys = generateOfferKeyPair();
+  const offer = createSignedOffer(
+    {
+      node_id: "02" + "d".repeat(64),
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://resolver.example",
+      assets: [{ asset_type: "ckb", symbol: "CKB" }],
+      recurrence: { interval: "custom_seconds", custom_seconds: 60, amount: "1000", cap_cycles: 2 }
+    },
+    keys.privateKeyPem
+  );
+  let calls = 0;
+  const events = [];
+  const scheduler = new FiberRecurringPaymentScheduler({
+    paymentFlow: {
+      async payOffer() {
+        calls += 1;
+        return { ok: true, status: "payment_sent", payment_hash: `hash-${calls}` };
+      }
+    },
+    store: new JsonFileRecurringApprovalStore(path),
+    intervalMs: 5,
+    onEvent: (event) => events.push(event)
+  });
+
+  try {
+    const approval = await scheduler.approve(offer);
+    scheduler.start();
+    await waitFor(async () => (await new JsonFileRecurringApprovalStore(path).get(approval.id))?.cycles_paid === 1);
+    const restored = await new JsonFileRecurringApprovalStore(path).get(approval.id);
+
+    assert.equal(restored.cycles_paid, 1);
+    assert.equal(scheduler.status().running, true);
+    assert.ok(events.some((event) => event.type === "cycle.payment_sent"));
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+  } finally {
+    scheduler.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("persists browser approvals and retries failed recurring attempts", async () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value)
+  };
+  const keys = generateOfferKeyPair();
+  const offer = createSignedOffer(
+    {
+      node_id: "03" + "e".repeat(64),
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://resolver.example",
+      assets: [{ asset_type: "ckb", symbol: "CKB" }],
+      recurrence: { interval: "daily", amount: "1000", spending_cap_total: "3000" }
+    },
+    keys.privateKeyPem
+  );
+  let current = new Date("2026-01-01T00:00:00.000Z");
+  let calls = 0;
+  const scheduler = new FiberRecurringPaymentScheduler({
+    paymentFlow: {
+      async payOffer() {
+        calls += 1;
+        return calls === 1
+          ? { ok: false, status: "payment_failed", failure: { code: "NO_ROUTE", summary: "route unavailable" } }
+          : { ok: true, status: "payment_sent", payment_hash: "hash-retry" };
+      }
+    },
+    store: new WebStorageRecurringApprovalStore({ storage }),
+    retryDelayMs: 1000,
+    now: () => current
+  });
+  const approval = await scheduler.approve(offer);
+  await scheduler.runDue();
+  const afterFailure = await new WebStorageRecurringApprovalStore({ storage }).get(approval.id);
+  current = new Date("2026-01-01T00:00:01.000Z");
+  await scheduler.runDue();
+  const afterRetry = await new WebStorageRecurringApprovalStore({ storage }).get(approval.id);
+
+  assert.equal(afterFailure.consecutive_failures, 1);
+  assert.equal(afterFailure.next_retry_at, current.toISOString());
+  assert.equal(afterRetry.cycles_paid, 1);
+  assert.equal(afterRetry.next_retry_at, undefined);
+  assert.equal(calls, 2);
 });
 
 test("registers an encoded offer through the configured resolver", async () => {
@@ -1558,4 +1653,12 @@ function inspectedNode({ pubkey, peers = [], channels = {}, pending_channels = {
       counterparties: pending_channels.counterparties ?? []
     }
   };
+}
+
+async function waitFor(predicate, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  while (!(await predicate())) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

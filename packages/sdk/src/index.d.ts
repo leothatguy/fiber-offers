@@ -796,7 +796,7 @@ export interface RecurringApproval {
   offer_id: string;
   offer: SignedFiberOffer;
   asset: FiberAsset;
-  status: "active" | "revoked" | "cap_reached";
+  status: "active" | "revoked" | "cap_reached" | "failed";
   approved_at: string;
   revoked_at?: string;
   next_due_at: string;
@@ -804,13 +804,36 @@ export interface RecurringApproval {
   spending_total: string;
   attempts: JsonObject[];
   last_error?: JsonObject;
+  consecutive_failures?: number;
+  next_retry_at?: string;
 }
 
-export class InMemoryRecurringApprovalStore {
+export interface RecurringApprovalStore {
+  list(): Promise<RecurringApproval[]>;
+  get(id: string): Promise<RecurringApproval | undefined>;
+  put(approval: RecurringApproval): Promise<RecurringApproval>;
+}
+
+export class InMemoryRecurringApprovalStore implements RecurringApprovalStore {
   constructor(initial?: RecurringApproval[]);
   list(): Promise<RecurringApproval[]>;
   get(id: string): Promise<RecurringApproval | undefined>;
   put(approval: RecurringApproval): Promise<RecurringApproval>;
+}
+
+export class WebStorageRecurringApprovalStore implements RecurringApprovalStore {
+  constructor(options?: { storage?: Storage; key?: string });
+  list(): Promise<RecurringApproval[]>;
+  get(id: string): Promise<RecurringApproval | undefined>;
+  put(approval: RecurringApproval): Promise<RecurringApproval>;
+}
+
+export interface RecurringSchedulerStatus {
+  running: boolean;
+  interval_ms: number;
+  retry_delay_ms: number;
+  last_run_at?: string;
+  last_error?: JsonObject;
 }
 
 export class FiberRecurringPaymentScheduler {
@@ -818,8 +841,18 @@ export class FiberRecurringPaymentScheduler {
     paymentFlow: FiberPaymentFlowClient;
     resolverClient?: Pick<FiberOffersClient, "getOffer">;
     resolver?: Pick<FiberOffersClient, "getOffer">;
-    store?: InMemoryRecurringApprovalStore;
+    store?: RecurringApprovalStore;
+    storage?: Storage;
+    storageKey?: string;
     now?: () => Date;
+    intervalMs?: number;
+    retryDelayMs?: number;
+    maxConsecutiveFailures?: number;
+    autoStart?: boolean;
+    runOnStart?: boolean;
+    onEvent?: (event: JsonObject) => void;
+    setInterval?: typeof globalThis.setInterval;
+    clearInterval?: typeof globalThis.clearInterval;
   });
   approve(
     offerOrEncoded: SignedFiberOffer | RegisteredOfferResponse | OfferId | string,
@@ -827,6 +860,9 @@ export class FiberRecurringPaymentScheduler {
   ): Promise<RecurringApproval>;
   revoke(approvalId: string): Promise<RecurringApproval>;
   runDue(now?: string | Date): Promise<JsonObject[]>;
+  start(options?: { runOnStart?: boolean }): RecurringSchedulerStatus;
+  stop(): RecurringSchedulerStatus;
+  status(): RecurringSchedulerStatus;
 }
 
 export interface InvoiceResolutionResponse {

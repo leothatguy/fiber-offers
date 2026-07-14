@@ -58,6 +58,10 @@ Fiber Offers adds the missing reusable payment-intent layer:
 - Merchant CLI for generated secrets, node ownership checks, offer creation, registration recovery, listing, and signed revocation.
 - SDK methods for protocol, resolver, readiness, status, reconciliation, and webhooks.
 - Browser demo.
+- API-key exchange for signed, short-lived, `HttpOnly` operator dashboard sessions.
+- Durable payer-owned automatic recurrence with retries and revocation.
+- A two-session live E2E harness that pays two fresh invoices from one static offer.
+- A verified two-session testnet run: both 1 CKB payments reached payer `Success`, merchant `Paid`, and resolver `invoice_paid` with zero fees.
 - Automated tests.
 
 ## What Is Mocked Or Simulated
@@ -65,7 +69,7 @@ Fiber Offers adds the missing reusable payment-intent layer:
 - The standard demo runtime uses real local Fiber testnet nodes. The mock invoice adapter is retained only for automated tests and explicit isolated UI work.
 - Manual status controls remain available for operator testing, but live settlement is reconciled automatically from Fiber RPC.
 - Webhook delivery and retry scheduling run through background workers; the built-in receiver remains a local demonstration endpoint.
-- API-key mode is resolver-wide, not merchant-scoped yet.
+- API-key mode is resolver-wide, not merchant-scoped yet; the browser exchanges it for an `HttpOnly` operator session.
 - Webhook secrets can be encrypted at rest with `RESOLVER_SECRET_ENCRYPTION_KEY`; external secret-manager integration remains deployment work.
 
 ## Technical Breakdown
@@ -104,6 +108,7 @@ Package: `packages/sdk`
 - Resolution status helpers.
 - Reconciliation helpers.
 - Webhook helpers.
+- Durable browser and Node recurrence stores plus an automatic payer scheduler.
 
 ### CLI
 
@@ -166,19 +171,19 @@ http://localhost:8787
 Hosted demo:
 
 ```text
-TBD
+Pending final server/domain deployment
 ```
 
 ## Repository Link
 
 ```text
-TBD
+https://github.com/leothatguy/fiber-offers
 ```
 
 ## Team Members
 
 ```text
-TBD
+Leo (Dilamme / Independent)
 ```
 
 ## Video Demonstration
@@ -191,8 +196,8 @@ Suggested video structure:
 2. Create one reusable Fiber Offer.
 3. Show stable offer ID, QR, payment link, and Fiber Address.
 4. Run readiness check.
-5. Request two invoices from the same offer.
-6. Mark one invoice paid.
+5. Run the two-session E2E check against the same offer.
+6. Show two distinct invoices and two paid resolver records.
 7. Show reconciliation JSON/CSV.
 8. Register webhook and drain signed delivery.
 9. Show diagnostics and Fiber RPC path.
@@ -200,11 +205,14 @@ Suggested video structure:
 
 ## Future Roadmap
 
-1. Capture and publish a funded two-wallet testnet run using the included E2E script.
-2. Move the JSON store and in-process webhook outbox to PostgreSQL and a durable job queue.
-3. Add merchant accounts, scoped API keys, rate limits, and production observability.
+1. Deploy the final HTTPS demo with managed secrets, backups, metrics, and alerting.
+2. Add merchant accounts, scoped API keys, and a multi-tenant Fiber node profile registry.
+3. Validate live UDT/RGB++ settlement with funded compatible channels.
 4. Run cross-wallet QR interoperability testing with external Fiber wallet teams.
 5. Propose the offer format and resolver-attested identity model for community review.
+
+The original draft requirement assumptions that changed after FNN RPC validation
+are recorded in [requirements-errata.md](requirements-errata.md).
 
 ## AI Allowance Claim
 

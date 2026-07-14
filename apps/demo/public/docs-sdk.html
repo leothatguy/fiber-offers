@@ -44,8 +44,28 @@ import {
                 <tr><td><code>FiberPaymentFlowClient</code></td><td>The composed wallet path from readiness to invoice to route confidence to explicitly opted-in payment.</td></tr>
                 <tr><td><code>FiberTopologyClient</code></td><td>Merchant and payer node pair inspection plus direct-channel diagnostics.</td></tr>
                 <tr><td><code>FiberRecurringPaymentScheduler</code></td><td>Payer-owned capped approvals, due-cycle execution, retries, and revocation.</td></tr>
+                <tr><td><code>JsonFileRecurringApprovalStore</code></td><td>Private durable approval storage for Node payer services through <code>@fiber-offers/sdk/node</code>.</td></tr>
               </tbody>
             </table>
+          </section>
+
+          <section id="recurrence-sdk">
+            <h2>Durable recurring payments</h2>
+            <pre><code>import {
+  FiberRecurringPaymentScheduler,
+  JsonFileRecurringApprovalStore
+} from "@fiber-offers/sdk/node";
+
+const scheduler = new FiberRecurringPaymentScheduler({
+  resolverClient: resolver,
+  paymentFlow,
+  store: new JsonFileRecurringApprovalStore(".fiber-offers/payer-approvals.json"),
+  autoStart: true,
+  retryDelayMs: 30000
+});
+
+await scheduler.approve(offerId);</code></pre>
+            <p>The scheduler remains in the payer trust boundary. Browser wallets can use <code>WebStorageRecurringApprovalStore</code>; merchant resolvers never receive payer payment credentials.</p>
           </section>
 
           <section id="merchant-sdk">
@@ -145,7 +165,7 @@ const route = await payer.checkPaymentRoute(invoice.invoice, {
           <div class="docs-pagination"><a href="/docs/fiber"><span>Previous</span><strong>Fiber integration</strong></a><a href="/docs/production"><span>Next</span><strong>Production and security</strong></a></div>
         </article>
       </main>
-      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="SDK sections"><a href="#install">Packages</a><a href="#merchant-sdk">Merchant registration</a><a href="#wallet-sdk">Wallet calls</a><a href="#operator-sdk">Operator helpers</a><a href="#topology-sdk">Topology helpers</a></nav></aside>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="SDK sections"><a href="#install">Packages</a><a href="#recurrence-sdk">Recurrence</a><a href="#merchant-sdk">Merchant registration</a><a href="#wallet-sdk">Wallet calls</a><a href="#operator-sdk">Operator helpers</a><a href="#topology-sdk">Topology helpers</a></nav></aside>
     </div>
   </body>
 </html>

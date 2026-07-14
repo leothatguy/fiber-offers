@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, InMemoryOfferStore, JsonOfferStore } from "../src/server.js";
-import { MockInvoiceAdapter } from "../src/invoice-adapter.js";
+import { FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
 import { deliverWebhookEvent, signWebhookPayload } from "../src/webhook-delivery.js";
 import {
   createOfferRevocation,
@@ -88,6 +88,49 @@ test("creates fixed pricing from one amount and rejects non-exact invoice reques
     assert.equal(rejected.status, 422);
     assert.equal(rejected.body.error.code, "AMOUNT_MUST_MATCH_FIXED_AMOUNT");
   });
+});
+
+test("selects a supported UDT from a multi-asset offer and mints the matching Fiber invoice", async () => {
+  const nodeId = "02" + "f".repeat(64);
+  const typeScriptHash = "0x" + "1".repeat(64);
+  const calls = [];
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(method, params) {
+        calls.push({ method, params });
+        if (method === "node_info") return { pubkey: nodeId };
+        if (method === "new_invoice") {
+          return {
+            invoice_address: "fibt1udtinvoice",
+            invoice: { data: { payment_hash: "0x" + "2".repeat(64) } }
+          };
+        }
+        throw new Error(`unexpected Fiber method: ${method}`);
+      }
+    }
+  });
+
+  await withServer(
+    async (baseUrl) => {
+      const created = await postJson(`${baseUrl}/demo/offers`, {
+        amount: "1000",
+        assets: [
+          { asset_type: "ckb", symbol: "CKB" },
+          { asset_type: "udt", symbol: "USDI", type_script_hash: typeScriptHash }
+        ]
+      });
+      const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+        amount: "1000",
+        asset: { asset_type: "udt", symbol: "USDI", type_script_hash: typeScriptHash }
+      });
+
+      assert.equal(created.status, 201);
+      assert.equal(invoice.status, 201);
+      assert.equal(invoice.body.invoice, "fibt1udtinvoice");
+      assert.equal(calls.find((call) => call.method === "new_invoice").params[0].currency, typeScriptHash);
+    },
+    { invoiceAdapter }
+  );
 });
 
 test("replays an idempotent invoice request without creating another invoice or event", async () => {
@@ -406,6 +449,39 @@ test("enforces API key when configured", async () => {
   );
 });
 
+test("exchanges the API key for a signed cross-replica operator session", async () => {
+  await withServer(
+    async (baseUrl) => {
+      const anonymous = await getJson(`${baseUrl}/operator/session`);
+      const rejected = await postJson(`${baseUrl}/operator/session`, { api_key: "wrong-key" });
+      const login = await fetch(`${baseUrl}/operator/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: "test-key" })
+      });
+      const cookie = login.headers.get("set-cookie");
+      const cookiePair = cookie.split(";")[0];
+      const session = await fetch(`${baseUrl}/operator/session`, { headers: { cookie: cookiePair } });
+      const offers = await fetch(`${baseUrl}/offers`, { headers: { cookie: cookiePair } });
+      const token = cookiePair.slice(cookiePair.indexOf("=") + 1);
+      const tampered = await fetch(`${baseUrl}/offers`, {
+        headers: { cookie: `fiber_offers_operator=${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}` }
+      });
+
+      assert.equal(anonymous.body.authenticated, false);
+      assert.equal(rejected.status, 401);
+      assert.equal(login.status, 204);
+      assert.match(cookie, /^fiber_offers_operator=/);
+      assert.match(cookie, /HttpOnly/);
+      assert.match(cookie, /SameSite=Strict/);
+      assert.equal((await session.json()).authenticated, true);
+      assert.equal(offers.status, 200);
+      assert.equal(tampered.status, 401);
+    },
+    { apiKey: "test-key" }
+  );
+});
+
 test("reports reachable Fiber RPC diagnostics from the invoice adapter", async () => {
   const invoiceAdapter = {
     mode: "fiber-rpc",
@@ -548,7 +624,7 @@ test("syncs invoice resolution status from the invoice source", async () => {
   );
 });
 
-test("background worker syncs open invoice resolutions", async () => {
+test("background worker propagates paid invoices within the five-second target", async () => {
   const invoiceAdapter = {
     mode: "fiber-rpc",
     async probe() {
@@ -579,7 +655,7 @@ test("background worker syncs open invoice resolutions", async () => {
   };
 
   await withServer(
-    async (baseUrl, server) => {
+    async (baseUrl) => {
       const created = await postJson(`${baseUrl}/demo/offers`, {
         amount_min: "1000",
         amount_max: "2000"
@@ -588,22 +664,34 @@ test("background worker syncs open invoice resolutions", async () => {
         amount: "1500",
         asset: { asset_type: "ckb", symbol: "CKB" }
       });
-
-      const pass = await server.backgroundWorkers.runSettlementSyncPass();
-      const resolution = await getJson(
-        `${baseUrl}/offers/${created.body.offer_id}/resolutions/${invoice.body.resolution_id}`
-      );
+      const startedAt = Date.now();
+      let resolution;
+      do {
+        resolution = await getJson(
+          `${baseUrl}/offers/${created.body.offer_id}/resolutions/${invoice.body.resolution_id}`
+        );
+        if (resolution.body.status === "invoice_paid") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      } while (Date.now() - startedAt < 1000);
       const events = await getJson(`${baseUrl}/offers/${created.body.offer_id}/webhook-events`);
 
-      assert.equal(pass.offers, 1);
-      assert.equal(pass.changed, 1);
       assert.equal(resolution.body.status, "invoice_paid");
+      assert.ok(Date.now() - startedAt < 5000);
       assert.deepEqual(
         events.body.events.map((event) => event.type),
         ["invoice.created", "invoice.paid"]
       );
     },
-    { invoiceAdapter, publicOrigin: "http://resolver.worker.test" }
+    {
+      invoiceAdapter,
+      publicOrigin: "http://resolver.worker.test",
+      workers: {
+        enabled: true,
+        runOnStart: false,
+        settlementSyncIntervalMs: 20,
+        webhookDeliveryIntervalMs: 0
+      }
+    }
   );
 });
 

@@ -28,7 +28,7 @@ npm run dev</code></pre>
             <ul>
               <li>Terminate TLS at a trusted reverse proxy and expose the resolver only through HTTPS.</li>
               <li>Set <code>RESOLVER_PUBLIC_URL</code> to the externally reachable origin so links and webhooks use the correct address.</li>
-              <li>Protect operator inventory, webhook configuration and history, and merchant write endpoints with <code>RESOLVER_API_KEY</code>.</li>
+              <li>Protect operator inventory, webhook configuration and history, and merchant write endpoints with <code>RESOLVER_API_KEY</code>. The browser exchanges it for a signed <code>HttpOnly</code> session cookie.</li>
               <li>Store API keys and Fiber RPC credentials in a secret manager, not source files or browser code.</li>
               <li>Run the PostgreSQL migration service before accepting live payments and use Redis/BullMQ for distributed maintenance work.</li>
             </ul>
@@ -40,7 +40,7 @@ npm run dev</code></pre>
             <p>The Docker deployment runs BullMQ workers against Redis. The interval-based worker remains a single-process development fallback.</p>
             <pre><code>RESOLVER_WORKERS_ENABLED=true
 RESOLVER_WORKERS_RUN_ON_START=true
-RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=30000
+RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=3000
 RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
 RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
 RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000

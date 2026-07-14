@@ -2,73 +2,79 @@
 
 ## One-Minute Pitch
 
-Fiber has invoices, but external apps also need reusable payment intents. Fiber Offers is a signed static offer format plus a resolver that turns the same stable offer into fresh Fiber invoices. This gives wallets, merchants, and developer tools a Fiber-native version of reusable payment links, addresses, and invoice resolution.
+Fiber invoices are payment-attempt specific. Fiber Offers adds a signed static
+offer and resolver that turns the same stable link, QR, or Fiber Address into a
+fresh standard Fiber invoice for every payer session.
 
 ## Walkthrough
 
-1. Start the resolver:
+1. Start the stack and verify that the resolver is bound to the merchant FNN:
 
    ```bash
-   npm run dev
+   docker compose up -d --build
+   npm run cli -- doctor
    ```
 
-2. Open `http://localhost:8787`.
+2. Keep the terminal and `http://localhost:8787` open side by side.
 
-3. Point out the diagnostics band: it reports live Fiber RPC reachability, channel capacity, and automatic worker state.
+3. Create the offer from the independent merchant CLI:
 
-4. In the Merchant panel, create an offer for `coffee`.
+   ```bash
+   npm run cli -- create \
+     --description "Coffee checkout" \
+     --amount 100000000 \
+     --username coffee
+   ```
 
-5. Point out:
+4. Point out the stable offer ID, payment link, `coffee@localhost:8787` Fiber
+   Address, and locally protected lifecycle key.
 
-   - `offer_id` is stable.
-   - `encoded_offer` starts with `fbroffer1`.
-   - `coffee@localhost:8787` resolves through the well-known endpoint.
-   - The payment link stays the same.
-   - The QR code points to the stable payment link.
+5. Unlock the operator workspace with `RESOLVER_API_KEY`. Show that the
+   CLI-created offer is already present, proving the CLI and browser use the same
+   resolver and PostgreSQL state.
 
-6. Register the sample webhook URL in the Merchant panel.
+6. Open the returned `/pay/:offer_id` link and show the customer-facing amount,
+   readiness check, invoice action, and QR.
 
-7. In the Payer panel, click `Check Readiness`.
+7. Run the two-session live proof:
 
-8. Request an invoice.
+   ```bash
+   RESOLVER_URL=http://127.0.0.1:8787 \
+   MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
+   PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+   FIBER_E2E_PAYMENT_COUNT=2 \
+   npm run fiber:e2e-check
+   ```
 
-9. Click `Request Twice`.
+8. Show that both payer client sessions used the same offer ID but received
+   different invoices and payment hashes, and that both merchant invoices and
+   resolver records reached `Paid` / `invoice_paid`.
 
-10. Click `Mark Latest Paid`.
+9. Refresh the dashboard and open reconciliation JSON/CSV, receipts, and the
+   webhook outbox.
 
-11. Click `Deliver`, then open the `JSON`, `CSV`, or `Events` link in the Resolution Log header.
-
-12. Compare the log, report, and webhook event outbox:
-
-   - Same offer ID.
-   - Same amount and asset.
-   - Different invoice strings.
-   - Different payment hashes.
-   - Latest invoice status changes to paid.
-   - Reconciliation export includes the paid row.
-   - Webhook outbox includes invoice lifecycle events and delivery attempts.
+10. Revoke the offer from the CLI and refresh the payment page to show the
+    explicit revoked state.
 
 ## What Is Real
 
-- Offer creation.
-- Canonical offer IDs.
-- Ed25519 signatures.
-- Offer encoding/decoding.
-- Resolver registration.
-- Fiber Address lookup.
-- QR generation for payment links and encoded offers.
-- Payment readiness diagnostics before invoice creation.
-- Resolver diagnostics and Fiber RPC probe path.
-- Request validation.
-- Fresh invoice generation boundary.
-- Settlement status records and paid-state simulation.
-- Merchant reconciliation JSON/CSV exports.
-- Webhook subscriptions, signed delivery, and event outbox records.
-- Tests covering protocol and resolver behavior.
+- Node-backed offer creation and resolver-attested FNN identity.
+- Canonical IDs, Ed25519 lifecycle signatures, and signed revocation.
+- Bech32m `fbroffer1...` encoding.
+- Fiber Address lookup and stable QR/payment links.
+- Live FNN invoice creation, route dry-run, payment, and status reconciliation.
+- Two independent payer client sessions paying one static offer.
+- Three-second settlement polling, receipts, reconciliation, and webhooks.
+- Signed `HttpOnly` operator dashboard sessions.
+- Durable payer-owned recurrence scheduling, cap enforcement, retries, and
+  revocation.
 
-## What Is Mocked
+## Explicit Boundaries
 
-- The standard demo uses real Fiber testnet invoices through the local merchant node.
-- The mock adapter is used only by automated tests or an explicit `npm run dev:mock` session.
-- Settlement polling and webhook retries run automatically; manual controls remain for operator demonstrations.
-- Direct-channel opening and merchant acceptance are guarded because they can mutate Fiber/on-chain state.
+- Mock invoices are used only by automated tests or `npm run dev:mock`.
+- The current resolver deployment maps to one merchant FNN.
+- A fresh invoice cannot be minted while that FNN is unavailable; the payer gets
+  `503 RECIPIENT_UNAVAILABLE`.
+- Live UDT/RGB++ settlement requires separately funded compatible channels.
+- Merchant accounts, multi-tenancy, managed secrets, and production TLS remain
+  deployment/product follow-up work.

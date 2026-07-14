@@ -1685,7 +1685,8 @@ td {
 
 .confirm-dialog,
 .form-dialog,
-.webhook-details-dialog {
+.webhook-details-dialog,
+.operator-login-dialog {
   width: min(480px, calc(100% - 32px));
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -2042,9 +2043,37 @@ td {
 
 .confirm-dialog::backdrop,
 .form-dialog::backdrop,
-.webhook-details-dialog::backdrop {
+.webhook-details-dialog::backdrop,
+.operator-login-dialog::backdrop {
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(6px);
+}
+
+.operator-login-dialog {
+  width: min(440px, calc(100% - 32px));
+}
+
+.operator-login-box {
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+}
+
+.operator-login-box > p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.operator-login-box label {
+  display: grid;
+  gap: 8px;
+}
+
+.operator-login-error {
+  border-left: 2px solid var(--rose);
+  padding-left: 10px;
+  color: #ffd8d7 !important;
 }
 
 .confirm-dialog form {

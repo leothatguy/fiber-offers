@@ -603,6 +603,19 @@
         <button id="doneWebhookDetailsButton" class="primary" type="button">Done</button>
       </div>
     </dialog>
+    <dialog id="operatorLoginDialog" class="operator-login-dialog" aria-labelledby="operatorLoginTitle">
+      <form id="operatorLoginForm" class="operator-login-box">
+        <p class="eyebrow">Merchant access</p>
+        <h2 id="operatorLoginTitle">Unlock operator workspace</h2>
+        <p>Enter this deployment's resolver API key. It is exchanged for a private session cookie and is not stored by the browser.</p>
+        <label>
+          <span>Resolver API key</span>
+          <input id="operatorApiKeyInput" name="api_key" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="operatorLoginError" class="operator-login-error" role="alert" hidden></p>
+        <button class="primary" type="submit">Unlock workspace</button>
+      </form>
+    </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

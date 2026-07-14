@@ -28,6 +28,7 @@
     "fiber:e2e-check": "node scripts/live-fiber-e2e-check.js",
     "example:wallet": "node examples/wallet-payment-flow.mjs",
     "example:merchant": "node examples/merchant-operator.mjs",
+    "example:recurrence": "node examples/recurring-payment-worker.mjs",
     "example:topology": "node examples/topology-readiness.mjs",
     "verify": "npm test && npm run smoke",
     "test": "node --test packages/protocol/test/*.test.js packages/sdk/test/*.test.js apps/resolver/test/*.test.js apps/cli/test/*.test.js",

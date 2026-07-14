@@ -1,5 +1,5 @@
 import { createServer as createHttpServer } from "node:http";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,6 +49,7 @@ const webhookSubscriptionEventTypes = new Set([
   "invoice.cancelled"
 ]);
 const webhookEventTypes = new Set([...webhookSubscriptionEventTypes, "webhook.test"]);
+const operatorSessionCookie = "fiber_offers_operator";
 
 export { InMemoryOfferStore, JsonOfferStore, PostgresOfferStore };
 
@@ -65,6 +66,10 @@ export function createServer(options = {}) {
   const staticRoot = options.staticRoot ?? defaultStaticRoot;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const apiKey = options.apiKey ?? process.env.RESOLVER_API_KEY;
+  const operatorSessionTtlSeconds = positiveInteger(
+    options.operatorSessionTtlSeconds ?? process.env.RESOLVER_ADMIN_SESSION_TTL_SECONDS,
+    28800
+  );
   const topologyClient = options.topologyClient ?? createTopologyClientFromEnv(process.env, fetchImpl);
   const demoWebhookInbox = options.demoWebhookInbox ?? [];
   const logger = options.logger ?? console;
@@ -79,6 +84,7 @@ export function createServer(options = {}) {
     staticRoot,
     fetchImpl,
     apiKey,
+    operatorSessionTtlSeconds,
     topologyClient,
     demoWebhookInbox,
     logger,
@@ -162,6 +168,43 @@ async function handleRequest(request, response, context) {
   if (request.method === "GET" && pathname === "/diagnostics") {
     sendJson(response, 200, await createDiagnostics(context));
     return;
+  }
+
+  if (pathname === "/operator/session") {
+    if (request.method === "GET") {
+      sendJson(response, 200, {
+        auth_required: Boolean(context.apiKey),
+        authenticated: !context.apiKey || hasValidApiCredential(request, context)
+      });
+      return;
+    }
+
+    if (request.method === "POST") {
+      if (!context.apiKey) {
+        sendJson(response, 200, { authenticated: true, auth_required: false });
+        return;
+      }
+      const body = await readJsonBody(request);
+      if (!safeSecretEqual(body.api_key, context.apiKey)) {
+        throw httpError(401, "UNAUTHORIZED", "valid API key is required");
+      }
+      response.writeHead(204, {
+        "cache-control": "no-store",
+        "set-cookie": operatorSessionHeader(context, request)
+      });
+      response.end();
+      return;
+    }
+
+    if (request.method === "DELETE") {
+      requireApiKey(request, context);
+      response.writeHead(204, {
+        "cache-control": "no-store",
+        "set-cookie": expiredOperatorSessionHeader(request)
+      });
+      response.end();
+      return;
+    }
   }
 
   if (request.method === "GET" && pathname === "/topology") {
@@ -1602,7 +1645,7 @@ function backgroundWorkerOptionsFromEnv(env) {
   return {
     enabled: booleanEnv(env.RESOLVER_WORKERS_ENABLED),
     runOnStart: booleanEnv(env.RESOLVER_WORKERS_RUN_ON_START),
-    settlementSyncIntervalMs: positiveInteger(env.RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS, 30000),
+    settlementSyncIntervalMs: positiveInteger(env.RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS, 3000),
     webhookDeliveryIntervalMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_INTERVAL_MS, 30000),
     webhookMaxAttempts: positiveInteger(env.RESOLVER_WEBHOOK_MAX_ATTEMPTS, 8),
     webhookRetryMinAgeMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS, 30000)
@@ -1749,16 +1792,65 @@ function createTopologyClientFromEnv(env, fetchImpl) {
 function requireApiKey(request, context) {
   if (!context.apiKey) return;
 
+  if (!hasValidApiCredential(request, context)) {
+    throw httpError(401, "UNAUTHORIZED", "valid API key is required");
+  }
+}
+
+function hasValidApiCredential(request, context) {
   const authorization = request.headers.authorization;
   const bearer = typeof authorization === "string" && authorization.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : undefined;
   const headerKey = request.headers["x-api-key"];
   const provided = bearer ?? (Array.isArray(headerKey) ? headerKey[0] : headerKey);
+  if (safeSecretEqual(provided, context.apiKey)) return true;
 
-  if (provided !== context.apiKey) {
-    throw httpError(401, "UNAUTHORIZED", "valid API key is required");
-  }
+  const token = parseCookies(request.headers.cookie)[operatorSessionCookie];
+  return verifyOperatorSession(token, context.apiKey);
+}
+
+function operatorSessionHeader(context, request) {
+  const expiresAt = Math.floor(Date.now() / 1000) + context.operatorSessionTtlSeconds;
+  const payload = `${expiresAt}.${randomBytes(18).toString("base64url")}`;
+  const signature = createHmac("sha256", context.apiKey).update(payload).digest("base64url");
+  return cookieHeader(`${payload}.${signature}`, context.operatorSessionTtlSeconds, request);
+}
+
+function expiredOperatorSessionHeader(request) {
+  return cookieHeader("", 0, request);
+}
+
+function cookieHeader(value, maxAge, request) {
+  const secure = requestOrigin(request).startsWith("https://") ? "; Secure" : "";
+  return `${operatorSessionCookie}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure}`;
+}
+
+function verifyOperatorSession(token, apiKey) {
+  if (!token || !apiKey) return false;
+  const [expiresAt, nonce, signature, ...rest] = String(token).split(".");
+  if (rest.length > 0 || !/^\d+$/.test(expiresAt) || !nonce || !signature) return false;
+  if (Number(expiresAt) <= Math.floor(Date.now() / 1000)) return false;
+  const expected = createHmac("sha256", apiKey).update(`${expiresAt}.${nonce}`).digest("base64url");
+  return safeSecretEqual(signature, expected);
+}
+
+function safeSecretEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string") return false;
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function parseCookies(header) {
+  if (typeof header !== "string") return {};
+  return Object.fromEntries(
+    header.split(";").map((item) => {
+      const separator = item.indexOf("=");
+      if (separator < 0) return [item.trim(), ""];
+      return [item.slice(0, separator).trim(), item.slice(separator + 1).trim()];
+    })
+  );
 }
 
 async function probeInvoiceSource(invoiceAdapter) {

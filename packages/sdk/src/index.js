@@ -20,7 +20,11 @@ import { analyzeFiberTopology, FiberTopologyClient, planDirectChannelFixture } f
 import { fiberNodeError, normalizeFiberPaymentFailure } from "./failures.js";
 import { FiberPaymentFlowClient } from "./payment-flow.js";
 import { analyzePaymentReadiness } from "./payment-readiness.js";
-import { FiberRecurringPaymentScheduler, InMemoryRecurringApprovalStore } from "./recurrence.js";
+import {
+  FiberRecurringPaymentScheduler,
+  InMemoryRecurringApprovalStore,
+  WebStorageRecurringApprovalStore
+} from "./recurrence.js";
 
 export {
   createSignedOffer,
@@ -33,6 +37,7 @@ export {
   FiberRpcClient,
   FiberRecurringPaymentScheduler,
   InMemoryRecurringApprovalStore,
+  WebStorageRecurringApprovalStore,
   FiberTopologyClient,
   analyzeFiberTopology,
   analyzePaymentReadiness,

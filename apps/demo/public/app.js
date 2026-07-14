@@ -13,7 +13,9 @@ const state = {
   webhookDeleteTarget: undefined,
   selectedResolutionId: undefined,
   recurringApproval: undefined,
-  activityRefreshInFlight: false
+  activityRefreshInFlight: false,
+  operatorLoginPromise: undefined,
+  operatorLoginResolve: undefined
 };
 
 const els = {};
@@ -35,11 +37,15 @@ async function init() {
   renderOfferDirectory();
   renderOverview();
   showView(viewFromLocationHash(), { updateLocation: false });
-  await loadHealth();
-  await loadOfferInventory();
+  const paymentOfferId = location.pathname.match(/^\/pay\/(0x[0-9a-f]{64})$/)?.[1];
+  const health = await loadHealth();
+  if (!paymentOfferId && health?.auth_required) {
+    const session = await api("/operator/session");
+    if (!session.authenticated) await showOperatorLogin();
+  }
+  if (!paymentOfferId) await loadOfferInventory();
   startLiveActivityPolling();
 
-  const paymentOfferId = location.pathname.match(/^\/pay\/(0x[0-9a-f]{64})$/)?.[1];
   if (paymentOfferId) {
     showView("payments");
     await loadOffer(paymentOfferId, { updateLocation: false });
@@ -203,6 +209,10 @@ function bindElements() {
     "topologyMerchantChannels",
     "topologyBlockers",
     "topologyActions",
+    "operatorLoginDialog",
+    "operatorLoginForm",
+    "operatorApiKeyInput",
+    "operatorLoginError",
     "toast"
   ]) {
     els[id] = document.getElementById(id);
@@ -274,6 +284,8 @@ function bindEvents() {
   els.invoiceDetailsDialog.addEventListener("click", (event) => {
     if (event.target === els.invoiceDetailsDialog) els.invoiceDetailsDialog.close();
   });
+  els.operatorLoginForm.addEventListener("submit", loginOperator);
+  els.operatorLoginDialog.addEventListener("cancel", (event) => event.preventDefault());
   for (const button of document.querySelectorAll(".invoice-copy-button")) {
     button.addEventListener("click", () => copyInvoiceDetail(button));
   }
@@ -371,10 +383,50 @@ async function loadHealth() {
     els.healthPill.classList.toggle("is-mock", mockMode);
     setTone(els.healthPill, mockMode ? "warn" : "ok");
     await loadDiagnostics();
+    return health;
   } catch {
     els.healthPill.textContent = "Offline";
     els.healthPill.classList.remove("is-mock");
     setTone(els.healthPill, "error");
+    return undefined;
+  }
+}
+
+function showOperatorLogin() {
+  if (state.operatorLoginPromise) return state.operatorLoginPromise;
+  state.operatorLoginPromise = new Promise((resolve) => {
+    state.operatorLoginResolve = resolve;
+  });
+  els.operatorLoginError.hidden = true;
+  els.operatorLoginError.textContent = "";
+  if (!els.operatorLoginDialog.open) els.operatorLoginDialog.showModal();
+  queueMicrotask(() => els.operatorApiKeyInput.focus());
+  return state.operatorLoginPromise;
+}
+
+async function loginOperator(event) {
+  event.preventDefault();
+  const button = els.operatorLoginForm.querySelector("button[type='submit']");
+  button.disabled = true;
+  els.operatorLoginError.hidden = true;
+  try {
+    await api("/operator/session", {
+      method: "POST",
+      body: { api_key: els.operatorApiKeyInput.value },
+      authRetried: true
+    });
+    els.operatorApiKeyInput.value = "";
+    els.operatorLoginDialog.close();
+    const resolve = state.operatorLoginResolve;
+    state.operatorLoginPromise = undefined;
+    state.operatorLoginResolve = undefined;
+    resolve?.();
+  } catch (error) {
+    els.operatorLoginError.textContent = error.message;
+    els.operatorLoginError.hidden = false;
+    els.operatorApiKeyInput.select();
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -764,7 +816,7 @@ function startLiveActivityPolling() {
     } finally {
       state.activityRefreshInFlight = false;
     }
-  }, 10_000);
+  }, 2_000);
 }
 
 function renderOffer() {
@@ -1852,11 +1904,25 @@ async function api(path, options = {}) {
       accept: "application/json",
       ...(options.body ? { "content-type": "application/json" } : {})
     },
-    body: options.body ? JSON.stringify(options.body) : undefined
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    credentials: "same-origin"
   });
-  const body = await response.json();
+  if (
+    response.status === 401 &&
+    path !== "/operator/session" &&
+    !options.authRetried &&
+    !location.pathname.startsWith("/pay/")
+  ) {
+    await showOperatorLogin();
+    return api(path, { ...options, authRetried: true });
+  }
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : undefined;
   if (!response.ok) {
-    throw new Error(body.error?.message ?? `Request failed with ${response.status}`);
+    const error = new Error(body?.error?.message ?? `Request failed with ${response.status}`);
+    error.status = response.status;
+    error.code = body?.error?.code;
+    throw error;
   }
   return body;
 }

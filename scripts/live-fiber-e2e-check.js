@@ -2,6 +2,8 @@ import { FiberPaymentClient, normalizeFiberPaymentFailure } from "../packages/sd
 
 const merchantRpcUrl = process.env.MERCHANT_FIBER_RPC_URL ?? process.env.FIBER_RPC_URL ?? "http://127.0.0.1:8227";
 const payerRpcUrl = process.env.PAYER_FIBER_RPC_URL ?? "http://127.0.0.1:8229";
+const payerRpcUrls = csvList(process.env.PAYER_FIBER_RPC_URLS);
+if (payerRpcUrls.length === 0) payerRpcUrls.push(payerRpcUrl);
 const resolverUrl = trimTrailingSlash(process.env.RESOLVER_URL ?? "http://127.0.0.1:8787");
 const apiKey = process.env.RESOLVER_API_KEY;
 const amount = process.env.FIBER_E2E_AMOUNT ?? "100000000";
@@ -11,7 +13,7 @@ const sendPayment = process.env.FIBER_E2E_DRY_RUN_ONLY !== "true";
 const trampolineHops = csvList(process.env.FIBER_E2E_TRAMPOLINE_HOPS);
 const maxFeeAmount = process.env.FIBER_E2E_MAX_FEE_AMOUNT;
 const maxFeeRate = process.env.FIBER_E2E_MAX_FEE_RATE;
-const payerPaymentClient = new FiberPaymentClient({ url: payerRpcUrl });
+const paymentCount = positiveInteger(process.env.FIBER_E2E_PAYMENT_COUNT, 2);
 
 let stage = "init";
 let latestDiagnostics;
@@ -58,82 +60,83 @@ try {
   });
   latestOffer = offer;
 
-  stage = "request_invoice";
-  const invoice = await resolverRequest(`/offers/${offer.offer_id}/invoice`, {
-    method: "POST",
-    body: {
-      amount,
-      asset: { asset_type: "ckb", symbol: "CKB" }
-    }
-  });
-  latestInvoice = invoice;
+  const sessions = [];
+  for (let index = 0; index < paymentCount; index += 1) {
+    const sessionId = `payer-session-${index + 1}`;
+    const sessionRpcUrl = payerRpcUrls[index % payerRpcUrls.length];
+    const payerPaymentClient = new FiberPaymentClient({ url: sessionRpcUrl });
 
-  stage = "dry_run_payment";
-  const routeCheck = await payerPaymentClient.checkPaymentRoute(invoice.invoice, {
-    ...paymentOptions(),
-    diagnostics
-  });
-  if (!routeCheck.ok) {
-    printFailure({
-      stage,
-      failure: routeCheck.failure,
-      offer,
-      invoice,
+    stage = `${sessionId}:request_invoice`;
+    const invoice = await resolverRequest(`/offers/${offer.offer_id}/invoice`, {
+      method: "POST",
+      headers: { "idempotency-key": `${offer.offer_id}:${sessionId}` },
+      body: {
+        amount,
+        asset: { asset_type: "ckb", symbol: "CKB" }
+      }
+    });
+    latestInvoice = invoice;
+
+    stage = `${sessionId}:dry_run_payment`;
+    const routeCheck = await payerPaymentClient.checkPaymentRoute(invoice.invoice, {
+      ...paymentOptions(),
       diagnostics
     });
-    process.exit(1);
-  }
-  const dryRun = routeCheck.dry_run;
+    if (!routeCheck.ok) throw failureError(routeCheck.failure);
+    const dryRun = routeCheck.dry_run;
 
-  if (!sendPayment) {
-    const resolverSync = await resolverRequest(`/offers/${offer.offer_id}/resolutions/${invoice.resolution_id}/sync`, {
-      method: "POST",
-      body: {}
-    });
+    if (!sendPayment) {
+      const resolverSync = await syncResolver(offer.offer_id, invoice.resolution_id);
+      sessions.push({
+        ok: true,
+        session_id: sessionId,
+        payer_rpc_url: sessionRpcUrl,
+        invoice,
+        dryRun,
+        resolverSync
+      });
+      continue;
+    }
 
-    printResult({
-      ok: true,
-      dry_run_only: true,
-      stage,
-      offer,
+    stage = `${sessionId}:send_payment`;
+    const payment = await payerPaymentClient.sendPayment(invoice.invoice, paymentOptions());
+    stage = `${sessionId}:poll_payment`;
+    const finalPayment = await pollPayment(payerPaymentClient, payment.payment_hash, timeoutSeconds);
+    stage = `${sessionId}:poll_invoice`;
+    const finalInvoice = await pollMerchantInvoice(invoice.payment_hash, timeoutSeconds);
+    stage = `${sessionId}:sync_resolver`;
+    const resolverSync = await syncResolver(offer.offer_id, invoice.resolution_id);
+    const ok =
+      finalPayment.status === "Success" &&
+      finalInvoice.status === "Paid" &&
+      resolverSync.resolution?.status === "invoice_paid";
+
+    sessions.push({
+      ok,
+      session_id: sessionId,
+      payer_rpc_url: sessionRpcUrl,
       invoice,
       dryRun,
-      resolverSync,
-      diagnostics
+      payment,
+      finalPayment,
+      finalInvoice,
+      resolverSync
     });
-    process.exit(0);
+    if (!ok) throw failureError(analyzePaymentFailure({ ...sessions.at(-1), stage, diagnostics }));
   }
 
-  stage = "send_payment";
-  const payment = await payerPaymentClient.sendPayment(invoice.invoice, paymentOptions());
-
-  stage = "poll_payment";
-  const finalPayment = await pollPayment(payment.payment_hash, timeoutSeconds);
-
-  stage = "poll_invoice";
-  const finalInvoice = await pollMerchantInvoice(invoice.payment_hash, timeoutSeconds);
-
-  stage = "sync_resolver";
-  const resolverSync = await resolverRequest(`/offers/${offer.offer_id}/resolutions/${invoice.resolution_id}/sync`, {
-    method: "POST",
-    body: {}
-  });
-
-  const ok =
-    finalPayment.status === "Success" &&
-    finalInvoice.status === "Paid" &&
-    resolverSync.resolution?.status === "invoice_paid";
+  const distinctInvoices = new Set(sessions.map((session) => session.invoice.invoice)).size === paymentCount;
+  const distinctPaymentHashes = new Set(sessions.map((session) => session.invoice.payment_hash)).size === paymentCount;
+  const ok = sessions.length === paymentCount && sessions.every((session) => session.ok) && distinctInvoices && distinctPaymentHashes;
 
   printResult({
     ok,
+    dry_run_only: !sendPayment,
     stage,
     offer,
-    invoice,
-    dryRun,
-    payment,
-    finalPayment,
-    finalInvoice,
-    resolverSync,
+    sessions,
+    distinctInvoices,
+    distinctPaymentHashes,
     diagnostics
   });
 
@@ -153,7 +156,7 @@ try {
   process.exit(1);
 }
 
-async function pollPayment(paymentHash, timeout) {
+async function pollPayment(payerPaymentClient, paymentHash, timeout) {
   const started = Date.now();
   let last;
 
@@ -164,6 +167,13 @@ async function pollPayment(paymentHash, timeout) {
   }
 
   return last;
+}
+
+async function syncResolver(offerId, resolutionId) {
+  return resolverRequest(`/offers/${offerId}/resolutions/${resolutionId}/sync`, {
+    method: "POST",
+    body: {}
+  });
 }
 
 async function pollMerchantInvoice(paymentHash, timeout) {
@@ -214,6 +224,7 @@ async function resolverRequest(path, options = {}) {
     headers: {
       accept: "application/json",
       ...authHeaders(),
+      ...options.headers,
       ...(options.body ? { "content-type": "application/json" } : {})
     },
     body: options.body ? JSON.stringify(options.body) : undefined
@@ -371,24 +382,31 @@ function printResult(result) {
         ok: result.ok,
         dry_run_only: result.dry_run_only,
         amount,
+        payment_count: paymentCount,
         resolver_url: resolverUrl,
         offer_id: result.offer.offer_id,
-        resolution_id: result.invoice.resolution_id,
-        invoice_mode: result.invoice.invoice_mode,
-        invoice_payment_hash: result.invoice.payment_hash,
-        dry_run_status: result.dryRun.status,
-        payment_hash: result.payment?.payment_hash ?? result.dryRun.payment_hash,
-        payment_status: result.finalPayment?.status ?? result.payment?.status,
-        payment_failed_error: result.finalPayment?.failed_error ?? result.payment?.failed_error,
-        merchant_invoice_status: result.finalInvoice?.status ?? result.resolverSync?.invoice_source?.fiber_status,
-        resolver_status: result.resolverSync?.resolution?.status,
-        resolver_changed: result.resolverSync?.changed,
-        fee: result.finalPayment?.fee ?? result.payment?.fee ?? result.dryRun.fee,
+        distinct_invoices: result.distinctInvoices,
+        distinct_payment_hashes: result.distinctPaymentHashes,
+        sessions: result.sessions.map((session) => ({
+          session_id: session.session_id,
+          payer_rpc_url: session.payer_rpc_url,
+          resolution_id: session.invoice.resolution_id,
+          invoice_mode: session.invoice.invoice_mode,
+          invoice_payment_hash: session.invoice.payment_hash,
+          dry_run_status: session.dryRun.status,
+          payment_hash: session.payment?.payment_hash ?? session.dryRun.payment_hash,
+          payment_status: session.finalPayment?.status ?? session.payment?.status,
+          payment_failed_error: session.finalPayment?.failed_error ?? session.payment?.failed_error,
+          merchant_invoice_status: session.finalInvoice?.status ?? session.resolverSync?.invoice_source?.fiber_status,
+          resolver_status: session.resolverSync?.resolution?.status,
+          resolver_changed: session.resolverSync?.changed,
+          fee: session.finalPayment?.fee ?? session.payment?.fee ?? session.dryRun.fee,
+          routers: session.finalPayment?.routers ?? session.payment?.routers ?? session.dryRun.routers,
+          ok: session.ok
+        })),
         trampoline_hops: trampolineHops,
         max_fee_amount: maxFeeAmount,
         max_fee_rate: maxFeeRate,
-        routers: result.finalPayment?.routers ?? result.payment?.routers ?? result.dryRun.routers,
-        failure: result.ok ? undefined : analyzePaymentFailure(result),
         diagnostics: result.diagnostics
       },
       null,
@@ -467,4 +485,17 @@ function checkError(message, details) {
   error.code = "LIVE_FIBER_E2E_CHECK_FAILED";
   error.details = details;
   return error;
+}
+
+function failureError(failure) {
+  const error = new Error(failure?.summary ?? failure?.message ?? "live Fiber payment session failed");
+  error.code = failure?.code ?? "LIVE_FIBER_E2E_CHECK_FAILED";
+  error.details = failure;
+  return error;
+}
+
+function positiveInteger(value, fallback) {
+  const number = Number(value ?? fallback);
+  if (!Number.isSafeInteger(number) || number <= 0) throw new Error("FIBER_E2E_PAYMENT_COUNT must be a positive integer");
+  return number;
 }

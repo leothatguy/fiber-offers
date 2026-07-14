@@ -60,6 +60,11 @@ docker compose up -d --build
 npm run cli -- doctor
 ```
 
+Open the resolver URL and enter `RESOLVER_API_KEY` in the operator unlock dialog
+to use the merchant dashboard. The server exchanges it for a signed `HttpOnly`
+session cookie; the dashboard does not persist the raw key. Customer payment
+links under `/pay/:offer_id` remain public and do not require this session.
+
 `doctor` fails unless:
 
 - the resolver is healthy;
@@ -159,3 +164,18 @@ const merchant = new FiberOffersClient({
 
 Do not put `RESOLVER_API_KEY`, the encryption key, PostgreSQL credentials, an
 offer lifecycle private key, or FNN RPC credentials in browser or mobile bundles.
+
+## Payer-Owned Recurrence
+
+Automatic recurring payments run beside the payer node, not inside the merchant
+resolver. A Node wallet service can use the durable reference worker:
+
+```bash
+RESOLVER_URL=https://offers.merchant.example \
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+FIBER_RECURRING_OFFER=0x<offer-id> \
+npm run example:recurrence
+```
+
+The approval file defaults to `.fiber-offers/payer-approvals.json` with mode
+`0600`. Browser wallets use `WebStorageRecurringApprovalStore` instead.
