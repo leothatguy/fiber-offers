@@ -44,7 +44,7 @@ async function init() {
     const session = await api("/operator/session");
     if (!session.authenticated) await showOperatorLogin();
   }
-  if (!paymentOfferId) await loadOfferInventory();
+  if (!paymentOfferId) await Promise.all([loadDiagnostics(), loadOfferInventory()]);
   startLiveActivityPolling();
 
   if (paymentOfferId) {
@@ -399,7 +399,6 @@ async function loadHealth() {
     els.healthPill.textContent = mockMode ? "Mock invoices" : "Fiber RPC";
     els.healthPill.classList.toggle("is-mock", mockMode);
     setTone(els.healthPill, mockMode ? "warn" : "ok");
-    await loadDiagnostics();
     return health;
   } catch {
     els.healthPill.textContent = "Offline";
