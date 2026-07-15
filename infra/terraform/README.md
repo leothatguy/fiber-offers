@@ -9,28 +9,39 @@ security groups, state, and application data remain separate.
 The default `m7i-flex.large` is selected from the instance types that this AWS
 account reports as Free Tier eligible.
 
-The S3 backend is intentionally partial. Initialize it with a bucket and a state
-key that are distinct from Loavix:
+Terraform is run locally through Docker; GitHub Actions are not involved. The
+authoritative state is stored remotely in S3 under a key distinct from Loavix:
 
-```bash
-terraform init \
-  -backend-config="bucket=$TERRAFORM_STATE_BUCKET" \
-  -backend-config="key=envs/production/fiber-offers/terraform.tfstate" \
-  -backend-config="region=$AWS_REGION" \
-  -backend-config="use_lockfile=true"
+```text
+envs/production/fiber-offers/terraform.tfstate
 ```
 
-Supply AWS credentials through the standard environment variables. Do not put
-credentials or SSH private keys in Terraform variables or committed files.
+Project-local credentials, backend configuration, variables, provider mirror,
+and SSH public key live in ignored files:
+
+```text
+.env.local
+backend.local.hcl
+terraform.tfvars
+.local/
+```
+
+Initialize with the local wrapper:
 
 ```bash
-terraform plan \
-  -var="aws_region=$AWS_REGION" \
-  -var="public_key_path=/absolute/path/to/deploy-key.pub" \
-  -var='ssh_cidr_blocks=["203.0.113.10/32"]'
+./terraform-local.sh init
+```
 
-terraform apply
-terraform output -raw public_ip
+The wrapper verifies the pinned AWS provider checksum, uses the project-local
+provider mirror, and passes the ignored AWS environment into the Terraform
+container. Do not commit credentials, Terraform state, plans, or SSH private
+keys.
+
+```bash
+./terraform-local.sh plan -out=fiber-offers.tfplan
+./terraform-local.sh apply fiber-offers.tfplan
+./terraform-local.sh output
+./terraform-local.sh output -raw public_ip
 ```
 
 After apply, create this Vercel DNS record:

@@ -13,4 +13,8 @@ apps/resolver/data/
 *.tfstate.*
 *.tfplan
 crash.log
+infra/terraform/.local/
+infra/terraform/.env.local
+infra/terraform/backend.local.hcl
+infra/terraform/terraform.tfvars
 *.log

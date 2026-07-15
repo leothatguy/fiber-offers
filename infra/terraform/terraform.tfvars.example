@@ -5,5 +5,5 @@ app_name         = "fiber-offers"
 environment      = "production"
 host_vpc_name    = "loavix-production-vpc"
 subnet_cidr      = "10.42.2.0/24"
-public_key_path  = "/absolute/path/to/deploy-key.pub"
+public_key_path  = "/terraform-local/deploy-key.pub"
 ssh_cidr_blocks  = ["203.0.113.10/32"]
