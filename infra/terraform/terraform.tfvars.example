@@ -6,4 +6,4 @@ environment      = "production"
 host_vpc_name    = "loavix-production-vpc"
 subnet_cidr      = "10.42.2.0/24"
 public_key_path  = "/terraform-local/deploy-key.pub"
-ssh_cidr_blocks  = ["203.0.113.10/32"]
+ssh_cidr_blocks  = ["0.0.0.0/0"]

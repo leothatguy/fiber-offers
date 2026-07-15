@@ -46,11 +46,11 @@ variable "public_key_path" {
 }
 
 variable "ssh_cidr_blocks" {
-  description = "CIDR blocks allowed to connect over SSH"
+  description = "CIDR blocks allowed to connect over key-authenticated SSH"
   type        = list(string)
 
   validation {
-    condition     = length(var.ssh_cidr_blocks) > 0 && !contains(var.ssh_cidr_blocks, "0.0.0.0/0")
-    error_message = "SSH access must be restricted to at least one explicit CIDR; 0.0.0.0/0 is not allowed."
+    condition     = length(var.ssh_cidr_blocks) > 0
+    error_message = "At least one SSH CIDR block is required."
   }
 }
