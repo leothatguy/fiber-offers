@@ -1,6 +1,8 @@
 {
   "name": "@fiber-offers/cli",
   "version": "0.1.0",
+  "description": "Command-line tools for independent Nervos Fiber Offers merchants.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "fiber-offers": "src/index.js"
@@ -10,5 +12,27 @@
   ],
   "dependencies": {
     "@fiber-offers/sdk": "0.1.0"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leothatguy/fiber-offers.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://fiber-offers.leothatguy.me/docs/merchants",
+  "bugs": {
+    "url": "https://github.com/leothatguy/fiber-offers/issues"
+  },
+  "keywords": [
+    "nervos",
+    "ckb",
+    "fiber-network",
+    "payments",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

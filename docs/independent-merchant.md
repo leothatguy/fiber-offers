@@ -128,15 +128,11 @@ Back up all three of these together:
 
 ## SDK Consumers
 
-A project can install the packages from a local clone before registry publication:
+A project can install the SDK and its protocol dependency from npm:
 
 ```bash
-npm install \
-  /path/to/fiber-offers/packages/protocol \
-  /path/to/fiber-offers/packages/sdk
+npm install @fiber-offers/sdk
 ```
-
-The same import paths remain valid when the packages are published to npm.
 
 A payer application needs only the public resolver URL:
 

@@ -35,6 +35,19 @@ docs/
 
 The monorepo is intentional: the protocol, SDK, resolver, and demo are separate deliverables, but they need to evolve together during the hackathon.
 
+## Published Packages
+
+Install only the surface needed by your application:
+
+```bash
+npm install @fiber-offers/protocol
+npm install @fiber-offers/sdk
+npm install --global @fiber-offers/cli
+```
+
+The resolver and dashboard remain deployment applications in this repository;
+they are not published as npm libraries.
+
 ## Quick Start
 
 Requires Node.js 20+ and a merchant Fiber RPC node. The sibling Loavix workspace provides one on `8227`:

@@ -1,6 +1,8 @@
 {
   "name": "@fiber-offers/sdk",
   "version": "0.1.0",
+  "description": "JavaScript SDK for creating, resolving, and paying Nervos Fiber Offers.",
+  "license": "MIT",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -37,6 +39,9 @@
       "default": "./src/react-native.js"
     }
   },
+  "engines": {
+    "node": ">=20"
+  },
   "peerDependencies": {
     "react": ">=18",
     "react-native": ">=0.72"
@@ -48,5 +53,24 @@
     "react-native": {
       "optional": true
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leothatguy/fiber-offers.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://fiber-offers.leothatguy.me/docs/sdk",
+  "bugs": {
+    "url": "https://github.com/leothatguy/fiber-offers/issues"
+  },
+  "keywords": [
+    "nervos",
+    "ckb",
+    "fiber-network",
+    "payments",
+    "sdk"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

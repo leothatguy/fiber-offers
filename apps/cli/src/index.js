@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
@@ -350,7 +351,7 @@ Common options:
 `;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((error) => {
     console.error(JSON.stringify({ ok: false, error: { code: error.code ?? "CLI_ERROR", message: error.message } }, null, 2));
     process.exitCode = 1;

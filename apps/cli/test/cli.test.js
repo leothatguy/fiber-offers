@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { decodeOffer, verifyOfferRevocation } from "../../../packages/protocol/src/index.js";
 import { main } from "../src/index.js";
+
+const execFileAsync = promisify(execFile);
+
+test("CLI executes through an npm-style binary symlink", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "fiber-offers-cli-bin-"));
+  const binary = join(cwd, "fiber-offers");
+  const source = new URL("../src/index.js", import.meta.url);
+  await symlink(source, binary);
+
+  const { stdout } = await execFileAsync(process.execPath, [binary, "--help"]);
+
+  assert.match(stdout, /Fiber Offers merchant CLI/);
+  assert.match(stdout, /fiber-offers create/);
+});
 
 test("CLI initializes private independent-merchant configuration", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "fiber-offers-cli-init-"));

@@ -1,9 +1,12 @@
 {
   "name": "@fiber-offers/protocol",
   "version": "0.1.0",
+  "description": "Signed reusable payment offer protocol for Nervos Fiber Network.",
+  "license": "MIT",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
+  "sideEffects": false,
   "files": [
     "src"
   ],
@@ -13,5 +16,27 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leothatguy/fiber-offers.git",
+    "directory": "packages/protocol"
+  },
+  "homepage": "https://github.com/leothatguy/fiber-offers#readme",
+  "bugs": {
+    "url": "https://github.com/leothatguy/fiber-offers/issues"
+  },
+  "keywords": [
+    "nervos",
+    "ckb",
+    "fiber-network",
+    "payments",
+    "offers"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
