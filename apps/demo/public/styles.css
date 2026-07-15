@@ -2325,8 +2325,8 @@ td {
 
 #toast {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  inset: auto 22px 22px auto;
+  margin: 0;
   z-index: 10;
   max-width: min(420px, calc(100% - 44px));
   min-height: 44px;
@@ -2339,6 +2339,10 @@ td {
   padding: 12px 14px;
   font-weight: 700;
   transition: opacity 160ms ease, transform 160ms ease;
+}
+
+#toast::backdrop {
+  background: transparent;
 }
 
 #toast.is-visible {

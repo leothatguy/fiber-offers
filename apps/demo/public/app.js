@@ -2066,10 +2066,22 @@ function setBusy(isBusy) {
 }
 
 let toastTimer;
+let toastHideTimer;
 function toast(message, isError = false) {
   clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
   els.toast.textContent = message;
   els.toast.classList.toggle("is-error", isError);
+  if (typeof els.toast.showPopover === "function" && !els.toast.matches(":popover-open")) {
+    els.toast.showPopover();
+  }
   els.toast.classList.add("is-visible");
-  toastTimer = setTimeout(() => els.toast.classList.remove("is-visible"), 2600);
+  toastTimer = setTimeout(() => {
+    els.toast.classList.remove("is-visible");
+    toastHideTimer = setTimeout(() => {
+      if (typeof els.toast.hidePopover === "function" && els.toast.matches(":popover-open")) {
+        els.toast.hidePopover();
+      }
+    }, 180);
+  }, 2600);
 }
