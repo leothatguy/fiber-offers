@@ -10,12 +10,6 @@ Reusable static payment offers for Fiber Network.
 
 Fiber Offers lets a wallet, merchant, or service publish one signed static offer and resolve it into fresh Fiber invoices on demand. It is infrastructure, not a consumer app: the reusable pieces are the signed offer protocol, resolver API, SDK, Fiber Address lookup, and demo workspace.
 
-## Why This Fits The Hackathon
-
-Category: Wallet and Payment UX Infrastructure.
-
-The infrastructure gap is that a normal invoice is payment-attempt specific. Merchants, wallets, pay links, tip jars, subscriptions, and API metering need a stable payment intent that can be shared once while still producing a fresh invoice for every payment attempt. Fiber Offers adds that missing layer without changing Fiber itself.
-
 ## Monorepo Layout
 
 ```text
@@ -30,19 +24,15 @@ docs/
   api-quick-reference.md
   architecture.md
   cli.md
-  final-checklist.md
   live-fiber-testing.md
   deployment.md
   protocol.md
-  prior-art-and-positioning.md
   sdk.md
-  submission.md
   spec-v1.md
-  nestjs-migration.md
-  requirements-errata.md
 ```
 
-The monorepo is intentional: the protocol, SDK, resolver, and demo are separate deliverables, but they need to evolve together during the hackathon.
+The monorepo keeps the protocol, SDK, resolver, CLI, and browser application
+versioned and tested together while preserving separate package boundaries.
 
 ## Published Packages
 
@@ -67,22 +57,22 @@ Package documentation is available directly on GitHub:
 
 ## Quick Start
 
-Requires Node.js 20+ and a merchant Fiber RPC node. The sibling Loavix workspace provides one on `8227`:
+Requires Node.js 20 or newer. Start the interface in explicit mock mode when
+evaluating the repository without a Fiber node:
 
 ```bash
-cd ../loavix
-docker compose --profile fiber up -d fiber
-
-cd ../fiber-offers
+npm install
 npm test
 npm run smoke
-npm run verify
-npm run dev
+npm run dev:mock
 ```
 
 Open `http://localhost:8787`.
 
-The standard runtime uses live Fiber RPC invoices and starts automatic settlement polling and webhook delivery. Use `npm run dev:mock` only for isolated UI development when a Fiber node is intentionally unavailable.
+For real payments, run a merchant Fiber node and follow the
+[Independent Merchant Setup](docs/independent-merchant.md). The standard runtime
+uses live Fiber RPC invoices and automatic settlement/webhook workers; mock mode
+is only for isolated evaluation and automated tests.
 
 The offer itself is offline-stable: it can be printed, cached, decoded, and
 verified without regeneration. Creating a fresh invoice still requires the
@@ -312,6 +302,4 @@ Not production-ready yet:
 - Managed production secrets, backups, metrics, TLS, and alerting.
 
 See [docs/spec-v1.md](docs/spec-v1.md) for the protocol details.
-See [docs/requirements-traceability.md](docs/requirements-traceability.md) for PRD/FRD/TRD acceptance mapping.
-See [docs/requirements-errata.md](docs/requirements-errata.md) for implementation-time clarifications to the draft PDFs.
 See [docs/live-fiber-testing.md](docs/live-fiber-testing.md) for the live Fiber node path.

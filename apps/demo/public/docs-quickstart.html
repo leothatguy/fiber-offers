@@ -35,20 +35,16 @@
             <ul>
               <li>Node.js 20 or newer.</li>
               <li>The repository dependencies installed with npm.</li>
-              <li>Docker and the sibling Loavix workspace, which provides a merchant Fiber testnet node.</li>
+              <li>Docker and a merchant Fiber testnet node with private JSON-RPC access.</li>
               <li>A terminal and a browser.</li>
             </ul>
           </section>
 
           <section id="run-resolver">
             <h2>Run the resolver</h2>
-            <pre><code>cd ../loavix
-docker compose --profile fiber up -d fiber
-
-cd ../fiber-offers
-npm install
+            <pre><code>npm install
 npm run verify
-npm run dev</code></pre>
+FIBER_RPC_URL=http://127.0.0.1:8227 npm run dev</code></pre>
             <p>Open the <a href="/">console</a> at <code>http://localhost:8787</code>. The status should report Fiber RPC, and diagnostics should show automatic workers enabled.</p>
           </section>
 

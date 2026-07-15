@@ -8,6 +8,7 @@ dist/
 build/
 apps/resolver/data/
 .fiber-offers/
+.internal-docs/
 .terraform/
 *.tfstate
 *.tfstate.*

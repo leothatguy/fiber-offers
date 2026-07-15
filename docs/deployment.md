@@ -60,14 +60,20 @@ preserves the node's loopback-only RPC listener without opening a host RPC port.
 Override `FIBER_RPC_URL` for a different private endpoint, or set
 `FIBER_RPC_HOST` and `FIBER_RPC_PORT` for another host-local address.
 
-With the sibling Loavix testnet fixtures, start both live nodes before this stack:
+Start the merchant Fiber node before the resolver stack. The default relay expects
+its JSON-RPC endpoint on host loopback at `127.0.0.1:8227`; verify `node_info`
+first, then start Fiber Offers:
 
 ```bash
-cd ../loavix
-docker compose --profile fiber up -d fiber fiber-payer
-cd ../fiber-offers
+curl -sS -X POST http://127.0.0.1:8227 \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"node_info","params":[]}'
+
 docker compose up -d --build
 ```
+
+A payer node is not part of the merchant deployment. Configure a separate payer
+RPC only for controlled topology and end-to-end tests.
 
 `GET /health` checks PostgreSQL, Redis, and the configured invoice source. In
 live mode it returns `503` when FNN cannot be reached; `GET /diagnostics` includes
