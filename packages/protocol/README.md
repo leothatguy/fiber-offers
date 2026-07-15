@@ -46,8 +46,9 @@ console.log(encodeOffer(offer));
 
 Amounts are integer base units. One CKB is `100000000` shannons.
 
-See the [Fiber Offers repository](https://github.com/leothatguy/fiber-offers)
-for the protocol specification and complete examples.
+See the [complete protocol guide](https://github.com/leothatguy/fiber-offers/blob/main/docs/protocol.md)
+and [V1 specification](https://github.com/leothatguy/fiber-offers/blob/main/docs/spec-v1.md)
+for field rules, revocation, recurrence, security boundaries, and complete examples.
 
 ## License
 

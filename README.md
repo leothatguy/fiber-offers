@@ -1,5 +1,11 @@
 # Fiber Offers
 
+[![Protocol](https://img.shields.io/npm/v/%40fiber-offers%2Fprotocol?label=protocol)](https://www.npmjs.com/package/@fiber-offers/protocol)
+[![SDK](https://img.shields.io/npm/v/%40fiber-offers%2Fsdk?label=sdk)](https://www.npmjs.com/package/@fiber-offers/sdk)
+[![CLI](https://img.shields.io/npm/v/%40fiber-offers%2Fcli?label=cli)](https://www.npmjs.com/package/@fiber-offers/cli)
+[![GitHub Release](https://img.shields.io/github/v/release/leothatguy/fiber-offers)](https://github.com/leothatguy/fiber-offers/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Reusable static payment offers for Fiber Network.
 
 Fiber Offers lets a wallet, merchant, or service publish one signed static offer and resolve it into fresh Fiber invoices on demand. It is infrastructure, not a consumer app: the reusable pieces are the signed offer protocol, resolver API, SDK, Fiber Address lookup, and demo workspace.
@@ -23,10 +29,13 @@ packages/
 docs/
   api-quick-reference.md
   architecture.md
+  cli.md
   final-checklist.md
   live-fiber-testing.md
   deployment.md
+  protocol.md
   prior-art-and-positioning.md
+  sdk.md
   submission.md
   spec-v1.md
   nestjs-migration.md
@@ -47,6 +56,14 @@ npm install --global @fiber-offers/cli
 
 The resolver and dashboard remain deployment applications in this repository;
 they are not published as npm libraries.
+
+Package documentation is available directly on GitHub:
+
+- [Protocol guide](docs/protocol.md)
+- [SDK guide](docs/sdk.md)
+- [CLI guide](docs/cli.md)
+- [Resolver API quick reference](docs/api-quick-reference.md)
+- [Independent merchant setup](docs/independent-merchant.md)
 
 ## Quick Start
 

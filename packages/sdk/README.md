@@ -55,8 +55,8 @@ import { JsonFileRecurringApprovalStore } from "@fiber-offers/sdk/node";
 import { OfferQR } from "@fiber-offers/sdk/react";
 ```
 
-See the [SDK documentation](https://fiber-offers.leothatguy.me/docs/sdk) and
-[examples](https://github.com/leothatguy/fiber-offers/tree/main/examples).
+See the [complete SDK guide](https://github.com/leothatguy/fiber-offers/blob/main/docs/sdk.md)
+and [examples](https://github.com/leothatguy/fiber-offers/tree/main/examples).
 
 ## License
 

@@ -43,7 +43,8 @@ The CLI passes amounts in base units. One CKB is `100000000` shannons.
 Lifecycle keys and environment files are private local operator material and
 must not be committed.
 
-See the [independent merchant guide](https://fiber-offers.leothatguy.me/docs/merchants)
+See the [complete CLI guide](https://github.com/leothatguy/fiber-offers/blob/main/docs/cli.md)
+and [independent merchant guide](https://github.com/leothatguy/fiber-offers/blob/main/docs/independent-merchant.md)
 for node, resolver, Fiber Address, and production setup.
 
 ## License
