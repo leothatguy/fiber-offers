@@ -8,4 +8,9 @@ dist/
 build/
 apps/resolver/data/
 .fiber-offers/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
 *.log
