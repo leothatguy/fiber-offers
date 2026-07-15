@@ -66,6 +66,26 @@
             <p>Follow the separate <a href="/docs/quickstart">Quickstart</a> to run this flow against the local two-node Fiber testnet fixture.</p>
           </section>
 
+          <section id="share-and-pay">
+            <h2>What customers open</h2>
+            <table>
+              <thead><tr><th>Merchant shares</th><th>Customer action</th><th>Result</th></tr></thead>
+              <tbody>
+                <tr><td>Payment link</td><td>Open it in a browser or application.</td><td>The checkout resolves the offer and requests a fresh invoice after confirmation.</td></tr>
+                <tr><td>Payment link QR</td><td>Scan it with a phone or compatible wallet.</td><td>The same stable browser checkout opens without requiring the customer to type an identifier.</td></tr>
+                <tr><td>Fiber Address</td><td>Paste <code>coffee@fiber-offers.leothatguy.me</code> into a compatible wallet or the Fiber Offers payment surface.</td><td>The wallet resolves the signed offer through the domain's well-known endpoint.</td></tr>
+                <tr><td><code>fibt...</code> invoice</td><td>Confirm and send it through a Fiber wallet or node.</td><td>Funds route through Fiber to the merchant node for one payment attempt.</td></tr>
+              </tbody>
+            </table>
+            <div class="callout callout-note"><strong>Fiber Address is not a URL</strong><span>Use a payment link when someone should click in a browser. A Fiber Address is the short reusable identifier that a wallet or SDK turns into a signed offer and then a fresh <code>fibt...</code> invoice.</span></div>
+            <pre><code>coffee@fiber-offers.leothatguy.me
+  -> GET https://fiber-offers.leothatguy.me/.well-known/fiberoffer/coffee
+  -> signed Coffee offer
+  -> POST /offers/:offer_id/invoice
+  -> fibt... invoice
+  -> Fiber send_payment</code></pre>
+          </section>
+
           <section id="choose-path">
             <h2>Choose your integration path</h2>
             <div class="docs-card-grid">
@@ -123,6 +143,7 @@
         <p class="toc-label">On this page</p>
         <nav aria-label="Overview sections">
           <a class="is-active" href="#how-it-works">How it works</a>
+          <a href="#share-and-pay">What customers open</a>
           <a href="#choose-path">Integration paths</a>
           <a href="#local-and-live">Mock and live mode</a>
         </nav>

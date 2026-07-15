@@ -58,6 +58,39 @@ The offer itself is offline-stable: it can be printed, cached, decoded, and
 verified without regeneration. Creating a fresh invoice still requires the
 merchant FNN; downtime produces an explicit `503 RECIPIENT_UNAVAILABLE` response.
 
+## How A Customer Pays
+
+Fiber Offers separates stable payment discovery from the one-time Fiber invoice
+that moves funds:
+
+```text
+payment link, QR, or coffee@offers.example
+  -> signed reusable offer
+  -> fresh fibt... invoice
+  -> payer Fiber node or wallet
+  -> merchant Fiber node
+```
+
+Use the payment link or its QR code for a browser checkout. A Fiber Address such
+as `coffee@offers.example` is a human-readable wallet/SDK lookup, not a web URL;
+the payer pastes it into a compatible wallet or payment surface. The wallet
+resolves `https://offers.example/.well-known/fiberoffer/coffee`, verifies the
+signed offer, and requests a fresh invoice. The returned `fibt...` value is then
+paid through the payer's own Fiber node.
+
+The merchant shares the stable address or payment link repeatedly. Customers do
+not receive the merchant API key, database password, encryption key, lifecycle
+key, or Fiber RPC credentials. A raw FNN client currently accepts the final
+`fibt...` invoice; the Fiber Offers SDK or browser flow performs the preceding
+address-to-offer-to-invoice resolution.
+
+Hosted testnet example:
+
+```text
+Fiber Address: coffee@fiber-offers.leothatguy.me
+Browser link:  https://fiber-offers.leothatguy.me/pay/0x5e76ba68ea260e2db9813fa333d2a81dc2f17cb1bb9e419825db3d329084591d
+```
+
 ## Independent Merchant Quickstart
 
 Bring an FNN on host loopback, generate private deployment secrets, start the

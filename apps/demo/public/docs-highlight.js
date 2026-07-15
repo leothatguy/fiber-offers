@@ -10,23 +10,77 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   setupDocumentationScrollSpy();
-  setupMobileSidebarActiveLink();
+  setupDocumentationNavigation();
 });
 
-function setupMobileSidebarActiveLink() {
+function setupDocumentationNavigation() {
   const sidebar = document.querySelector(".docs-sidebar");
-  const activeLink = sidebar?.querySelector('a[aria-current="page"]');
-  if (!sidebar || !activeLink) return;
+  const topbar = document.querySelector(".docs-topbar");
+  if (!sidebar || !topbar) return;
 
-  const revealActiveLink = () => {
-    if (!window.matchMedia("(max-width: 760px)").matches) return;
-    const sidebarRect = sidebar.getBoundingClientRect();
-    const linkRect = activeLink.getBoundingClientRect();
-    sidebar.scrollLeft += linkRect.left - sidebarRect.left - (sidebar.clientWidth - linkRect.width) / 2;
+  sidebar.id = "docs-navigation";
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "docs-menu-button";
+  trigger.setAttribute("aria-label", "Open documentation navigation");
+  trigger.setAttribute("aria-controls", sidebar.id);
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.innerHTML = '<span aria-hidden="true"><i></i><i></i><i></i></span>';
+  topbar.prepend(trigger);
+
+  const drawerHeader = document.createElement("div");
+  drawerHeader.className = "docs-sidebar-header";
+  drawerHeader.innerHTML = '<strong>Documentation</strong><button class="docs-sidebar-close" type="button" aria-label="Close documentation navigation"><span aria-hidden="true"></span></button>';
+  sidebar.prepend(drawerHeader);
+
+  const closeButton = drawerHeader.querySelector("button");
+  const backdrop = document.createElement("button");
+  backdrop.type = "button";
+  backdrop.className = "docs-nav-backdrop";
+  backdrop.setAttribute("aria-label", "Close documentation navigation");
+  backdrop.tabIndex = -1;
+  document.body.append(backdrop);
+
+  const mobileViewport = window.matchMedia("(max-width: 760px)");
+  const pageRegions = [topbar, document.querySelector(".docs-main"), document.querySelector(".docs-toc")].filter(Boolean);
+  let returnFocus;
+
+  const setOpen = (open, options = {}) => {
+    const shouldOpen = mobileViewport.matches && open;
+    document.body.classList.toggle("docs-nav-open", shouldOpen);
+    trigger.setAttribute("aria-expanded", String(shouldOpen));
+    trigger.setAttribute("aria-label", shouldOpen ? "Close documentation navigation" : "Open documentation navigation");
+    sidebar.inert = mobileViewport.matches && !shouldOpen;
+    backdrop.tabIndex = shouldOpen ? 0 : -1;
+    backdrop.setAttribute("aria-hidden", String(!shouldOpen));
+    for (const region of pageRegions) region.inert = shouldOpen;
+
+    if (shouldOpen) {
+      returnFocus = document.activeElement;
+      requestAnimationFrame(() => {
+        (sidebar.querySelector('a[aria-current="page"]') ?? closeButton).focus();
+      });
+    } else if (options.restoreFocus && returnFocus instanceof HTMLElement) {
+      returnFocus.focus();
+    }
   };
 
-  requestAnimationFrame(revealActiveLink);
-  window.addEventListener("resize", revealActiveLink);
+  const syncViewport = () => setOpen(false);
+
+  trigger.addEventListener("click", () => setOpen(trigger.getAttribute("aria-expanded") !== "true", { restoreFocus: true }));
+  closeButton.addEventListener("click", () => setOpen(false, { restoreFocus: true }));
+  backdrop.addEventListener("click", () => setOpen(false, { restoreFocus: true }));
+  sidebar.addEventListener("click", (event) => {
+    if (event.target.closest("a")) setOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("docs-nav-open")) {
+      setOpen(false, { restoreFocus: true });
+    }
+  });
+  mobileViewport.addEventListener("change", syncViewport);
+  syncViewport();
 }
 
 function setupDocumentationScrollSpy() {

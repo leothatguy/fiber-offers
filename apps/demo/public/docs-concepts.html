@@ -94,19 +94,19 @@
 
           <section id="discovery">
             <h2>Discovery and QR payloads</h2>
-            <p>Offer data can be shared in three forms. Each form leads to the same signed offer and resolver contract.</p>
+            <p>Offer data can be shared in three stable forms. Each form leads to the same signed offer and resolver contract; the resolver then creates a new <code>fibt...</code> invoice for each payment attempt.</p>
             <table>
-              <thead><tr><th>Form</th><th>Example</th><th>When to use it</th></tr></thead>
+              <thead><tr><th>Form</th><th>Example</th><th>How customers use it</th></tr></thead>
               <tbody>
-                <tr><td>Payment link</td><td><code>https://resolver.example/pay/0x...</code></td><td>Merchant checkout, browser, or app-to-app handoff.</td></tr>
-                <tr><td>Fiber Address</td><td><code>coffee@example.com</code></td><td>Human-friendly repeat payments and wallet address lookup.</td></tr>
-                <tr><td>Encoded offer</td><td><code>fbroffer1...</code></td><td>Wallet-level sharing and offline transport of the signed descriptor.</td></tr>
+                <tr><td>Payment link</td><td><code>https://resolver.example/pay/0x...</code></td><td>Click in a browser, include in a message, or use for an app-to-app handoff.</td></tr>
+                <tr><td>Fiber Address</td><td><code>coffee@resolver.example</code></td><td>Paste into a compatible wallet or payment surface for human-friendly repeat lookup. It is not itself a web URL.</td></tr>
+                <tr><td>Encoded offer</td><td><code>fbroffer1...</code></td><td>Scan or import into a wallet when the full signed descriptor must travel offline.</td></tr>
               </tbody>
             </table>
             <pre><code>GET /.well-known/fiberoffer/coffee
 GET /offers/0x.../qr.svg?payload=link
 GET /offers/0x.../qr.svg?payload=offer</code></pre>
-            <p>The link QR is the default because it is smaller and resolves current metadata through the payment URL. The offer QR embeds the signed offer and is helpful for wallet integration testing.</p>
+            <p>The link QR is the default because it is smaller and resolves current metadata through the payment URL. The offer QR embeds the signed offer and is helpful for wallet integration testing. Neither stable form is the final payment request: the wallet requests and pays a fresh <code>fibt...</code> invoice only after the customer confirms.</p>
           </section>
 
           <section id="single-use">

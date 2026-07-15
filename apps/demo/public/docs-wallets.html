@@ -19,6 +19,28 @@
           <h1>Wallet payment flows</h1>
           <p class="docs-lead">A wallet consumes an offer as a payment intent, verifies it, validates the payer's intended request, resolves it into one new invoice, then sends that invoice through Fiber only after the user confirms.</p>
 
+          <section id="fiber-address">
+            <h2>Resolve a Fiber Address</h2>
+            <p>A Fiber Address is wallet input, not a clickable browser URL. Parse its domain, retrieve the signed offer from the well-known endpoint, and then use the offer ID with the resolver that returned it. Browser users should receive the offer's payment link or link QR instead.</p>
+            <pre><code>import { FiberOffersClient } from "@fiber-offers/sdk";
+
+const resolver = new FiberOffersClient({
+  resolverUrl: "https://fiber-offers.leothatguy.me"
+});
+
+const offer = await resolver.resolveFiberAddress(
+  "coffee@fiber-offers.leothatguy.me"
+);
+
+const invoice = await resolver.requestInvoice(offer.offer_id, {
+  amount: "100000000",
+  asset: { asset_type: "ckb", symbol: "CKB" }
+});
+
+await payer.sendPayment(invoice.invoice);</code></pre>
+            <p>The merchant shares the address repeatedly, but every call to <code>requestInvoice</code> produces a payment-attempt-specific <code>fibt...</code> invoice. The payer never needs the merchant API key or Fiber RPC credentials.</p>
+          </section>
+
           <section id="responsibilities">
             <h2>Wallet responsibilities</h2>
             <div class="concept-grid">
@@ -118,7 +140,7 @@ if (result.status === "payment_sent") {
           <div class="docs-pagination"><a href="/docs/api"><span>Previous</span><strong>Resolver API</strong></a><a href="/docs/merchants"><span>Next</span><strong>Merchant operations</strong></a></div>
         </article>
       </main>
-      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Wallet flow sections"><a href="#responsibilities">Responsibilities</a><a href="#flow">Payment sequence</a><a href="#sdk-flow">SDK preparation</a><a href="#pricing-cases">Pricing cases</a><a href="#failure-handling">Failure handling</a></nav></aside>
+      <aside class="docs-toc"><p class="toc-label">On this page</p><nav aria-label="Wallet flow sections"><a href="#fiber-address">Fiber Address</a><a href="#responsibilities">Responsibilities</a><a href="#flow">Payment sequence</a><a href="#sdk-flow">SDK preparation</a><a href="#pricing-cases">Pricing cases</a><a href="#failure-handling">Failure handling</a></nav></aside>
     </div>
   </body>
 </html>
