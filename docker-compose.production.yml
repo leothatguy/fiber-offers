@@ -1,0 +1,15 @@
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:8787:8080"
+
+  fiber-node:
+    image: nervos/fiber:0.9.0-rc1
+    container_name: fiber-offers-fiber
+    network_mode: host
+    environment:
+      FIBER_SECRET_KEY_PASSWORD: ${FIBER_SECRET_KEY_PASSWORD}
+      RUST_LOG: ${FIBER_RUST_LOG:-info}
+    volumes:
+      - ./fiber-node:/fiber
+    restart: unless-stopped

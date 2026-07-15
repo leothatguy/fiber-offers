@@ -66,6 +66,7 @@ export function createServer(options = {}) {
   const staticRoot = options.staticRoot ?? defaultStaticRoot;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const apiKey = options.apiKey ?? process.env.RESOLVER_API_KEY;
+  const publicOperatorAccess = options.publicOperatorAccess ?? booleanEnv(process.env.RESOLVER_PUBLIC_OPERATOR_ACCESS);
   const operatorSessionTtlSeconds = positiveInteger(
     options.operatorSessionTtlSeconds ?? process.env.RESOLVER_ADMIN_SESSION_TTL_SECONDS,
     28800
@@ -84,6 +85,7 @@ export function createServer(options = {}) {
     staticRoot,
     fetchImpl,
     apiKey,
+    publicOperatorAccess,
     operatorSessionTtlSeconds,
     topologyClient,
     demoWebhookInbox,
@@ -160,6 +162,7 @@ async function handleRequest(request, response, context) {
       service: "fiber-offers-resolver",
       invoice_mode: context.invoiceAdapter.mode,
       auth_required: Boolean(context.apiKey),
+      public_operator_access: Boolean(context.publicOperatorAccess),
       dependencies
     });
     return;
@@ -172,9 +175,14 @@ async function handleRequest(request, response, context) {
 
   if (pathname === "/operator/session") {
     if (request.method === "GET") {
+      const publicSession = Boolean(context.apiKey && context.publicOperatorAccess);
+      if (publicSession && !hasValidApiCredential(request, context)) {
+        response.setHeader("set-cookie", operatorSessionHeader(context, request));
+      }
       sendJson(response, 200, {
         auth_required: Boolean(context.apiKey),
-        authenticated: !context.apiKey || hasValidApiCredential(request, context)
+        authenticated: !context.apiKey || publicSession || hasValidApiCredential(request, context),
+        public_operator_access: publicSession
       });
       return;
     }

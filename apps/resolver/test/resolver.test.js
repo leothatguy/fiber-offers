@@ -493,6 +493,26 @@ test("exchanges the API key for a signed cross-replica operator session", async 
   );
 });
 
+test("public demo access establishes an operator session without exposing the API key", async () => {
+  await withServer(
+    async (baseUrl) => {
+      const login = await fetch(`${baseUrl}/operator/session`);
+      const body = await login.json();
+      const cookie = login.headers.get("set-cookie");
+      const cookiePair = cookie.split(";")[0];
+      const offers = await fetch(`${baseUrl}/offers`, { headers: { cookie: cookiePair } });
+
+      assert.equal(body.auth_required, true);
+      assert.equal(body.authenticated, true);
+      assert.equal(body.public_operator_access, true);
+      assert.match(cookie, /^fiber_offers_operator=/);
+      assert.doesNotMatch(cookie, /test-key/);
+      assert.equal(offers.status, 200);
+    },
+    { apiKey: "test-key", publicOperatorAccess: true }
+  );
+});
+
 test("reports reachable Fiber RPC diagnostics from the invoice adapter", async () => {
   const invoiceAdapter = {
     mode: "fiber-rpc",
@@ -1274,6 +1294,7 @@ async function withServer(callback, options = {}) {
     store: new InMemoryOfferStore(),
     invoiceAdapter: options.invoiceAdapter ?? new MockInvoiceAdapter(),
     apiKey: options.apiKey,
+    publicOperatorAccess: options.publicOperatorAccess,
     topologyClient: options.topologyClient ?? false,
     fetchImpl: options.fetchImpl,
     workers: options.workers,
