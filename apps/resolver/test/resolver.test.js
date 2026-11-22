@@ -344,7 +344,9 @@ test("serializes concurrent single-use invoice requests", async () => {
 
     assert.equal(successes.length, 1);
     assert.equal(rejections.length, 1);
-    assert.equal(rejections[0].body.error.code, "OFFER_ALREADY_USED");
+    // The loser is told an unpaid invoice is outstanding, and until when.
+    assert.equal(rejections[0].body.error.code, "OFFER_INVOICE_OUTSTANDING");
+    assert.equal(rejections[0].body.error.details.outstanding_until, successes[0].body.expires_at);
     assert.equal(resolutions.body.resolutions.length, 1);
   });
 });
@@ -374,9 +376,9 @@ test("post-invoice readiness check does not count the checked invoice against a 
     assert.equal(checkOf(sameInvoice, "single_use").status, "pass");
     assert.equal(checkOf(sameInvoice, "invoice_match").status, "pass");
     assert.equal(newRequest.body.ready, false);
-    assert.equal(checkOf(newRequest, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(checkOf(newRequest, "single_use").code, "OFFER_INVOICE_OUTSTANDING");
     assert.equal(foreignInvoice.body.ready, false);
-    assert.equal(checkOf(foreignInvoice, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(checkOf(foreignInvoice, "single_use").code, "OFFER_INVOICE_OUTSTANDING");
     assert.equal(checkOf(foreignInvoice, "invoice_match").code, "INVOICE_NOT_ISSUED_FOR_OFFER");
   });
 });
@@ -401,10 +403,10 @@ test("readiness treats an idempotent retry as a replay instead of a new use", as
     assert.equal(singleRetry.body.ready, true);
     assert.equal(checkOf(singleRetry, "idempotency").status, "pass");
     assert.equal(singleNoKey.body.ready, false);
-    assert.equal(checkOf(singleNoKey, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(checkOf(singleNoKey, "single_use").code, "OFFER_INVOICE_OUTSTANDING");
     assert.equal(singleOtherRequest.body.ready, false);
     assert.equal(checkOf(singleOtherRequest, "idempotency").code, "IDEMPOTENCY_KEY_REUSED");
-    assert.equal(checkOf(singleOtherRequest, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(checkOf(singleOtherRequest, "single_use").code, "OFFER_INVOICE_OUTSTANDING");
 
     const recurring = await postJson(`${baseUrl}/demo/offers`, {
       amount: "1000",
@@ -424,6 +426,121 @@ test("readiness treats an idempotent retry as a replay instead of a new use", as
     assert.equal(checkOf(cycleNoKey, "recurrence").code, "INVALID_RECURRENCE_CYCLE");
     assert.equal(nextCycle.body.ready, true);
   });
+});
+
+test("a single-use offer is used up by payment and comes back when an invoice lapses unpaid", async () => {
+  let clock = () => Date.now();
+  const invoiceAdapter = new MockInvoiceAdapter({ invoiceTtlSeconds: 60, now: () => clock() });
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { single_use: true, amount: "1000" });
+    const offerUrl = `${baseUrl}/offers/${created.body.offer_id}`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+    const invoice = () => postJson(`${offerUrl}/invoice`, request);
+    const check = async () => (await postJson(`${offerUrl}/check`, request)).body;
+    const eventTypes = async () => (await getJson(`${offerUrl}/webhook-events`)).body.events.map((event) => event.type);
+
+    // Someone requests an invoice and never pays. Issue it as if an hour ago.
+    clock = () => Date.now() - 3600_000;
+    const abandoned = await invoice();
+    clock = () => Date.now();
+
+    // Its minute has passed, so the offer is available again.
+    assert.equal((await check()).ready, true);
+    const second = await invoice();
+    assert.deepEqual([abandoned.status, second.status], [201, 201]);
+    assert.notEqual(second.body.invoice, abandoned.body.invoice);
+    assert.deepEqual(await eventTypes(), ["invoice.created", "invoice.expired", "invoice.created"]);
+
+    // While that one is unpaid, nobody else gets an invoice.
+    const blocked = await invoice();
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.error.code, "OFFER_INVOICE_OUTSTANDING");
+    assert.equal(blocked.body.error.details.outstanding_until, second.body.expires_at);
+
+    // Payment is what uses the offer up, for good.
+    await postJson(`${offerUrl}/resolutions/${second.body.resolution_id}/status`, { status: "invoice_paid" });
+    const used = await invoice();
+    const usedCheck = await check();
+    assert.equal(used.status, 409);
+    assert.equal(used.body.error.code, "OFFER_ALREADY_USED");
+    assert.equal(usedCheck.ready, false);
+    assert.equal(usedCheck.checks.find((item) => item.id === "single_use").code, "OFFER_ALREADY_USED");
+  }, { invoiceAdapter });
+});
+
+test("the readiness check and the invoice endpoint agree after every outcome", async () => {
+  const outcomes = [
+    { status: "invoice_failed", available: true },
+    { status: "invoice_expired", available: true },
+    { status: "invoice_cancelled", available: true },
+    { status: "invoice_paid", available: false, code: "OFFER_ALREADY_USED" },
+    { status: undefined, available: false, code: "OFFER_INVOICE_OUTSTANDING" }
+  ];
+  for (const outcome of outcomes) {
+    await withServer(async (baseUrl) => {
+      const created = await postJson(`${baseUrl}/demo/offers`, { single_use: true, amount: "1000" });
+      const offerUrl = `${baseUrl}/offers/${created.body.offer_id}`;
+      const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+      const first = await postJson(`${offerUrl}/invoice`, request);
+      if (outcome.status) {
+        await postJson(`${offerUrl}/resolutions/${first.body.resolution_id}/status`, { status: outcome.status });
+      }
+
+      const readiness = await postJson(`${offerUrl}/check`, request);
+      const next = await postJson(`${offerUrl}/invoice`, request);
+      const label = outcome.status ?? "still unpaid";
+
+      assert.equal(readiness.body.ready, outcome.available, label);
+      assert.equal(next.status, outcome.available ? 201 : 409, label);
+      if (!outcome.available) {
+        assert.equal(next.body.error.code, outcome.code, label);
+        assert.equal(readiness.body.checks.find((item) => item.id === "single_use").code, outcome.code, label);
+      }
+    });
+  }
+});
+
+test("for a live invoice the node decides whether a single-use offer is free again", async () => {
+  const nodeId = "02" + "6".repeat(64);
+  let nodeStatus = "Open";
+  let minted = 0;
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    invoiceTtlSeconds: 60,
+    // The resolver's clock is an hour ahead: by its reckoning every invoice has lapsed.
+    now: () => Date.now() - 3600_000,
+    client: {
+      async call(method) {
+        if (method === "node_info") return { pubkey: nodeId };
+        if (method === "new_invoice") {
+          minted += 1;
+          return { invoice_address: `fibt1live${minted}`, invoice: { data: { payment_hash: "0x" + String(minted).padStart(64, "0") } } };
+        }
+        return { invoice_address: "fibt1live", invoice: { amount: "0x3e8", currency: "Fibt" }, status: nodeStatus };
+      }
+    }
+  });
+
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { single_use: true, amount: "1000" });
+    const invoiceUrl = `${baseUrl}/offers/${created.body.offer_id}/invoice`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+    const first = await postJson(invoiceUrl, request);
+
+    // The node still has it open, so it could yet be paid: no second invoice.
+    const whileOpen = await postJson(invoiceUrl, request);
+    // The node says it expired: released.
+    nodeStatus = "Expired";
+    const afterExpiry = await postJson(invoiceUrl, request);
+    // The node says the replacement was paid, before any sync ran: used up.
+    nodeStatus = "Paid";
+    const afterPayment = await postJson(invoiceUrl, request);
+
+    assert.equal(first.status, 201);
+    assert.equal(whileOpen.body.error.code, "OFFER_INVOICE_OUTSTANDING");
+    assert.equal(afterExpiry.status, 201);
+    assert.equal(afterPayment.body.error.code, "OFFER_ALREADY_USED");
+    assert.equal(minted, 2);
+  }, { invoiceAdapter });
 });
 
 test("resolves a Fiber Address to its encoded offer", async () => {

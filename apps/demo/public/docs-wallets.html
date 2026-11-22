@@ -134,7 +134,7 @@ if (result.status === "payment_sent") {
                 <tr><td>Fiber send failure</td><td>Keep the raw node error for diagnostics, but present the normalized failure and suggest the next action.</td></tr>
               </tbody>
             </table>
-            <p>A single-use offer is also safe under concurrent use: if another payer already caused an invoice to be created, the resolver rejects subsequent attempts with <code>OFFER_ALREADY_USED</code>.</p>
+            <p>A single-use offer is also safe under concurrent use. While another payer's invoice is unpaid, the resolver answers <code>OFFER_INVOICE_OUTSTANDING</code> with the time it lapses, and the offer becomes available again if it is not paid. Once the offer has been paid it answers <code>OFFER_ALREADY_USED</code>.</p>
           </section>
 
           <div class="docs-pagination"><a href="/docs/api"><span>Previous</span><strong>Resolver API</strong></a><a href="/docs/merchants"><span>Next</span><strong>Merchant operations</strong></a></div>

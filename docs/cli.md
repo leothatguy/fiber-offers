@@ -181,7 +181,7 @@ Useful creation options:
 | `--custom-seconds N` | Cycle length for `custom_seconds` |
 | `--network NETWORK` | `mainnet`, `testnet`, or `dev`. Defaults to the Fiber node's own network when it follows a public CKB chain, otherwise `testnet`. A value that contradicts the node is refused with `OFFER_NETWORK_MISMATCH`. |
 | `--expiry UNIX_SECONDS` | Optional offer expiry |
-| `--single-use` | Permit only one invoice resolution |
+| `--single-use` | The offer can be paid once. An unpaid invoice holds it until that invoice expires |
 | `--username NAME` | Bind a Fiber Address username during registration |
 | `--local-only` | Create and save without registering |
 

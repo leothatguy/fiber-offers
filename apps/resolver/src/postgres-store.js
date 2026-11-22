@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
+import { assertInvoiceCapacity } from "./resolution-rules.js";
 import { normalizeUsername } from "./store.js";
 
 export class PostgresOfferStore {
@@ -149,15 +150,21 @@ export class PostgresOfferStore {
         }
       }
 
-      const priorResult = await client.query(
-        "SELECT * FROM fiber_resolutions WHERE offer_id = $1 AND status <> 'invoice_failed' ORDER BY created_at",
-        [offerId]
-      );
-      const prior = priorResult.rows.map(resolutionRow);
-      if (entry.offer.single_use && prior.length > 0) {
-        throw storeError("single-use offer already produced an invoice", "OFFER_ALREADY_USED", 409);
-      }
-      const recurrence = recurrenceReservation(entry.offer, input.request, prior);
+      // Only single-use and recurring offers are limited by what was issued
+      // before; a plain reusable offer needs no history at all. Resolutions
+      // that ended unpaid never count, so they are not even read.
+      const limited = entry.offer.single_use || entry.offer.recurrence;
+      const prior = limited
+        ? (
+            await client.query(
+              `SELECT * FROM fiber_resolutions
+               WHERE offer_id = $1 AND status NOT IN ('invoice_expired', 'invoice_failed', 'invoice_cancelled')
+               ORDER BY created_at`,
+              [offerId]
+            )
+          ).rows.map(resolutionRow)
+        : [];
+      const recurrence = assertInvoiceCapacity(entry.offer, input.request, prior);
       const now = new Date().toISOString();
       const id = `res_${randomUUID()}`;
       const history = [{ status: "invoice_pending", at: now, source: "resolver" }];
@@ -441,38 +448,6 @@ export class PostgresOfferStore {
       client.release();
     }
   }
-}
-
-function recurrenceReservation(offer, request, prior) {
-  if (!offer.recurrence) {
-    if (request.recurrence_cycle !== undefined) {
-      throw storeError("offer does not define recurring payment terms", "RECURRENCE_NOT_CONFIGURED", 400);
-    }
-    return undefined;
-  }
-  const terms = offer.recurrence;
-  if (BigInt(request.amount) !== BigInt(terms.amount)) {
-    throw storeError(`recurring cycle amount must equal ${terms.amount}`, "RECURRENCE_AMOUNT_MISMATCH", 400);
-  }
-  const cycles = prior.filter((resolution) => resolution.recurrence);
-  const expected = cycles.length + 1;
-  const requested = request.recurrence_cycle === undefined ? expected : Number(request.recurrence_cycle);
-  if (!Number.isSafeInteger(requested) || requested !== expected) {
-    throw storeError(`next recurrence cycle must be ${expected}`, "INVALID_RECURRENCE_CYCLE", 409);
-  }
-  if (terms.cap_cycles !== undefined && expected > terms.cap_cycles) {
-    throw storeError("recurring payment cycle cap has been reached", "RECURRENCE_CYCLE_CAP_REACHED", 409);
-  }
-  const reserved = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  if (terms.spending_cap_total !== undefined && reserved + BigInt(terms.amount) > BigInt(terms.spending_cap_total)) {
-    throw storeError("recurring payment spending cap has been reached", "RECURRENCE_SPENDING_CAP_REACHED", 409);
-  }
-  return clean({
-    cycle: expected,
-    interval: terms.interval,
-    scheduled_for: request.scheduled_for,
-    approval_id: request.approval_id
-  });
 }
 
 function offerRow(row) {

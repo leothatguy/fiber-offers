@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { consumingResolutions } from "./resolution-rules.js";
+import { assertInvoiceCapacity } from "./resolution-rules.js";
 
 export class InMemoryOfferStore {
   constructor(initialState = undefined) {
@@ -147,10 +147,7 @@ export class InMemoryOfferStore {
       }
     }
 
-    const prior = consumingResolutions(records);
-    if (entry.offer.single_use && prior.length > 0) {
-      throw storeError("single-use offer already produced an invoice", "OFFER_ALREADY_USED", 409);
-    }
+    const recurrence = assertInvoiceCapacity(entry.offer, input.request, records);
 
     const createdAt = new Date().toISOString();
     const record = {
@@ -159,7 +156,7 @@ export class InMemoryOfferStore {
       status: "invoice_pending",
       amount: input.request.amount,
       asset: input.request.asset,
-      recurrence: recurrenceReservation(entry.offer, input.request, prior),
+      recurrence,
       idempotency_key: input.idempotencyKey,
       idempotency_fingerprint: input.idempotencyFingerprint,
       reservation_expires_at: new Date(now + 120000).toISOString(),
@@ -567,36 +564,4 @@ function clone(value) {
 function webhookSecretHint(secret) {
   if (!secret) return undefined;
   return `${secret.slice(0, 6)}...${secret.slice(-4)}`;
-}
-
-function recurrenceReservation(offer, request, prior) {
-  if (!offer.recurrence) {
-    if (request.recurrence_cycle !== undefined) {
-      throw storeError("offer does not define recurring payment terms", "RECURRENCE_NOT_CONFIGURED", 400);
-    }
-    return undefined;
-  }
-  const terms = offer.recurrence;
-  if (BigInt(request.amount) !== BigInt(terms.amount)) {
-    throw storeError(`recurring cycle amount must equal ${terms.amount}`, "RECURRENCE_AMOUNT_MISMATCH", 400);
-  }
-  const cycles = prior.filter((resolution) => resolution.recurrence);
-  const expected = cycles.length + 1;
-  const requested = request.recurrence_cycle === undefined ? expected : Number(request.recurrence_cycle);
-  if (!Number.isSafeInteger(requested) || requested !== expected) {
-    throw storeError(`next recurrence cycle must be ${expected}`, "INVALID_RECURRENCE_CYCLE", 409);
-  }
-  if (terms.cap_cycles !== undefined && expected > terms.cap_cycles) {
-    throw storeError("recurring payment cycle cap has been reached", "RECURRENCE_CYCLE_CAP_REACHED", 409);
-  }
-  const reserved = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  if (terms.spending_cap_total !== undefined && reserved + BigInt(terms.amount) > BigInt(terms.spending_cap_total)) {
-    throw storeError("recurring payment spending cap has been reached", "RECURRENCE_SPENDING_CAP_REACHED", 409);
-  }
-  return {
-    cycle: expected,
-    interval: terms.interval,
-    ...(request.scheduled_for ? { scheduled_for: request.scheduled_for } : {}),
-    ...(request.approval_id ? { approval_id: request.approval_id } : {})
-  };
 }

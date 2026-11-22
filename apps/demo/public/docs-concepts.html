@@ -111,7 +111,7 @@ GET /offers/0x.../qr.svg?payload=offer</code></pre>
 
           <section id="single-use">
             <h2>Reusable and single-use behavior</h2>
-            <p>Most offers are reusable: every valid invoice request receives a newly created invoice. For a one-time authorization, set <code>single_use: true</code>. The resolver serializes invoice creation per offer so simultaneous requests cannot produce multiple invoices from a single-use offer.</p>
+            <p>Most offers are reusable: every valid invoice request receives a newly created invoice. For a one-time authorization, set <code>single_use: true</code>. Such an offer is used up when it is paid. Only one invoice can be outstanding at a time, so simultaneous requests cannot both be issued one; if that invoice expires unpaid, the offer becomes available again.</p>
             <div class="callout">
               <strong>Recurring offers</strong>
               <span>When recurrence metadata is used, the protocol requires either a cycle cap or a total spending cap. This prevents an unbounded authorization from being represented as a recurring offer.</span>

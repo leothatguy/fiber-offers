@@ -88,7 +88,7 @@ Fiber node identity and must remain private.
 | `amount_max` | Optional maximum integer amount in asset base units |
 | `recurrence` | Optional payer-owned recurrence policy |
 | `expiry` | Optional Unix timestamp after which resolution is rejected |
-| `single_use` | Whether only one invoice resolution may be created |
+| `single_use` | Whether the offer can be paid only once. Payment uses it up; an invoice that lapses unpaid does not |
 | `metadata` | Optional application metadata covered by the signature |
 | `extensions` / `x_*` | Signed extension data for compatible applications |
 | `offer_id` | SHA-256 ID derived from the canonical unsigned content |

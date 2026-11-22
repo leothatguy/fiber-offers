@@ -30,12 +30,16 @@ test("SDK payOffer completes a payment on a single-use offer", async () => {
     const flow = new FiberPaymentFlowClient({ resolverClient: client, paymentClient: payer });
 
     const paid = await flow.payOffer(created.offer_id, { amount: "1000", asset }, { execute: true });
+    // Until the resolver learns of the payment, the offer is held, not used up.
+    const beforeSettlement = await flow.payOffer(created.offer_id, { amount: "1000", asset }, { execute: true });
+    await client.updateResolutionStatus(created.offer_id, paid.invoice.resolution_id, { status: "invoice_paid" });
     const secondAttempt = await flow.payOffer(created.offer_id, { amount: "1000", asset }, { execute: true });
 
     assert.equal(paid.status, "payment_sent");
     assert.equal(paid.ok, true);
     assert.equal(payer.sent.length, 1);
     assert.equal(payer.sent[0], paid.invoice.invoice);
+    assert.equal(beforeSettlement.failure.code, "OFFER_INVOICE_OUTSTANDING");
     assert.equal(secondAttempt.status, "blocked_before_invoice");
     assert.equal(secondAttempt.failure.code, "OFFER_ALREADY_USED");
     assert.equal(payer.sent.length, 1);

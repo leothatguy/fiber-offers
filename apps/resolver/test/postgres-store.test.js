@@ -44,7 +44,7 @@ test("PostgreSQL store serializes single-use reservations across pools", { skip:
   const rejected = attempts.filter((attempt) => attempt.status === "rejected");
   assert.equal(fulfilled.length, 1);
   assert.equal(rejected.length, 1);
-  assert.equal(rejected[0].reason.code, "OFFER_ALREADY_USED");
+  assert.equal(rejected[0].reason.code, "OFFER_INVOICE_OUTSTANDING");
 
   const reservation = fulfilled[0].value.record;
   const finalized = await primary.finalizeInvoiceReservation(offer.offer_id, reservation.id, {
@@ -54,6 +54,46 @@ test("PostgreSQL store serializes single-use reservations across pools", { skip:
   });
   assert.equal(finalized.status, "invoice_created");
   assert.equal(finalized.reservation_expires_at, undefined);
+
+  // The unpaid invoice lapses: the offer is free for the next payer.
+  await primary.transitionResolution(offer.offer_id, finalized.id, { from: "invoice_created", status: "invoice_expired" });
+  const next = await replica.reserveInvoiceAttempt(offer.offer_id, input("request-c"));
+  const paid = await replica.finalizeInvoiceReservation(offer.offer_id, next.record.id, {
+    invoice: "fibt1postgres2",
+    payment_hash: "0x03",
+    mode: "mock"
+  });
+  // Paid: used up for good, on every replica.
+  await replica.transitionResolution(offer.offer_id, paid.id, { from: "invoice_created", status: "invoice_paid" });
+  await assert.rejects(
+    () => primary.reserveInvoiceAttempt(offer.offer_id, input("request-d")),
+    (error) => error.code === "OFFER_ALREADY_USED" && error.status === 409
+  );
+});
+
+test("PostgreSQL lets a recurring cycle be issued again after its invoice lapsed", { skip: !enabled }, async () => {
+  const offer = signedOffer({ recurrence: { interval: "daily", amount: "1000", cap_cycles: 2 } });
+  await primary.upsertOffer(offer, encodeOffer(offer));
+  const cycle = (number) => ({ request: { amount: "1000", asset: offer.assets[0], recurrence_cycle: number } });
+  const issue = async (store, number, hash) => {
+    const reservation = await store.reserveInvoiceAttempt(offer.offer_id, cycle(number));
+    return store.finalizeInvoiceReservation(offer.offer_id, reservation.record.id, {
+      invoice: `fibt1cycle${hash}`,
+      payment_hash: hash,
+      mode: "mock"
+    });
+  };
+
+  const lapsed = await issue(primary, 1, "0x10");
+  await primary.transitionResolution(offer.offer_id, lapsed.id, { from: "invoice_created", status: "invoice_expired" });
+  // Cycle 1 again, on the other replica: the lapsed one no longer counts.
+  const again = await issue(replica, 1, "0x11");
+
+  assert.equal(again.recurrence.cycle, 1);
+  await assert.rejects(
+    () => primary.reserveInvoiceAttempt(offer.offer_id, cycle(1)),
+    (error) => error.code === "INVALID_RECURRENCE_CYCLE"
+  );
 });
 
 test("PostgreSQL applies a racing status change exactly once", { skip: !enabled }, async () => {

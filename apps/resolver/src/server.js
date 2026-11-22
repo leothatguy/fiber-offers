@@ -22,9 +22,12 @@ import { assertProductionConfiguration } from "./production-guard.js";
 import { renderOfferQrSvg } from "./qr.js";
 import { RedisRateLimiter } from "./redis-rate-limiter.js";
 import {
+  assertSingleUseCapacity,
   canTransition,
-  consumingResolutions,
+  countedResolutions,
+  isConsumed,
   PUBLIC_RESOLUTION_STATUSES,
+  recurrenceReservation,
   resolutionUnderCheck,
   TERMINAL_RESOLUTION_STATUSES
 } from "./resolution-rules.js";
@@ -672,6 +675,9 @@ async function resolveInvoice(entry, body, context, origin, options = {}) {
       approval_id: body?.approval_id
     };
     const idempotencyFingerprint = options.idempotencyKey ? invoiceRequestFingerprint(request) : undefined;
+    // Whether this offer can issue another invoice depends on what became of
+    // the earlier ones, so their outcomes are brought up to date first.
+    await settleOpenResolutions(context, entry, origin);
     const reservation = await context.store.reserveInvoiceAttempt(entry.offer.offer_id, {
       request,
       idempotencyKey: options.idempotencyKey,
@@ -967,6 +973,38 @@ async function settleOverdueResolutions(context, offerId, origin, resolutions = 
   return expired;
 }
 
+// Before deciding whether a limited offer (single-use or recurring) can issue
+// another invoice, find out what became of the invoices still open on it: paid
+// uses the offer up, expired or cancelled gives the capacity back. A live
+// invoice is settled by asking the node; a mock one by the clock. A plain
+// reusable offer is not limited by its history, so nothing is asked.
+async function settleOpenResolutions(context, entry, origin) {
+  if (!entry.offer.single_use && !entry.offer.recurrence) return;
+  const offerId = entry.offer.offer_id;
+  const open = (await context.store.getResolutions(offerId)).filter((record) =>
+    ["invoice_created", "invoice_received"].includes(record.status)
+  );
+  if (open.length === 0) return;
+
+  const overdue = [];
+  for (const record of open) {
+    if (!canSyncFromInvoiceSource(context, record)) {
+      overdue.push(record);
+      continue;
+    }
+    try {
+      await syncResolutionFromInvoiceSource(context, offerId, record.id, origin);
+    } catch (error) {
+      const failure = classifyInvoiceFailure(error);
+      throw httpError(failure.status, failure.code, failure.message, {
+        retryable: failure.retryable,
+        ...(failure.cause_code !== undefined ? { cause_code: failure.cause_code } : {})
+      });
+    }
+  }
+  if (overdue.length > 0) await settleOverdueResolutions(context, offerId, origin, overdue);
+}
+
 function canSyncFromInvoiceSource(context, record) {
   return (
     typeof context.invoiceAdapter.syncInvoice === "function" &&
@@ -1072,6 +1110,16 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
     checks.push(failCheck("request", "Request cannot be checked until the offer signature is valid", "SIGNATURE_REQUIRED"));
   }
 
+  // Bring earlier invoices up to date first, as the invoice endpoint does, so
+  // the two never disagree. If the node cannot be asked, the check carries on
+  // with what is stored and says so.
+  try {
+    await settleOpenResolutions(context, entry, origin);
+  } catch (error) {
+    checks.push(
+      warnCheck("settlement", "Earlier invoices could not be brought up to date with the Fiber node", error.code)
+    );
+  }
   const priorResolutions = await context.store.getResolutions(entry.offer.offer_id);
   const suppliedInvoice = invoiceFromReadinessBody(body);
   // The check may be about an invoice this offer already issued (the post-invoice
@@ -1117,13 +1165,21 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
     }
   }
 
-  const otherUses = consumingResolutions(priorResolutions, { excludeId: replayAllowed ? current.id : undefined });
-  if (entry.offer.single_use && otherUses.length > 0) {
-    checks.push(failCheck("single_use", "Single-use offer has already produced an invoice", "OFFER_ALREADY_USED"));
-  } else if (entry.offer.single_use && replayAllowed) {
-    checks.push(passCheck("single_use", "This is the invoice issued for this single-use offer"));
-  } else {
-    checks.push(passCheck("single_use", "Offer can produce another invoice"));
+  // The same rules the stores apply when reserving an invoice, minus the
+  // resolution this check is about.
+  const excluding = { excludeId: replayAllowed ? current.id : undefined };
+  try {
+    assertSingleUseCapacity(entry.offer, priorResolutions, excluding);
+    checks.push(
+      passCheck(
+        "single_use",
+        entry.offer.single_use && replayAllowed
+          ? "This is the invoice issued for this single-use offer"
+          : "Offer can produce another invoice"
+      )
+    );
+  } catch (error) {
+    checks.push(failCheck("single_use", error.message, error.code));
   }
 
   if (entry.offer.recurrence) {
@@ -1131,7 +1187,7 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
       if (replayAllowed && current.recurrence) {
         assertReplayedRecurrenceCycle(current, body);
       } else if (!suppliedInvoice) {
-        validateRecurrenceCycle(entry.offer, body, priorResolutions);
+        recurrenceReservation(entry.offer, { ...body, amount: request?.amount ?? body?.amount }, priorResolutions, excluding);
       }
       checks.push(passCheck("recurrence", "Recurring cycle is within the approved caps"));
     } catch (error) {
@@ -2210,49 +2266,6 @@ function assertOfferActive(entry) {
   if (entry.disabled) throw httpError(410, "OFFER_REVOKED", "offer has been revoked");
 }
 
-function validateRecurrenceCycle(offer, body, priorResolutions) {
-  if (!offer.recurrence) {
-    if (body?.recurrence_cycle !== undefined) {
-      throw httpError(400, "RECURRENCE_NOT_CONFIGURED", "offer does not define recurring payment terms");
-    }
-    return undefined;
-  }
-
-  const recurrence = offer.recurrence;
-  const amount = String(body?.amount ?? "");
-  if (!/^[1-9][0-9]*$/.test(amount)) {
-    throw httpError(400, "INVALID_AMOUNT", "recurring cycle amount must be a positive integer string");
-  }
-  if (BigInt(amount) !== BigInt(recurrence.amount)) {
-    throw httpError(400, "RECURRENCE_AMOUNT_MISMATCH", `recurring cycle amount must equal ${recurrence.amount}`);
-  }
-
-  const cycles = priorResolutions.filter((resolution) => resolution.recurrence);
-  const expectedCycle = cycles.length + 1;
-  const requestedCycle = body?.recurrence_cycle === undefined ? expectedCycle : Number(body.recurrence_cycle);
-  if (!Number.isSafeInteger(requestedCycle) || requestedCycle <= 0 || requestedCycle !== expectedCycle) {
-    throw httpError(409, "INVALID_RECURRENCE_CYCLE", `next recurrence cycle must be ${expectedCycle}`);
-  }
-  if (recurrence.cap_cycles !== undefined && expectedCycle > recurrence.cap_cycles) {
-    throw httpError(409, "RECURRENCE_CYCLE_CAP_REACHED", "recurring payment cycle cap has been reached");
-  }
-
-  const reservedTotal = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  if (
-    recurrence.spending_cap_total !== undefined &&
-    reservedTotal + BigInt(recurrence.amount) > BigInt(recurrence.spending_cap_total)
-  ) {
-    throw httpError(409, "RECURRENCE_SPENDING_CAP_REACHED", "recurring payment spending cap has been reached");
-  }
-
-  return {
-    cycle: expectedCycle,
-    interval: recurrence.interval,
-    scheduled_for: body?.scheduled_for,
-    approval_id: body?.approval_id
-  };
-}
-
 // A replayed recurring request must name the cycle its resolution was issued for.
 function assertReplayedRecurrenceCycle(resolution, body) {
   if (body?.recurrence_cycle === undefined) return;
@@ -2271,8 +2284,9 @@ async function recurrenceStatus(entry, store) {
     return { offer_id: entry.offer.offer_id, enabled: false, revoked: Boolean(entry.disabled) };
   }
   const resolutions = await store.getResolutions(entry.offer.offer_id);
-  const cycles = resolutions.filter((resolution) => resolution.recurrence);
-  const paid = cycles.filter((resolution) => effectiveResolutionStatus(resolution) === "invoice_paid");
+  // Cycles that ended unpaid were released and are not counted.
+  const cycles = countedResolutions(resolutions).filter((resolution) => resolution.recurrence);
+  const paid = cycles.filter(isConsumed);
   const reservedTotal = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
   const paidTotal = paid.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
   const capRemaining = recurrence.spending_cap_total === undefined

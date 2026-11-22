@@ -88,6 +88,18 @@ A payer that skips steps 3 and 4 can be made to pay anyone, or to pay for someon
 
 Proof that an offer was paid is the node-signed invoice, whose description names the offer and resolution, together with the payment preimage for its payment hash. Both are verifiable by anyone without trusting the resolver. `GET /offers/:offer_id/resolutions/:resolution_id/receipt.json` is the resolver's own record of the same payment. It is convenient for bookkeeping and is not signed, so on its own it proves only what the resolver asserts.
 
+## Single-Use Offers
+
+An offer with `single_use: true` can be paid once.
+
+- **Payment uses it up.** Once a resolution reaches `invoice_paid`, every later invoice request is refused with `409 OFFER_ALREADY_USED`.
+- **An unpaid invoice only holds it.** While an invoice is outstanding, other requests are refused with `409 OFFER_INVOICE_OUTSTANDING`; `error.details.outstanding_until` says when it lapses. Only one invoice can be outstanding, so two payers can never both be issued one.
+- **An invoice that ends unpaid releases it.** After `invoice_expired`, `invoice_cancelled` or `invoice_failed`, the next request is issued a new invoice. Requesting an invoice and not paying therefore costs the merchant nothing lasting.
+
+Before answering, the resolver brings the offer's open invoices up to date. For a live invoice it asks the node, which decides whether the invoice was paid, expired or is still open; the resolver's own clock is never enough to release an invoice the node could still accept. `POST /offers/:offer_id/check` applies the same rules, so it never disagrees with the invoice endpoint.
+
+Recurring offers follow the same rule per cycle: a cycle is used up when its invoice is paid, and released if the invoice ends unpaid.
+
 ## Revocation
 
 `DELETE /offers/:offer_id` accepts a `fiberoffer-revocation-v1` proof containing the offer ID, node ID, timestamp, optional reason, and Ed25519 signature from the offer lifecycle key. Revoked offers return `410 OFFER_REVOKED` and cannot create more invoices.
