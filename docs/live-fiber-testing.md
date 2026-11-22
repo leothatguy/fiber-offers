@@ -294,55 +294,61 @@ fnn-cli -u "$MERCHANT_FIBER_RPC_URL" channel accept_channel \
   --funding-amount "$ACCEPT_FUNDING_AMOUNT"
 ```
 
-## 8. Run A Payer-To-Merchant E2E Check
+## 8. Run The Live End-To-End Check
 
-With merchant and payer Fiber nodes available, the E2E check creates one static
-offer and, by default, constructs two independent payer client sessions. Each
-session requests its own invoice, dry-runs the route, sends payment, polls
-`get_payment`, polls merchant `get_invoice`, and syncs the resolver status. The
-check fails unless both invoices and payment hashes are distinct and both
-resolver records reach `invoice_paid`.
+`npm run fiber:e2e-check` proves the whole path on real nodes. It starts a
+resolver in its own process, wired to the merchant node, and drives it only
+through the public SDK with the payer node. Nothing in it is mocked, and every
+case sends real payments.
 
 ```bash
-RESOLVER_URL=http://127.0.0.1:8787 \
-MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
-PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
+npm run fiber:local -- start
+DATABASE_URL=postgresql:///fiber_offers_test?host=/var/run/postgresql \
 npm run fiber:e2e-check
 ```
 
-Set `FIBER_E2E_OFFER_ID=0x...` to pay an offer already created by the merchant
-CLI. When it is unset, the check creates a disposable E2E offer. Each run uses
-fresh idempotency keys, so rerunning against the same reusable offer still
-creates new invoices.
+| Case | What it proves |
+| --- | --- |
+| `reusable-ckb` | One offer is paid twice; the invoices and payment hashes differ; the payer's `get_payment` says `Success`, the merchant's `get_invoice` says `Paid`, and the resolver records `invoice_paid` |
+| `token-invoice` | A token invoice is minted with the token's type script and the payer node verifies its hash against the offer |
+| `single-use` | An unpaid invoice holds the offer, a lapsed one releases it, and payment uses it up |
+| `recurring-two-subscribers` | Two subscriptions each pay their own cycles and reach their own cap; a forged cycle request is refused |
+| `invoice-expiry` | An unpaid invoice becomes `Expired` on the node and `invoice_expired` in the resolver; the SDK refuses to pay it |
+| `revocation` | A signed revocation turns invoice requests into `410 OFFER_REVOKED` |
+| `tamper-rejection` | A resolver that substitutes another order's genuine invoice, or another offer, is caught by the SDK and nothing is paid |
+| `idempotent-retry` | A payment that fails in transit is retried on the same invoice |
+| `two-replicas-single-use` | Two resolver replicas sharing PostgreSQL issue exactly one invoice under four concurrent requests |
+| `fiber-address` | `user@host` resolves to the registered, verified offer |
+| `webhook-delivery` | `invoice.created` and `invoice.paid` reach a merchant endpoint with valid HMAC signatures |
+| `network-mismatch` | An offer signed for another network is refused |
 
-Set `FIBER_E2E_PAYMENT_COUNT` to change the number of independent client
-sessions. When multiple funded payer nodes are available, provide their RPC URLs
-through `PAYER_FIBER_RPC_URLS` as a comma-separated list; otherwise each session
-uses a fresh client instance against `PAYER_FIBER_RPC_URL`.
+A case that cannot run in the current setup is reported as skipped with its
+reason: `two-replicas-single-use` without `DATABASE_URL`, and the payment half of
+`token-invoice` without a token channel. The command exits non-zero if any case
+fails.
 
-To only test route construction without sending a payment:
+Add `--evidence <path>` to save a transcript of the run: the git commit, each
+node's version and identity, and for every case the offer IDs, invoices, payment
+hashes and what each side reported. The transcript of the last recorded run is
+committed as [`docs/evidence/live-fiber-run.json`](evidence/live-fiber-run.json).
 
 ```bash
-FIBER_E2E_DRY_RUN_ONLY=true \
-RESOLVER_URL=http://127.0.0.1:8787 \
-MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
-PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
-npm run fiber:e2e-check
+npm run fiber:e2e-check -- --evidence docs/evidence/live-fiber-run.json
 ```
 
-Optional route parameters:
+Options:
 
 ```bash
-FIBER_E2E_AMOUNT=1000 \
-FIBER_E2E_PAYMENT_COUNT=2 \
-FIBER_E2E_TRAMPOLINE_HOPS=<comma-separated-pubkeys> \
-FIBER_E2E_MAX_FEE_AMOUNT=100000 \
-FIBER_E2E_DRY_RUN_ONLY=true \
-RESOLVER_URL=http://127.0.0.1:8787 \
-MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 \
-PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 \
-npm run fiber:e2e-check
+MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227   # default
+PAYER_FIBER_RPC_URL=http://127.0.0.1:8229      # default
+FIBER_E2E_AMOUNT=100000000                     # shannons per payment (1 CKB)
+FIBER_E2E_INVOICE_TTL=10                       # seconds; the expiry cases wait this long
+FIBER_E2E_DRY_RUN_ONLY=true                    # verify and dry-run every invoice, send nothing
+FIBER_E2E_MAX_FEE_AMOUNT=100000
+FIBER_E2E_TRAMPOLINE_HOPS=<comma-separated-pubkeys>
 ```
+
+A full run makes nine payments of `FIBER_E2E_AMOUNT` and takes about a minute.
 
 The command prints channel, peer, direct-channel, common-counterparty, and `failure` diagnostics if the route or payment fails. `ROUTE_OUTBOUND_LIQUIDITY_UNUSABLE` usually means Fiber could not find an online route from the payer to the merchant invoice, even if the payer has non-zero local channel balances. Check `route_context.payer_offline_channel_counterparties`, `route_context.offline_common_counterparties`, pending TLCs, and whether there is a direct ready channel.
 
