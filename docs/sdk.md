@@ -212,6 +212,19 @@ if (prepared.ok) {
 Real payment is deliberately opt-in. Calling `payOffer` without `execute: true`
 returns `execute_required` instead of sending funds.
 
+`payment_sent` means the payer node accepted the payment, not that it arrived:
+Fiber reports it as `Created` or `Inflight` and it can still fail. Pass
+`confirm: true` to wait for the outcome:
+
+```js
+const paid = await flow.payOffer(offer, request, { execute: true, confirm: true });
+// paid.status: "payment_succeeded" | "payment_failed" | "payment_pending"
+```
+
+`payment_pending` means it had not settled within `confirmTimeoutMs` (default
+60 seconds); call `flow.confirmPayment(paid.payment_hash)` later. A failed
+payment moved no funds and can be retried with the same idempotency key.
+
 ### What the flow verifies
 
 The resolver is treated as untrusted. Before any funds move, the flow checks:

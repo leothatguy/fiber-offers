@@ -92,6 +92,39 @@ test("SDK payOffer retries a recurring cycle after a transport failure", async (
   });
 });
 
+test("SDK confirms a payment with the payer node before reporting it paid", async () => {
+  await withResolver(async ({ client, ledger }) => {
+    const created = await client.demoCreateOffer({ amount_min: "1000", amount_max: "5000" });
+    const payer = fakePayerNode({ ledger });
+    const flow = new FiberPaymentFlowClient({ resolverClient: client, paymentClient: payer });
+    const pay = (statuses, options = {}) => {
+      payer.statuses = statuses;
+      return flow.payOffer(
+        created.offer,
+        { amount: "1000", asset },
+        { execute: true, confirm: true, confirmPollIntervalMs: 1, sleep: async () => {}, ...options }
+      );
+    };
+
+    const succeeded = await pay(["Inflight", "Success"]);
+    const failed = await pay(["Inflight", "Failed"]);
+    // Never settles within the deadline: reported as pending, not as paid.
+    const pending = await pay(["Inflight"], { confirmTimeoutMs: 0 });
+    // Without confirm the result still says only that the payment was sent.
+    payer.statuses = ["Success"];
+    const unconfirmed = await flow.payOffer(created.offer, { amount: "1000", asset }, { execute: true });
+    const later = await flow.confirmPayment(unconfirmed.payment_hash);
+
+    assert.deepEqual([succeeded.ok, succeeded.status, succeeded.next_action], [true, "payment_succeeded", "done"]);
+    assert.deepEqual([failed.ok, failed.status, failed.failure.code], [false, "payment_failed", "PAYMENT_FAILED"]);
+    assert.match(failed.failure.summary, /no route/);
+    assert.deepEqual([pending.ok, pending.status, pending.next_action], [true, "payment_pending", "poll_payment_status"]);
+    assert.equal(unconfirmed.status, "payment_sent");
+    assert.equal(later.status, "payment_succeeded");
+    assert.equal(payer.sent.length, 4);
+  });
+});
+
 test("SDK verifies the invoice against the signed offer before paying", async () => {
   await withResolver(async ({ client, ledger }) => {
     const created = await client.demoCreateOffer({ amount: "1000", assets: [asset, token] });
@@ -291,6 +324,17 @@ function fakePayerNode(options = {}) {
       }
       node.sent.push(invoice);
       return { payment_hash: `0xsent-${node.sent.length}`, status: "Created" };
+    },
+    // Reports each status in `statuses` in turn, then keeps repeating the last.
+    statuses: ["Success"],
+    async getPayment(paymentHash) {
+      const status = node.statuses.length > 1 ? node.statuses.shift() : node.statuses[0];
+      return {
+        payment_hash: paymentHash,
+        status,
+        fee: "0x0",
+        ...(status === "Failed" ? { failed_error: "no route to the recipient" } : {})
+      };
     }
   };
   return node;

@@ -1,4 +1,5 @@
 import { fiberNodeError, normalizeFiberPaymentFailure } from "./failures.js";
+import { fiberPaymentStatus, waitForFiberPayment } from "./fiber-payment.js";
 import { verifyInvoiceForOffer } from "./invoice-verification.js";
 import { decodeOffer, validateResolutionRequest, verifyOffer } from "@fiber-offers/protocol";
 
@@ -97,8 +98,17 @@ export class FiberPaymentFlowClient {
     });
   }
 
+  // Prepares and, with `execute: true`, sends. With `confirm: true` it also
+  // waits for the node to report the payment settled, and ends in
+  // payment_succeeded or payment_failed instead of payment_sent.
   async payOffer(offerOrId, request, options = {}) {
     const prepared = await this.preparePayment(offerOrId, request, options);
+    return this.executePrepared(prepared, options);
+  }
+
+  // The sending half of payOffer, for callers that need to act between
+  // preparing and sending, such as recording the payment hash first.
+  async executePrepared(prepared, options = {}) {
     if (!prepared.ok) return prepared;
 
     if (!options.execute) {
@@ -146,15 +156,16 @@ export class FiberPaymentFlowClient {
     const invoiceValue = prepared.invoice.invoice?.invoice ?? prepared.invoice.invoice;
     try {
       const payment = await this.paymentClient.sendPayment(invoiceValue, paymentOptions(options));
-      return paymentFlowResult({
+      const sent = paymentFlowResult({
         ...prepared,
         ok: true,
         status: "payment_sent",
         payment,
-        payment_hash: payment?.payment_hash ?? prepared.route_check?.payment_hash,
+        payment_hash: payment?.payment_hash ?? prepared.invoice?.payment_hash ?? prepared.route_check?.payment_hash,
         fee: payment?.fee ?? prepared.route_check?.fee,
         next_action: "poll_payment_status"
       });
+      return this.#settle(sent, options);
     } catch (error) {
       const failure = normalizeFiberPaymentFailure(error, {
         stage: "send_payment",
@@ -168,6 +179,70 @@ export class FiberPaymentFlowClient {
         next_action: "fix_request"
       });
     }
+  }
+
+  // Checks whether a sent payment has settled. Resolves to a result whose status
+  // is payment_succeeded, payment_failed, payment_pending (not settled by the
+  // deadline; check again later) or payment_unknown (the node has no record).
+  async confirmPayment(paymentHash, options = {}) {
+    if (!paymentHash) {
+      return {
+        ok: false,
+        status: "payment_unknown",
+        failure: { code: "PAYMENT_HASH_REQUIRED", summary: "No payment hash was available to look the payment up." }
+      };
+    }
+    const getPayment =
+      typeof this.paymentClient?.getPayment === "function"
+        ? (hash) => this.paymentClient.getPayment(hash)
+        : undefined;
+    if (!getPayment) {
+      return {
+        ok: false,
+        status: "payment_unknown",
+        payment_hash: paymentHash,
+        failure: {
+          code: "PAYMENT_CLIENT_CANNOT_CONFIRM",
+          summary: "The payment client cannot report payment status (no getPayment)."
+        }
+      };
+    }
+
+    let outcome;
+    try {
+      outcome = await waitForFiberPayment(getPayment, paymentHash, {
+        timeoutMs: options.confirmTimeoutMs,
+        pollIntervalMs: options.confirmPollIntervalMs,
+        sleep: options.sleep,
+        now: options.now
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        status: "payment_unknown",
+        payment_hash: paymentHash,
+        failure: normalizeFiberPaymentFailure(error, { stage: "get_payment" }),
+        next_action: "retry_payment"
+      };
+    }
+    return settledResult(paymentHash, outcome.payment, outcome.settled ? outcome.status : undefined);
+  }
+
+  // A node may already report the outcome in its send_payment reply. Otherwise
+  // the payment is only "sent" until confirmed.
+  async #settle(sent, options) {
+    const immediate = fiberPaymentStatus(sent.payment);
+    if (immediate === "Success" || immediate === "Failed") {
+      return paymentFlowResult({ ...sent, ...settledResult(sent.payment_hash, sent.payment, immediate) });
+    }
+    if (!options.confirm) return sent;
+    const confirmation = await this.confirmPayment(sent.payment_hash, options);
+    return paymentFlowResult({
+      ...sent,
+      ...confirmation,
+      payment: confirmation.payment ?? sent.payment,
+      fee: confirmation.payment?.fee ?? sent.fee
+    });
   }
 
   // The signed offer behind whatever the caller passed: an encoded offer, a
@@ -304,6 +379,31 @@ export class FiberPaymentFlowClient {
       ...(outcome.failure ? { failure: outcome.failure } : {})
     };
   }
+}
+
+function settledResult(paymentHash, payment, status) {
+  if (status === "Success") {
+    return { ok: true, status: "payment_succeeded", payment, payment_hash: paymentHash, next_action: "done" };
+  }
+  if (status === "Failed") {
+    return {
+      ok: false,
+      status: "payment_failed",
+      payment,
+      payment_hash: paymentHash,
+      failure: {
+        code: "PAYMENT_FAILED",
+        summary: payment?.failed_error
+          ? `The Fiber payment failed: ${payment.failed_error}`
+          : "The Fiber payment failed after it was sent.",
+        fiber_error: payment?.failed_error ? { message: payment.failed_error } : undefined,
+        next_actions: ["Check route liquidity and retry; a failed payment moved no funds."]
+      },
+      next_action: "retry_payment"
+    };
+  }
+  // Accepted by the node and still in flight.
+  return { ok: true, status: "payment_pending", payment, payment_hash: paymentHash, next_action: "poll_payment_status" };
 }
 
 function assertVerifiedOffer(offer) {

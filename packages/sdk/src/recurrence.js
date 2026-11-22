@@ -60,6 +60,11 @@ export class FiberRecurringPaymentScheduler {
     this.intervalMs = positiveInteger(options.intervalMs, 1000);
     this.retryDelayMs = positiveInteger(options.retryDelayMs, 30000);
     this.maxConsecutiveFailures = positiveInteger(options.maxConsecutiveFailures, 8);
+    // A cycle counts as paid only once the payer node reports the payment
+    // settled. `confirm: false` restores the old behaviour of trusting
+    // "payment sent", for a payment flow that cannot report status.
+    this.confirm = options.confirm !== false;
+    this.confirmTimeoutMs = options.confirmTimeoutMs;
     this.onEvent = options.onEvent ?? (() => {});
     this.setInterval = options.setInterval ?? globalThis.setInterval;
     this.clearInterval = options.clearInterval ?? globalThis.clearInterval;
@@ -109,6 +114,9 @@ export class FiberRecurringPaymentScheduler {
       asset: options.asset ?? offer.assets[0],
       status: "active",
       approved_at: this.now().toISOString(),
+      // Every due date is computed from this fixed anchor, so the schedule
+      // cannot drift (a monthly plan started on the 31st stays month-end).
+      schedule_anchor: start.toISOString(),
       next_due_at: start.toISOString(),
       cycles_paid: 0,
       spending_total: "0",
@@ -152,6 +160,13 @@ export class FiberRecurringPaymentScheduler {
   }
 
   async #runApproval(approval, now) {
+    // A payment already sent for this approval is settled first. Nothing new
+    // is sent while its outcome is unknown.
+    if (approval.in_flight) {
+      const settled = await this.#reconcile(approval, now);
+      if (settled) return settled;
+    }
+
     const terms = approval.offer.recurrence;
     const nextCycle = approval.cycles_paid + 1;
     if (terms.cap_cycles !== undefined && nextCycle > terms.cap_cycles) {
@@ -165,38 +180,117 @@ export class FiberRecurringPaymentScheduler {
     }
 
     const scheduledFor = approval.next_due_at;
-    // Pass the signed offer stored with the approval, so each cycle's invoice
-    // is verified against the terms the payer actually approved.
-    const result = await this.paymentFlow.payOffer(
-      approval.offer,
+    const request = {
+      amount: terms.amount,
+      asset: approval.asset,
+      recurrence_cycle: nextCycle,
+      approval_id: approval.id,
+      scheduled_for: scheduledFor
+    };
+    const idempotencyKey = cycleIdempotencyKey(approval, nextCycle);
+    const sendOptions = {
+      execute: true,
+      confirm: this.confirm,
+      confirmTimeoutMs: this.confirmTimeoutMs,
+      idempotencyKey
+    };
+
+    // The stored signed offer is passed, so each cycle's invoice is verified
+    // against the terms the payer approved.
+    let result;
+    if (typeof this.paymentFlow.preparePayment === "function" && typeof this.paymentFlow.executePrepared === "function") {
+      const prepared = await this.paymentFlow.preparePayment(approval.offer, request, { idempotencyKey });
+      if (prepared.ok) {
+        // Written before anything is sent: after a crash the next run finds
+        // this and asks the node what happened instead of paying again.
+        approval.in_flight = {
+          cycle: nextCycle,
+          scheduled_for: scheduledFor,
+          payment_hash: prepared.invoice?.payment_hash ?? prepared.route_check?.payment_hash,
+          idempotency_key: idempotencyKey,
+          started_at: now.toISOString()
+        };
+        await this.store.put(approval);
+      }
+      result = await this.paymentFlow.executePrepared(prepared, sendOptions);
+    } else {
+      result = await this.paymentFlow.payOffer(approval.offer, request, sendOptions);
+    }
+
+    return this.#applyResult(approval, nextCycle, scheduledFor, result, now);
+  }
+
+  // Asks the payer node what became of a payment recorded as in flight.
+  // Returns the cycle result when that settles the matter for this run, or
+  // undefined when the cycle should simply be attempted again.
+  async #reconcile(approval, now) {
+    const pending = approval.in_flight;
+    if (typeof this.paymentFlow.confirmPayment !== "function" || !pending.payment_hash) {
+      // Nothing to ask with. The retry replays the same invoice, which a node
+      // will not pay twice.
+      delete approval.in_flight;
+      return undefined;
+    }
+    const outcome = await this.paymentFlow.confirmPayment(pending.payment_hash, { confirmTimeoutMs: 0 });
+    if (outcome.status === "payment_unknown") {
+      // The node has no record: the crash came before the send.
+      delete approval.in_flight;
+      return undefined;
+    }
+    return this.#applyResult(approval, pending.cycle, pending.scheduled_for, outcome, now);
+  }
+
+  async #applyResult(approval, cycle, scheduledFor, result, now) {
+    const terms = approval.offer.recurrence;
+    const paymentHash = result.payment_hash ?? approval.in_flight?.payment_hash;
+    approval.attempts = [
+      ...(approval.attempts ?? []),
       {
-        amount: terms.amount,
-        asset: approval.asset,
-        recurrence_cycle: nextCycle,
-        approval_id: approval.id,
-        scheduled_for: scheduledFor
-      },
-      { execute: true, idempotencyKey: `${approval.id}:${nextCycle}` }
-    );
-    approval.attempts.push({ cycle: nextCycle, scheduled_for: scheduledFor, attempted_at: now.toISOString(), result });
-    if (result.ok && result.status === "payment_sent") {
-      approval.cycles_paid = nextCycle;
+        cycle,
+        scheduled_for: scheduledFor,
+        attempted_at: now.toISOString(),
+        status: result.status,
+        payment_hash: paymentHash,
+        failure_code: result.failure?.code
+      }
+    ].slice(-MAX_STORED_ATTEMPTS);
+
+    const paid =
+      result.status === "payment_succeeded" || (!this.confirm && result.ok && result.status === "payment_sent");
+    const pending = !paid && result.ok && ["payment_sent", "payment_pending"].includes(result.status);
+
+    if (paid) {
+      approval.cycles_paid = cycle;
       approval.spending_total = (BigInt(approval.spending_total) + BigInt(terms.amount)).toString();
-      approval.next_due_at = nextOccurrence(new Date(scheduledFor), terms).toISOString();
+      approval.next_due_at = dueDate(approval, terms, cycle, scheduledFor).toISOString();
       approval.consecutive_failures = 0;
+      delete approval.in_flight;
+      delete approval.invoice_attempt;
       delete approval.next_retry_at;
       delete approval.last_error;
-      this.#emit({ type: "cycle.payment_sent", approval_id: approval.id, cycle: nextCycle, result });
+      this.#emit({ type: "cycle.paid", approval_id: approval.id, cycle, payment_hash: paymentHash, result });
+    } else if (pending) {
+      // Sent and not yet settled. Not a failure; the next run checks again.
+      approval.in_flight = {
+        ...(approval.in_flight ?? { cycle, scheduled_for: scheduledFor, started_at: now.toISOString() }),
+        payment_hash: paymentHash
+      };
+      this.#emit({ type: "cycle.payment_pending", approval_id: approval.id, cycle, payment_hash: paymentHash });
     } else {
+      delete approval.in_flight;
       approval.last_error = result.failure;
       approval.consecutive_failures = (approval.consecutive_failures ?? 0) + 1;
+      // An expired invoice can never be paid; the next attempt asks for a new one.
+      if (result.failure?.code === "INVOICE_EXPIRED") {
+        approval.invoice_attempt = (approval.invoice_attempt ?? 0) + 1;
+      }
       if (approval.consecutive_failures >= this.maxConsecutiveFailures) {
         approval.status = "failed";
         delete approval.next_retry_at;
         this.#emit({
           type: "approval.failed",
           approval_id: approval.id,
-          cycle: nextCycle,
+          cycle,
           error: approval.last_error
         });
       } else {
@@ -204,14 +298,14 @@ export class FiberRecurringPaymentScheduler {
         this.#emit({
           type: "cycle.retry_scheduled",
           approval_id: approval.id,
-          cycle: nextCycle,
+          cycle,
           retry_at: approval.next_retry_at,
           error: approval.last_error
         });
       }
     }
     await this.store.put(approval);
-    return { approval_id: approval.id, cycle: nextCycle, result };
+    return { approval_id: approval.id, cycle, result };
   }
 
   async #block(approval, code, summary) {
@@ -254,13 +348,49 @@ function assertOffer(offer) {
   return offer;
 }
 
-function nextOccurrence(date, terms) {
-  const next = new Date(date);
-  if (terms.interval === "daily") next.setUTCDate(next.getUTCDate() + 1);
-  if (terms.interval === "weekly") next.setUTCDate(next.getUTCDate() + 7);
-  if (terms.interval === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
-  if (terms.interval === "custom_seconds") next.setUTCSeconds(next.getUTCSeconds() + terms.custom_seconds);
+const MAX_STORED_ATTEMPTS = 20;
+
+// A retried cycle replays the same invoice. Only after that invoice has expired
+// does the key change, so the resolver is asked for a new one.
+function cycleIdempotencyKey(approval, cycle) {
+  const base = `${approval.id}:${cycle}`;
+  return approval.invoice_attempt ? `${base}:${approval.invoice_attempt}` : base;
+}
+
+// When the cycle after `cyclesPaid` paid cycles falls due.
+function dueDate(approval, terms, cyclesPaid, scheduledFor) {
+  if (approval.schedule_anchor) return occurrence(new Date(approval.schedule_anchor), terms, cyclesPaid);
+  // An approval stored before anchors existed: step from the last due date.
+  return occurrence(new Date(scheduledFor), terms, 1);
+}
+
+// The date `count` intervals after `anchor`.
+function occurrence(anchor, terms, count) {
+  const next = new Date(anchor);
+  if (terms.interval === "daily") next.setUTCDate(next.getUTCDate() + count);
+  if (terms.interval === "weekly") next.setUTCDate(next.getUTCDate() + 7 * count);
+  if (terms.interval === "monthly") return addMonthsClamped(anchor, count);
+  if (terms.interval === "custom_seconds") return new Date(anchor.getTime() + terms.custom_seconds * count * 1000);
   return next;
+}
+
+// Adds whole months, keeping the day of month where the target month has it
+// and using its last day otherwise (31 January + 1 month = 28 or 29 February).
+function addMonthsClamped(date, months) {
+  const target = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + months,
+      1,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds()
+    )
+  );
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(date.getUTCDate(), lastDay));
+  return target;
 }
 
 function schedulerError(message, code) {

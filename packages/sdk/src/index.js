@@ -25,9 +25,11 @@ import { normalizeParsedInvoice, verifyInvoiceForOffer } from "./invoice-verific
 import {
   FiberPaymentClient,
   FiberRpcClient,
+  fiberPaymentStatus,
   fiberSendPaymentParams,
   toFiberDecimalQuantity,
-  toFiberHexQuantity
+  toFiberHexQuantity,
+  waitForFiberPayment
 } from "./fiber-payment.js";
 import { analyzeFiberTopology, FiberTopologyClient, planDirectChannelFixture } from "./fiber-topology.js";
 import { fiberNodeError, normalizeFiberPaymentFailure } from "./failures.js";
@@ -56,6 +58,8 @@ export {
   verifyInvoiceForOffer,
   formatInvoiceDescription,
   parseInvoiceBinding,
+  fiberPaymentStatus,
+  waitForFiberPayment,
   FiberNodeDiagnosticsClient,
   FiberPaymentFlowClient,
   FiberPaymentClient,

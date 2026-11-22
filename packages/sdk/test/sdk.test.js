@@ -11,6 +11,7 @@ import {
   FiberRecurringPaymentScheduler,
   FiberRpcClient,
   FiberTopologyClient,
+  InMemoryRecurringApprovalStore,
   WebStorageRecurringApprovalStore,
   analyzeFiberTopology,
   analyzePaymentReadiness,
@@ -28,7 +29,8 @@ import {
   summarizeFiberChannels,
   toFiberDecimalQuantity,
   toFiberHexQuantity,
-  verifyInvoiceForOffer
+  verifyInvoiceForOffer,
+  waitForFiberPayment
 } from "../src/index.js";
 import { JsonFileRecurringApprovalStore } from "../src/node.js";
 import {
@@ -391,7 +393,7 @@ test("runs capped recurring payments and supports one-tap revocation", async () 
     paymentFlow: {
       async payOffer(offerId, request, options) {
         calls.push({ offerId, request, options });
-        return { ok: true, status: "payment_sent", payment_hash: `hash-${request.recurrence_cycle}` };
+        return { ok: true, status: "payment_succeeded", payment_hash: `hash-${request.recurrence_cycle}` };
       }
     },
     now: () => current
@@ -433,7 +435,7 @@ test("automatically runs due recurring payments and persists approvals privately
     paymentFlow: {
       async payOffer() {
         calls += 1;
-        return { ok: true, status: "payment_sent", payment_hash: `hash-${calls}` };
+        return { ok: true, status: "payment_succeeded", payment_hash: `hash-${calls}` };
       }
     },
     store: new JsonFileRecurringApprovalStore(path),
@@ -449,7 +451,7 @@ test("automatically runs due recurring payments and persists approvals privately
 
     assert.equal(restored.cycles_paid, 1);
     assert.equal(scheduler.status().running, true);
-    assert.ok(events.some((event) => event.type === "cycle.payment_sent"));
+    assert.ok(events.some((event) => event.type === "cycle.paid"));
     assert.equal((await stat(path)).mode & 0o777, 0o600);
   } finally {
     scheduler.stop();
@@ -482,7 +484,7 @@ test("persists browser approvals and retries failed recurring attempts", async (
         calls += 1;
         return calls === 1
           ? { ok: false, status: "payment_failed", failure: { code: "NO_ROUTE", summary: "route unavailable" } }
-          : { ok: true, status: "payment_sent", payment_hash: "hash-retry" };
+          : { ok: true, status: "payment_succeeded", payment_hash: "hash-retry" };
       }
     },
     store: new WebStorageRecurringApprovalStore({ storage }),
@@ -501,6 +503,256 @@ test("persists browser approvals and retries failed recurring attempts", async (
   assert.equal(afterRetry.cycles_paid, 1);
   assert.equal(afterRetry.next_retry_at, undefined);
   assert.equal(calls, 2);
+});
+
+function recurringOffer(recurrence) {
+  const keys = generateOfferKeyPair();
+  return createSignedOffer(
+    {
+      node_id: "02" + "c".repeat(64),
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://resolver.example",
+      assets: [{ asset_type: "ckb", symbol: "CKB" }],
+      recurrence
+    },
+    keys.privateKeyPem
+  );
+}
+
+test("a recurring cycle counts as paid only once the node confirms it", async () => {
+  const offer = recurringOffer({ interval: "daily", amount: "1000", cap_cycles: 5 });
+  let current = new Date("2026-01-01T00:00:00.000Z");
+  let sends = 0;
+  let executeResult = { ok: true, status: "payment_pending", payment_hash: "0xhash1" };
+  let confirmResult = { ok: true, status: "payment_pending", payment_hash: "0xhash1" };
+  const events = [];
+  const store = new InMemoryRecurringApprovalStore();
+  const scheduler = new FiberRecurringPaymentScheduler({
+    paymentFlow: {
+      async preparePayment() {
+        return { ok: true, status: "ready_to_send", invoice: { payment_hash: "0xhash1" } };
+      },
+      async executePrepared() {
+        sends += 1;
+        return executeResult;
+      },
+      async confirmPayment() {
+        return confirmResult;
+      }
+    },
+    store,
+    retryDelayMs: 1000,
+    now: () => current,
+    onEvent: (event) => events.push(event.type)
+  });
+  const approval = await scheduler.approve(offer);
+
+  // Sent but not settled: not paid, not a failure, and remembered.
+  await scheduler.runDue();
+  const afterSend = await store.get(approval.id);
+  assert.equal(afterSend.cycles_paid, 0);
+  assert.equal(afterSend.consecutive_failures ?? 0, 0);
+  assert.equal(afterSend.in_flight.payment_hash, "0xhash1");
+
+  // Still in flight on the next run: nothing is sent again.
+  await scheduler.runDue();
+  assert.equal(sends, 1);
+  assert.equal((await store.get(approval.id)).cycles_paid, 0);
+
+  // The node reports success: now the cycle is paid and the schedule advances.
+  confirmResult = { ok: true, status: "payment_succeeded", payment_hash: "0xhash1" };
+  await scheduler.runDue();
+  const afterSuccess = await store.get(approval.id);
+  assert.equal(sends, 1);
+  assert.equal(afterSuccess.cycles_paid, 1);
+  assert.equal(afterSuccess.in_flight, undefined);
+  assert.equal(afterSuccess.next_due_at, "2026-01-02T00:00:00.000Z");
+
+  // A payment that fails after being sent does not advance the cycle.
+  current = new Date("2026-01-02T00:00:00.000Z");
+  executeResult = { ok: false, status: "payment_failed", failure: { code: "PAYMENT_FAILED" } };
+  await scheduler.runDue();
+  const afterFailure = await store.get(approval.id);
+  assert.equal(afterFailure.cycles_paid, 1);
+  assert.equal(afterFailure.consecutive_failures, 1);
+  assert.equal(afterFailure.in_flight, undefined);
+  assert.deepEqual(events.filter((type) => type.startsWith("cycle.")), [
+    "cycle.payment_pending",
+    "cycle.payment_pending",
+    "cycle.paid",
+    "cycle.retry_scheduled"
+  ]);
+});
+
+test("a scheduler restarted mid-payment asks the node instead of paying again", async () => {
+  const offer = recurringOffer({ interval: "daily", amount: "1000", cap_cycles: 5 });
+  const current = new Date("2026-01-01T00:00:00.000Z");
+  const store = new InMemoryRecurringApprovalStore();
+  const keys = [];
+  let sends = 0;
+  const flow = (behaviour) => ({
+    async preparePayment(_offer, _request, options) {
+      keys.push(options.idempotencyKey);
+      return { ok: true, status: "ready_to_send", invoice: { payment_hash: "0xcrash" } };
+    },
+    async executePrepared() {
+      sends += 1;
+      return behaviour.execute();
+    },
+    async confirmPayment(hash) {
+      return behaviour.confirm(hash);
+    }
+  });
+
+  // The process dies after the payment hash was recorded, during the send.
+  const crashing = new FiberRecurringPaymentScheduler({
+    paymentFlow: flow({
+      execute: () => {
+        throw new Error("process killed");
+      }
+    }),
+    store,
+    now: () => current
+  });
+  const approval = await crashing.approve(offer);
+  await assert.rejects(() => crashing.runDue(), /process killed/);
+  assert.equal((await store.get(approval.id)).in_flight.payment_hash, "0xcrash");
+
+  // Restart. The node says the payment went through: no second send.
+  const confirmed = [];
+  const restarted = new FiberRecurringPaymentScheduler({
+    paymentFlow: flow({
+      execute: () => assert.fail("must not send again"),
+      confirm: (hash) => {
+        confirmed.push(hash);
+        return { ok: true, status: "payment_succeeded", payment_hash: hash };
+      }
+    }),
+    store,
+    now: () => current
+  });
+  await restarted.runDue();
+  const settled = await store.get(approval.id);
+  assert.deepEqual(confirmed, ["0xcrash"]);
+  assert.equal(sends, 1);
+  assert.equal(settled.cycles_paid, 1);
+
+  // Had the node never seen it, the same invoice is requested and sent again.
+  const second = await restarted.approve(offer, { id: "approval_never_sent" });
+  await store.put({ ...second, in_flight: { cycle: 1, scheduled_for: second.next_due_at, payment_hash: "0xlost" } });
+  const retried = new FiberRecurringPaymentScheduler({
+    paymentFlow: flow({
+      execute: () => ({ ok: true, status: "payment_succeeded", payment_hash: "0xlost" }),
+      confirm: () => ({ ok: false, status: "payment_unknown" })
+    }),
+    store,
+    now: () => current
+  });
+  await retried.runDue();
+  assert.equal((await store.get("approval_never_sent")).cycles_paid, 1);
+  assert.equal(keys.at(-1), "approval_never_sent:1");
+});
+
+test("the scheduler asks for a new invoice after one expires, keeps month-end dates, and bounds its history", async () => {
+  const offer = recurringOffer({ interval: "monthly", amount: "1000", cap_cycles: 40 });
+  let current = new Date("2026-01-31T00:00:00.000Z");
+  const keys = [];
+  let outcome = { ok: false, status: "invoice_rejected", failure: { code: "INVOICE_EXPIRED" } };
+  const store = new InMemoryRecurringApprovalStore();
+  const scheduler = new FiberRecurringPaymentScheduler({
+    paymentFlow: {
+      async payOffer(_offer, _request, options) {
+        keys.push(options.idempotencyKey);
+        return outcome;
+      }
+    },
+    store,
+    retryDelayMs: 1000,
+    maxConsecutiveFailures: 100,
+    now: () => current
+  });
+  const approval = await scheduler.approve(offer, { id: "plan", startAt: current });
+
+  await scheduler.runDue();
+  current = new Date(current.getTime() + 1000);
+  outcome = { ok: true, status: "payment_succeeded", payment_hash: "0x1" };
+  await scheduler.runDue();
+  // The first key replayed an expired invoice; the second asks for a fresh one.
+  assert.deepEqual(keys, ["plan:1", "plan:1:1"]);
+  assert.equal((await store.get(approval.id)).next_due_at, "2026-02-28T00:00:00.000Z");
+
+  current = new Date("2026-02-28T00:00:00.000Z");
+  await scheduler.runDue();
+  // Anchored to the 31st, so March is the 31st again, not the 28th.
+  assert.equal((await store.get(approval.id)).next_due_at, "2026-03-31T00:00:00.000Z");
+  assert.equal(keys.at(-1), "plan:2");
+
+  for (let month = 3; month <= 30; month += 1) {
+    current = new Date((await store.get(approval.id)).next_due_at);
+    await scheduler.runDue();
+  }
+  const final = await store.get(approval.id);
+  assert.equal(final.cycles_paid, 30);
+  assert.equal(final.attempts.length, 20);
+  assert.equal(final.attempts.at(-1).cycle, 30);
+});
+
+test("a payment flow that cannot report status needs confirm: false to count sent as paid", async () => {
+  const offer = recurringOffer({ interval: "daily", amount: "1000", cap_cycles: 2 });
+  const current = new Date("2026-01-01T00:00:00.000Z");
+  const sendOnly = { payOffer: async () => ({ ok: true, status: "payment_sent", payment_hash: "0xsent" }) };
+
+  const strictStore = new InMemoryRecurringApprovalStore();
+  const strict = new FiberRecurringPaymentScheduler({ paymentFlow: sendOnly, store: strictStore, now: () => current });
+  const strictApproval = await strict.approve(offer);
+  await strict.runDue();
+
+  const legacyStore = new InMemoryRecurringApprovalStore();
+  const legacy = new FiberRecurringPaymentScheduler({
+    paymentFlow: sendOnly,
+    store: legacyStore,
+    confirm: false,
+    now: () => current
+  });
+  const legacyApproval = await legacy.approve(offer);
+  await legacy.runDue();
+
+  assert.equal((await strictStore.get(strictApproval.id)).cycles_paid, 0);
+  assert.equal((await legacyStore.get(legacyApproval.id)).cycles_paid, 1);
+});
+
+test("waits for a Fiber payment to settle and reports the outcome", async () => {
+  const statuses = ["Created", "Inflight", "Success"];
+  const slept = [];
+  const settles = await waitForFiberPayment(
+    async () => ({ status: statuses.shift(), fee: "0x1" }),
+    "0xhash",
+    { pollIntervalMs: 250, sleep: async (ms) => slept.push(ms) }
+  );
+
+  // A dropped connection while polling is retried; the deadline still applies.
+  let clock = 0;
+  let attempts = 0;
+  const neverSettles = await waitForFiberPayment(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("fetch failed"), { retryable: true });
+      return { status: "Inflight" };
+    },
+    "0xhash",
+    { timeoutMs: 1000, pollIntervalMs: 400, now: () => clock, sleep: async (ms) => { clock += ms; } }
+  );
+  const failed = await waitForFiberPayment(async () => ({ status: "Failed", failed_error: "no route" }), "0xhash");
+
+  assert.deepEqual([settles.settled, settles.status], [true, "Success"]);
+  assert.deepEqual(slept, [250, 250]);
+  assert.deepEqual([neverSettles.settled, neverSettles.status, attempts], [false, "Inflight", 3]);
+  assert.deepEqual([failed.settled, failed.status], [true, "Failed"]);
+  // The node saying it has no such payment is an answer, not something to retry.
+  await assert.rejects(
+    () => waitForFiberPayment(async () => { throw Object.assign(new Error("payment not found"), { retryable: false }); }, "0xhash"),
+    /payment not found/
+  );
 });
 
 test("registers an encoded offer through the configured resolver", async () => {

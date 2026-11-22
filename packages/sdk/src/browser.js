@@ -20,6 +20,8 @@ export {
   verifyInvoiceForOffer,
   formatInvoiceDescription,
   parseInvoiceBinding,
+  fiberPaymentStatus,
+  waitForFiberPayment,
   normalizeFiberPaymentFailure,
   parseFiberAddress,
   planDirectChannelFixture,

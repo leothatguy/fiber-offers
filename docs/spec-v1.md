@@ -96,7 +96,7 @@ Proof that an offer was paid is the node-signed invoice, whose description names
 
 Recurring invoice attempts carry `recurrence_cycle`, `approval_id`, and `scheduled_for`. The resolver enforces sequential cycles, the signed per-cycle amount, `cap_cycles`, and `spending_cap_total`.
 
-`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles from its internal timer, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. Browser wallets can use `WebStorageRecurringApprovalStore`; Node wallet services can use the private atomic `JsonFileRecurringApprovalStore` export from `@fiber-offers/sdk/node`. Status is available from `GET /offers/:offer_id/recurrence-status`.
+`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles from its internal timer, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. A cycle counts as paid only once the payer's node reports the payment settled; the scheduler records each payment before sending it, so after a restart it asks the node what happened instead of paying again. Due dates are computed from the approval's fixed start, so a monthly plan begun on the 31st falls on the last day of shorter months. Browser wallets can use `WebStorageRecurringApprovalStore`; Node wallet services can use the private atomic `JsonFileRecurringApprovalStore` export from `@fiber-offers/sdk/node`. Status is available from `GET /offers/:offer_id/recurrence-status`.
 
 ## Availability Boundary
 

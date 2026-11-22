@@ -387,7 +387,39 @@ export class FiberPaymentClient {
   /** The payer node's own reading of an invoice (`parse_invoice`). */
   parseInvoice<T = { invoice: FiberParsedInvoice }>(invoice: string): Promise<T>;
   getPayment<T = FiberPaymentResult>(paymentHash: string): Promise<T>;
+  /** Polls `get_payment` until the payment is `Success` or `Failed`, or the deadline passes. */
+  waitForPayment(paymentHash: string, options?: WaitForPaymentOptions): Promise<PaymentWaitOutcome>;
 }
+
+export type FiberPaymentStatus = "Created" | "Inflight" | "Success" | "Failed";
+
+export interface WaitForPaymentOptions {
+  /** Default 60000. `0` checks once. */
+  timeoutMs?: number;
+  /** Default 1000. */
+  pollIntervalMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export interface PaymentWaitOutcome {
+  /** True once the node reports `Success` or `Failed`. */
+  settled: boolean;
+  status: FiberPaymentStatus | "Unknown";
+  payment?: FiberPaymentResult;
+  error?: unknown;
+}
+
+/**
+ * `send_payment` returning only means the node accepted the request. This
+ * polls until the payment settles. Throws when the node has no such payment.
+ */
+export function waitForFiberPayment(
+  getPayment: (paymentHash: string) => Promise<FiberPaymentResult>,
+  paymentHash: string,
+  options?: WaitForPaymentOptions
+): Promise<PaymentWaitOutcome>;
+export function fiberPaymentStatus(payment: unknown): FiberPaymentStatus | undefined;
 
 /** A Fiber invoice as a node reports it. Optional fields arrive in `data.attrs`. */
 export interface FiberParsedInvoice {
@@ -863,7 +895,7 @@ export type PaymentFlowResolver = Pick<FiberOffersClient, "checkPayment" | "requ
   Partial<Pick<FiberOffersClient, "getOffer" | "resolverUrl">>;
 /** `parseInvoice` is required to verify an invoice, and so to execute a payment. */
 export type PaymentFlowPayer = Partial<
-  Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment" | "parseInvoice">
+  Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment" | "parseInvoice" | "getPayment">
 >;
 
 export interface FiberPaymentFlowClientOptions {
@@ -889,6 +921,11 @@ export interface FiberPaymentFlowOptions extends FiberSendPaymentOptions {
   allowUnboundInvoices?: boolean;
   /** Pay an invoice that was not checked against the signed offer. Unsafe outside tests. */
   skipInvoiceVerification?: boolean;
+  /** After sending, wait for the node to report the payment settled. */
+  confirm?: boolean;
+  /** How long `confirm` waits. Default 60000. */
+  confirmTimeoutMs?: number;
+  confirmPollIntervalMs?: number;
 }
 
 export interface PaymentFlowInvoiceVerification {
@@ -913,7 +950,14 @@ export interface PaymentFlowResult {
     | "blocked_after_invoice"
     | "payment_client_required"
     | "invoice_unverified"
+    /** Accepted by the payer node; not yet known to have settled. */
     | "payment_sent"
+    /** Confirmed settled by the payer node. */
+    | "payment_succeeded"
+    /** Sent, and not settled when the confirmation deadline passed. */
+    | "payment_pending"
+    /** The payer node has no record of the payment. */
+    | "payment_unknown"
     | "payment_failed"
     | string;
   request?: PaymentRequest;
@@ -940,6 +984,10 @@ export class FiberPaymentFlowClient {
   constructor(options: FiberPaymentFlowClientOptions);
   preparePayment(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
   payOffer(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
+  /** The sending half of `payOffer`, for a result from `preparePayment`. */
+  executePrepared(prepared: PaymentFlowResult, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
+  /** Looks up a sent payment: `payment_succeeded`, `payment_failed`, `payment_pending` or `payment_unknown`. */
+  confirmPayment(paymentHash: string, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
 }
 
 export interface RecurrenceStatus {
@@ -965,12 +1013,35 @@ export interface RecurringApproval {
   approved_at: string;
   revoked_at?: string;
   next_due_at: string;
+  /** Fixed start of the schedule; every due date is computed from it. */
+  schedule_anchor?: string;
+  /** Cycles the payer node has confirmed as paid. */
   cycles_paid: number;
   spending_total: string;
-  attempts: JsonObject[];
+  /** The most recent attempts (at most 20), newest last. */
+  attempts: RecurringAttempt[];
+  /** A payment that was sent and whose outcome is not yet known. */
+  in_flight?: {
+    cycle: number;
+    scheduled_for: string;
+    payment_hash?: string;
+    idempotency_key?: string;
+    started_at?: string;
+  };
+  /** Raised each time a cycle's invoice expires, so the next attempt asks for a new one. */
+  invoice_attempt?: number;
   last_error?: JsonObject;
   consecutive_failures?: number;
   next_retry_at?: string;
+}
+
+export interface RecurringAttempt {
+  cycle: number;
+  scheduled_for: string;
+  attempted_at: string;
+  status: string;
+  payment_hash?: string;
+  failure_code?: string;
 }
 
 export interface RecurringApprovalStore {
@@ -1003,7 +1074,8 @@ export interface RecurringSchedulerStatus {
 
 export class FiberRecurringPaymentScheduler {
   constructor(options: {
-    paymentFlow: FiberPaymentFlowClient;
+    paymentFlow: Pick<FiberPaymentFlowClient, "payOffer"> &
+      Partial<Pick<FiberPaymentFlowClient, "preparePayment" | "executePrepared" | "confirmPayment">>;
     resolverClient?: Pick<FiberOffersClient, "getOffer">;
     resolver?: Pick<FiberOffersClient, "getOffer">;
     store?: RecurringApprovalStore;
@@ -1013,6 +1085,14 @@ export class FiberRecurringPaymentScheduler {
     intervalMs?: number;
     retryDelayMs?: number;
     maxConsecutiveFailures?: number;
+    /**
+     * Default true: a cycle counts as paid only once the payer node reports the
+     * payment settled. `false` counts "payment sent" as paid, for a payment
+     * flow that cannot report status.
+     */
+    confirm?: boolean;
+    /** How long each run waits for a sent payment to settle. Default 60000. */
+    confirmTimeoutMs?: number;
     autoStart?: boolean;
     runOnStart?: boolean;
     onEvent?: (event: JsonObject) => void;

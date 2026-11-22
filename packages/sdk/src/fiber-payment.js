@@ -63,6 +63,60 @@ export class FiberPaymentClient {
     if (!paymentHash) throw new Error("payment_hash is required");
     return this.rpc.call("get_payment", [{ payment_hash: paymentHash }]);
   }
+
+  // Polls get_payment until the payment is Success or Failed, or the deadline
+  // passes. See waitForFiberPayment.
+  async waitForPayment(paymentHash, options = {}) {
+    return waitForFiberPayment((hash) => this.getPayment(hash), paymentHash, options);
+  }
+}
+
+// `send_payment` returning only means the node accepted the request: the
+// payment is then Created or Inflight and may still fail. This polls until it
+// is settled either way.
+//
+// Returns { settled: true, status: "Success" | "Failed", payment } or, when the
+// deadline passes first, { settled: false, status, payment }. A transport
+// failure while polling is retried until the deadline; an answer from the node
+// that it does not know the payment is thrown.
+export async function waitForFiberPayment(getPayment, paymentHash, options = {}) {
+  if (!paymentHash) throw new Error("payment_hash is required");
+  const timeoutMs = options.timeoutMs ?? 60000;
+  const pollIntervalMs = options.pollIntervalMs ?? 1000;
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + timeoutMs;
+  let payment;
+  let lastError;
+
+  for (;;) {
+    try {
+      payment = await getPayment(paymentHash);
+      lastError = undefined;
+      const status = fiberPaymentStatus(payment);
+      if (status === "Success" || status === "Failed") return { settled: true, status, payment };
+    } catch (error) {
+      if (error?.retryable !== true) throw error;
+      lastError = error;
+    }
+    if (now() + pollIntervalMs > deadline) {
+      return {
+        settled: false,
+        status: fiberPaymentStatus(payment) ?? "Unknown",
+        payment,
+        ...(lastError ? { error: lastError } : {})
+      };
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
+// "Created" | "Inflight" | "Success" | "Failed", or undefined.
+export function fiberPaymentStatus(payment) {
+  const status = payment?.status;
+  if (typeof status !== "string") return undefined;
+  const normalized = status.trim().toLowerCase();
+  return { created: "Created", inflight: "Inflight", success: "Success", failed: "Failed" }[normalized];
 }
 
 export function fiberSendPaymentParams(invoice, options = {}) {
