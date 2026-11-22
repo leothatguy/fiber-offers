@@ -138,8 +138,11 @@ For a horizontally scaled local stack with PostgreSQL, Redis, BullMQ, two API
 replicas, and Nginx:
 
 ```bash
-docker compose up --build
+npm run stack:up   # NODE_ENV=development docker compose up --build
 ```
+
+The bundled Compose defaults are for local use. In production mode the resolver
+refuses to start with them; see [Deployment](docs/deployment.md).
 
 Runnable SDK examples are available for wallet, merchant/operator, and topology integration paths:
 

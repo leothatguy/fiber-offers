@@ -16,7 +16,7 @@
     "dev:mock": "FIBER_INVOICE_MODE=mock RESOLVER_WORKERS_ENABLED=false node apps/resolver/src/server.js",
     "db:migrate": "node apps/resolver/src/migrate.js",
     "worker": "node apps/resolver/src/queue-worker.js",
-    "stack:up": "docker compose up --build",
+    "stack:up": "NODE_ENV=development docker compose up --build",
     "stack:down": "docker compose down",
     "cli": "node apps/cli/src/index.js",
     "fiber:check": "node scripts/live-fiber-check.js",

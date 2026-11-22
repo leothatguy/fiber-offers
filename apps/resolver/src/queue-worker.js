@@ -1,10 +1,17 @@
 import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
+import { assertProductionConfiguration } from "./production-guard.js";
 import { createServer } from "./server.js";
 
 const queueName = process.env.RESOLVER_QUEUE_NAME ?? "fiber-offers-maintenance";
 const redisUrl = process.env.REDIS_URL;
 
+try {
+  assertProductionConfiguration(process.env);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 if (!redisUrl) throw new Error("REDIS_URL is required for the resolver queue worker");
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for the resolver queue worker");
 

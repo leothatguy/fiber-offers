@@ -329,7 +329,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - Remove direct `Buffer` and `node:crypto` assumptions from browser entrypoints (use `Uint8Array` + Web Crypto / `@noble/ed25519` + `@noble/hashes` or dual conditional exports `"browser"` / `"node"`).
     - Verify `@fiber-offers/sdk/browser` bundles cleanly with zero Node built-ins (e.g. via `esbuild` or Vite check in tests/CI).
 
-- [ ] **E3. Harden JSON persistence & enforce database guard in production**
+- [~] **E3. Harden JSON persistence & enforce database guard in production** — *database guard done with `G4`; atomic JSON writes, the revocation-loss fix, non-root image and `SIGTERM` handling are still open*
   - **Problem:** `Dockerfile` sets `NODE_ENV=production` and runs `npm run dev`; running without `DATABASE_URL` silently falls back to `JsonOfferStore`, whose `save()` uses non-atomic `writeFile()` and rewrites the whole file on every mutation.
   - **Files:** `apps/resolver/src/server.js`, `apps/resolver/src/store.js`, `Dockerfile`, `docs/deployment.md`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
@@ -453,13 +453,15 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - `redirect: "manual"`; a redirect is a failed delivery. Response bodies are not stored (status code only).
     - Tests cover each bypass above plus a public URL that redirects to a private one.
 
-- [ ] **G4. Refuse insecure production configuration** *(`F-033`)*
+- [~] **G4. Refuse insecure production configuration** *(`F-033`)* — *startup guards done 2026-11-22; key stretching and the rotation command are still open*
   - **Problem:** `docker-compose.yml` sets `NODE_ENV=production` with fallbacks `RESOLVER_API_KEY=local-dev-api-key`, `RESOLVER_SECRET_ENCRYPTION_KEY=local-dev-encryption-key-change-me` and `POSTGRES_PASSWORD=fiber_offers_dev`, and `docker-compose.production.yml` does not override them. The server also starts in production with no API key (every operator route open) and no encryption key (webhook secrets stored in plaintext). Operator login is not rate limited (150 wrong keys → 150 × `401`).
   - **Files:** `apps/resolver/src/server.js`, `docker-compose.yml`, `docker-compose.production.yml`, `.env.example`, `docs/deployment.md`
   - **Acceptance criteria:**
     - In production the server refuses to start without an API key and encryption key, or with the known development defaults; the production compose file uses `${VAR:?}` for all three secrets.
     - The encryption key is stretched with a KDF and a documented rotation command re-encrypts stored secrets.
     - Tests cover each refusal. (Extends the `E3` database guard.)
+  - **Outcome so far:** `apps/resolver/src/production-guard.js` runs in the resolver and queue-worker entrypoints. With `NODE_ENV=production` they exit with a message listing every problem when the API key or encryption key is missing, short or an example value, when `RESOLVER_PUBLIC_URL` is missing or not `https`, or when `DATABASE_URL` is missing (unless `RESOLVER_ALLOW_JSON_STORE=true`) or carries an example password. `docker-compose.production.yml` requires the three secrets and the public URL with `${VAR:?}`. `npm run stack:up` now runs the local stack in development mode. Operator login is rate limited (`B4`).
+  - **Still open:** stretching the encryption key with a KDF (needs a versioned ciphertext format so existing `enc:v1` secrets stay readable) and the documented re-encryption command.
 
 - [ ] **G5. Least-privilege Fiber RPC access** *(`F-034`, needs verification)*
   - **Problem:** The adapter authenticates with HTTP Basic credentials only and uses a connection that can call every RPC method, including `send_payment` and channel management, although the resolver needs only `node_info`, `new_invoice`, `get_invoice`, `list_peers` and `list_channels`.
@@ -515,7 +517,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-006** | 2026-11-22 | Resolver | Anonymous callers can permanently exhaust single-use offers (even when unpaid invoices expire) and drain all cycles/caps on recurring offers. | High | `B1`, `B2` | Open |
 | **F-007** | 2026-11-22 | SDK / Resolver | Single-use `payOffer()` fails with `blocked_after_invoice` because the second `/check` call counts the invoice that was just minted. | High | `A1` | Fixed |
 | **F-008** | 2026-11-22 | SDK / Browser | `@fiber-offers/sdk/browser` re-exports `@fiber-offers/protocol`, which statically imports `node:crypto` and uses `Buffer`. | Medium | `E2` | Open |
-| **F-009** | 2026-11-22 | Resolver / Docker | `Dockerfile` sets `NODE_ENV=production`, yet running without `DATABASE_URL` silently falls back to non-atomic `JsonOfferStore`. | Medium | `E3` | Open |
+| **F-009** | 2026-11-22 | Resolver / Docker | `Dockerfile` sets `NODE_ENV=production`, yet running without `DATABASE_URL` silently falls back to non-atomic `JsonOfferStore`. | Medium | `E3` | Guard fixed with `G4`; non-atomic write still open |
 | **F-010** | 2026-11-22 | SDK / Resolver | Idempotent retry is blocked by the pre-invoice `/check` (`OFFER_ALREADY_USED` for single-use, `INVALID_RECURRENCE_CYCLE` for recurring), so a transient failure after invoice issuance strands the payment; the scheduler burns its 8 retries and marks the approval failed. *Reproduced.* | High | `A1` | Fixed |
 | **F-011** | 2026-11-22 | SDK | `resolveFiberAddress("alice@other.example")` queries the configured `resolverUrl` and ignores the address domain. *Reproduced.* | Medium | `A2` | Fixed |
 | **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Fixed |
@@ -539,7 +541,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-030** | 2026-11-22 | Resolver | Demo routes ship enabled: unauthenticated, unbounded, world-readable webhook inbox; server-generated private keys; public operator cookie mode. *Reproduced.* | Medium | `G2`, `D-8` | Open |
 | **F-031** | 2026-11-22 | Resolver | With `PAYER_FIBER_RPC_URL` set, anonymous `/check` runs dry-run payments for caller-supplied invoices on the operator's payer node. | Low | `G2` | Open |
 | **F-032** | 2026-11-22 | Resolver | Webhook SSRF filter is string-based and registration-only; accepts `0.0.0.0`, IPv4-mapped and private IPv6, CGNAT, and private-resolving DNS names; delivery follows redirects; response bodies are stored and returned. *Reproduced.* | High | `G3` | Open |
-| **F-033** | 2026-11-22 | Deploy | Compose runs `NODE_ENV=production` with known default API key, encryption key and database password; server starts in production with neither key; operator login unlimited. *Login reproduced.* | High | `G4` | Open |
+| **F-033** | 2026-11-22 | Deploy | Compose runs `NODE_ENV=production` with known default API key, encryption key and database password; server starts in production with neither key; operator login unlimited. *Login reproduced.* | High | `G4` | Fixed (KDF and rotation command still open under `G4`) |
 | **F-034** | 2026-11-22 | Resolver | Fiber RPC access is all-methods with Basic auth only. **Unverified** whether Fiber offers method-scoped RPC tokens. | Low | `G5` | Needs verification |
 | **F-035** | 2026-11-22 | Resolver / Docker | PNG served as `text/html`; no app-level security headers; no `SIGTERM` handling; image runs as root through `npm run dev`. *Content type reproduced.* | Low | `G6`, `E3` | Open |
 | **F-036** | 2026-11-22 | Release | `0.1.0` packages are on npm with the Phase A/C defects; no release, deprecation or changelog step existed in the plan. | Medium | `H1`, `D-7` | Open |
@@ -568,3 +570,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `A8` done | `feat(sdk): bind every invoice to its offer and resolution` | Fixes `F-015`. Suite: 146 tests, 142 pass, 4 skipped. |
 | 2026-11-22 | `A7` done — Phase A complete | `fix(sdk): count a payment as made only after confirmation` | Fixes `F-014`, `F-038` (SDK half). Suite: 152 tests, 148 pass, 4 skipped. Phase A items A1–A8 are all done; their live-node confirmations are collected under `F2`. |
 | 2026-11-22 | `B4` done | `fix(resolver): identify clients and origins from trusted configuration only` | Branch `fix/trusted-proxy-headers-and-production-startup-guards`. Fixes `F-017`, `F-018`. Suite: 157 tests, 153 pass, 4 skipped. |
+| 2026-11-22 | `G4` partly, `E3` partly | `feat(resolver): refuse to start in production with unsafe settings` | Fixes the startup half of `F-033` and the guard half of `F-009`. Suite: 162 tests, 158 pass, 4 skipped. |

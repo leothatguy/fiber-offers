@@ -32,9 +32,34 @@ Public read endpoints such as payment links, QR codes, readiness checks, receipt
 
 ## Docker
 
+For a local stack, with the example secrets:
+
 ```bash
-docker compose up --build
+NODE_ENV=development docker compose up --build
 ```
+
+For production, supply real secrets (`fiber-offers init` writes them to `.env`)
+and add the production overrides:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
+```
+
+### Production startup checks
+
+With `NODE_ENV=production` the resolver and the queue worker refuse to start,
+and say why, unless all of these hold:
+
+| Setting | Requirement |
+| --- | --- |
+| `RESOLVER_API_KEY` | Set, at least 24 characters, not an example value. Without it every operator endpoint is open. |
+| `RESOLVER_SECRET_ENCRYPTION_KEY` | Set, at least 32 characters, not an example value. Without it webhook secrets are stored in plaintext. |
+| `RESOLVER_PUBLIC_URL` | Set, and `https` unless it is a localhost address. |
+| `DATABASE_URL` | Set, without an example password. To run a single process on the JSON file store instead, set `RESOLVER_ALLOW_JSON_STORE=true`. |
+
+`docker-compose.production.yml` also makes Compose itself stop when one of the
+secrets is missing. The base file keeps example values so a local stack starts
+with no setup; they are refused in production.
 
 Open:
 
@@ -44,9 +69,7 @@ http://localhost:8787
 
 The Compose stack runs two resolver API replicas behind Nginx, one PostgreSQL
 instance, one Redis instance, a one-shot migration service, and a BullMQ worker.
-PostgreSQL and Redis data use separate named volumes. The defaults are for local
-development; set real passwords, API keys, and encryption keys before exposing
-the stack.
+PostgreSQL and Redis data use separate named volumes.
 
 `RESOLVER_SECRET_ENCRYPTION_KEY` must be identical on every API and worker
 replica and remain stable across restarts. Rotate it with an explicit data

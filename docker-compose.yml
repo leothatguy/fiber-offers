@@ -32,7 +32,10 @@ services:
     build: .
     command: ["npm", "run", "db:migrate"]
     environment: &resolver-environment
-      NODE_ENV: production
+      # The values below are for local use. In production the resolver refuses
+      # to start with them; use docker-compose.production.yml, which requires
+      # real secrets. For a local stack run with NODE_ENV=development.
+      NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://fiber_offers:${POSTGRES_PASSWORD:-fiber_offers_dev}@postgres:5432/fiber_offers
       REDIS_URL: redis://redis:6379
       REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-fiber-offers}

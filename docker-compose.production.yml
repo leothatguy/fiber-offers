@@ -1,6 +1,19 @@
+# Production overrides. Every secret must be supplied: Compose stops with the
+# message below when one is missing, and the resolver itself refuses to start in
+# production with a missing, short or published-example secret.
 services:
   postgres:
     restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (fiber-offers init generates one)}
+
+  migrate:
+    environment: &production-secrets
+      NODE_ENV: production
+      DATABASE_URL: postgresql://fiber_offers:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/fiber_offers
+      RESOLVER_API_KEY: ${RESOLVER_API_KEY:?set RESOLVER_API_KEY (fiber-offers init generates one)}
+      RESOLVER_SECRET_ENCRYPTION_KEY: ${RESOLVER_SECRET_ENCRYPTION_KEY:?set RESOLVER_SECRET_ENCRYPTION_KEY (fiber-offers init generates one)}
+      RESOLVER_PUBLIC_URL: ${RESOLVER_PUBLIC_URL:?set RESOLVER_PUBLIC_URL to the https address of this resolver}
 
   redis:
     restart: unless-stopped
@@ -9,10 +22,13 @@ services:
   fiber-offers:
     restart: unless-stopped
     environment:
+      <<: *production-secrets
       RESOLVER_TRUSTED_PROXY_HOPS: ${RESOLVER_TRUSTED_PROXY_HOPS:-2}
 
   worker:
     restart: unless-stopped
+    environment:
+      <<: *production-secrets
 
   gateway:
     ports: !override

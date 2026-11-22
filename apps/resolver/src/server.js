@@ -18,6 +18,7 @@ import {
 import { createInvoiceAdapter } from "./invoice-adapter.js";
 import { classifyInvoiceFailure } from "./invoice-errors.js";
 import { PostgresOfferStore } from "./postgres-store.js";
+import { assertProductionConfiguration } from "./production-guard.js";
 import { renderOfferQrSvg } from "./qr.js";
 import { RedisRateLimiter } from "./redis-rate-limiter.js";
 import { consumingResolutions, resolutionUnderCheck } from "./resolution-rules.js";
@@ -2486,6 +2487,12 @@ function applyDefaultRuntimeConfiguration(env) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    assertProductionConfiguration(process.env);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
   applyDefaultRuntimeConfiguration(process.env);
   const port = Number(process.env.PORT ?? 8787);
   const server = createServer();
