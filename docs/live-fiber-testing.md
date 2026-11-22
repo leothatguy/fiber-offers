@@ -59,6 +59,21 @@ Observed on Fiber `v0.10.1`, testnet, on 2026-11-22:
 | A token not on the node's whitelist | **Accepted** by `new_invoice`. The resolver's own registry check is the only guard |
 | `get_payment` for an unknown hash | `-32000 … Payment session not found` |
 | Dry-run with no channel | `-32000 … max outbound liquidity 0 is insufficient` |
+| `open_channel` right after `connect_peer` | Refused until the peers have exchanged Init messages (`… waiting for peer to send Init message`); the fixture script retries |
+| RPC authentication | `fnn-cli` takes `--auth-token`: the node's own RPC auth is a bearer token, not HTTP Basic |
+
+With a 1,000 CKB channel from the payer node to the merchant node, the same day:
+
+| Flow, through `FiberOffersClient` and `FiberPaymentFlowClient` | Result |
+| --- | --- |
+| Reusable offer, two payments (1 CKB and 1.5 CKB), `confirm: true` | Both `payment_succeeded` (Fiber `Success`), distinct invoices and payment hashes |
+| Resolver sync after payment | `invoice_created` → `invoice_paid` (Fiber `Paid`) |
+| Single-use offer | First payment `payment_succeeded`; second attempt `blocked_before_invoice` / `OFFER_ALREADY_USED` |
+| Recurring offer, two cycles through `FiberRecurringPaymentScheduler` | Two `cycle.paid`, then `approval.cap_reached` |
+| Every invoice above | Verified by the payer node before sending: payee, amount, currency, asset, expiry, binding |
+
+These were run by hand from a scratch script. Turning them into the repeatable
+`npm run fiber:e2e-check` with a saved transcript is plan items `F2` and `F3`.
 
 ## 1. Probe The Fiber Node
 

@@ -67,7 +67,7 @@ try {
       rpc_url: step.rpc_url,
       rpc_method: step.rpc_method,
       rpc_params: step.rpc_params,
-      result: await rpc.call(step.rpc_method, [step.rpc_params])
+      result: await callWhenPeerIsReady(rpc, step)
     });
   }
 
@@ -97,6 +97,23 @@ try {
     )
   );
   process.exit(1);
+}
+
+// connect_peer returns before the two nodes have exchanged their Init
+// messages, and until they have, the node refuses open_channel for that peer
+// ("waiting for peer to send Init message"). Observed on Fiber v0.10.1. Channel
+// steps are therefore retried for a short while on exactly that answer.
+async function callWhenPeerIsReady(rpc, step) {
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      return await rpc.call(step.rpc_method, [step.rpc_params]);
+    } catch (error) {
+      const peerNotReady = /waiting for peer to send Init message|feature not found/i.test(error.message ?? "");
+      if (!peerNotReady || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
 }
 
 function printResult(result) {
