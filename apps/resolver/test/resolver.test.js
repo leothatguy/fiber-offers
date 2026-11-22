@@ -546,6 +546,51 @@ test("for a live invoice the node decides whether a single-use offer is free aga
   }, { invoiceAdapter });
 });
 
+test("subscription status counts a payment the node has seen before any sync ran", async () => {
+  const nodeId = "02" + "4".repeat(64);
+  let nodeStatus = "Open";
+  let nodeReachable = true;
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(method) {
+        if (method === "node_info") return { pubkey: nodeId };
+        if (method === "new_invoice") {
+          return { invoice_address: "fibt1cycle", invoice: { data: { payment_hash: "0x" + "8".repeat(64) } } };
+        }
+        if (!nodeReachable) throw Object.assign(new Error("fetch failed"), { kind: "transport", retryable: true });
+        return { invoice_address: "fibt1cycle", invoice: { amount: "0x3e8", currency: "Fibt" }, status: nodeStatus };
+      }
+    }
+  });
+
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, {
+      amount: "1000",
+      recurrence: { interval: "daily", amount: "1000", cap_cycles: 3 }
+    });
+    const offer = created.body.offer;
+    const subscriber = generateOfferKeyPair();
+    const statusUrl = `${baseUrl}/offers/${offer.offer_id}/recurrence-status?approval_id=${subscriptionId(subscriber.publicKeyPem)}`;
+    await postJson(
+      `${baseUrl}/offers/${offer.offer_id}/invoice`,
+      signRecurrenceRequest(offer, { amount: "1000", asset: offer.assets[0], recurrence_cycle: 1 }, subscriber.privateKeyPem)
+    );
+
+    const unpaid = (await getJson(statusUrl)).body;
+    // The payer pays; the node knows, the resolver has not synced.
+    nodeStatus = "Paid";
+    nodeReachable = false;
+    const nodeDown = (await getJson(statusUrl)).body;
+    nodeReachable = true;
+    const paid = (await getJson(statusUrl)).body;
+
+    assert.deepEqual([unpaid.cycles_paid, unpaid.next_cycle, unpaid.outstanding.cycle], [0, 1, 1]);
+    // With the node unreachable it still answers, from what is stored.
+    assert.deepEqual([nodeDown.cycles_paid, nodeDown.next_cycle], [0, 1]);
+    assert.deepEqual([paid.cycles_paid, paid.next_cycle, paid.outstanding], [1, 2, undefined]);
+  }, { invoiceAdapter });
+});
+
 test("resolves a Fiber Address to its encoded offer", async () => {
   await withServer(async (baseUrl) => {
     const created = await postJson(`${baseUrl}/demo/offers`, {

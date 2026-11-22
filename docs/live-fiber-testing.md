@@ -72,6 +72,17 @@ With a 1,000 CKB channel from the payer node to the merchant node, the same day:
 | Recurring offer, two cycles through `FiberRecurringPaymentScheduler` | Two `cycle.paid`, then `approval.cap_reached` |
 | Every invoice above | Verified by the payer node before sending: payee, amount, currency, asset, expiry, binding |
 
+With PostgreSQL as the store, after Phase B of the remediation plan:
+
+| Flow | Result |
+| --- | --- |
+| Single-use offer, invoice requested and not paid | A second request: `409 OFFER_INVOICE_OUTSTANDING`, with the time it lapses |
+| After that 8-second invoice lapsed on the node | Recorded as `invoice_expired`; a new invoice was issued and paid (`payment_succeeded`) |
+| Request after that payment, before any sync ran | `409 OFFER_ALREADY_USED`: the resolver asked the node and found it paid |
+| Events for that offer | `invoice.created`, `invoice.expired`, `invoice.created`, `invoice.paid` |
+| One recurring offer (cap 2), two subscriptions | Each paid its own two cycles and then reached its own cap |
+| A cycle request naming another subscription, signed with a different key | `403 SUBSCRIPTION_KEY_MISMATCH` |
+
 These were run by hand from a scratch script. Turning them into the repeatable
 `npm run fiber:e2e-check` with a saved transcript is plan items `F2` and `F3`.
 

@@ -561,7 +561,15 @@ async function handleRequest(request, response, context) {
     }
 
     if (request.method === "GET" && action === "recurrence-status") {
-      sendJson(response, 200, await recurrenceStatus(entry, context.store, url.searchParams.get("approval_id")));
+      const approvalId = url.searchParams.get("approval_id");
+      if (approvalId) {
+        // A payer asks which cycle to request next. Bring that subscription's
+        // open invoice up to date first, so a payment the node has already
+        // seen is counted. If the node cannot be asked, answer from what is stored.
+        await enforceRateLimit(request, context, "recurrence-status");
+        await settleOpenResolutions(context, entry, requestOrigin(request), approvalId).catch(() => {});
+      }
+      sendJson(response, 200, await recurrenceStatus(entry, context.store, approvalId));
       return;
     }
 
