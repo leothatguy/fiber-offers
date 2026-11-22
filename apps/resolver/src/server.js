@@ -675,6 +675,7 @@ async function resolveInvoice(entry, body, context, origin, options = {}) {
         offer: entry.offer,
         amount: request.amount,
         asset: request.asset,
+        resolutionId: reservation.record.id,
         request: body
       });
     } catch (error) {

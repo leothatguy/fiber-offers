@@ -8,7 +8,8 @@ import { MockInvoiceAdapter } from "../src/invoice-adapter.js";
 import {
   FIBER_CURRENCIES,
   FiberOffersClient,
-  FiberPaymentFlowClient
+  FiberPaymentFlowClient,
+  formatInvoiceDescription
 } from "../../../packages/sdk/src/index.js";
 import {
   ckbScriptHash,
@@ -108,8 +109,11 @@ test("SDK verifies the invoice against the signed offer before paying", async ()
     assert.equal(byEncoded.invoice_verification.invoice.type_script_hash, token.type_script_hash);
     assert.deepEqual(
       byId.invoice_verification.checks.map((check) => [check.id, check.status]),
-      [["payee", "pass"], ["amount", "pass"], ["currency", "pass"], ["asset", "pass"], ["expiry", "pass"]]
+      [["payee", "pass"], ["amount", "pass"], ["currency", "pass"], ["asset", "pass"], ["expiry", "pass"], ["binding", "pass"]]
     );
+    // The node-signed description names this offer and the resolution it was minted for.
+    assert.equal(byId.invoice_verification.invoice.offer_id, created.offer_id);
+    assert.equal(byId.invoice_verification.invoice.resolution_id, byId.invoice.resolution_id);
     assert.equal(payer.sent.length, 3);
   });
 });
@@ -133,6 +137,27 @@ test("SDK refuses to pay an invoice a resolver substituted", async () => {
       name: "an expired invoice",
       code: "INVOICE_EXPIRED",
       tamper: (invoice) => ({ ...invoice, data: { ...invoice.data, timestamp: "0x1" } })
+    },
+    {
+      // A genuine invoice from the same node, same amount, for someone else's order.
+      name: "an invoice issued for a different offer",
+      code: "INVOICE_OFFER_MISMATCH",
+      tamper: (invoice) => setAttr(invoice, "description", `Other order (fiberoffer:0x${"7".repeat(64)}:res_other)`)
+    },
+    {
+      name: "an invoice from another resolution of the same offer",
+      code: "INVOICE_RESOLUTION_MISMATCH",
+      tamper: (invoice) =>
+        setAttr(
+          invoice,
+          "description",
+          invoice.data.attrs.find((attribute) => "description" in attribute).description.replace(/res_[a-z0-9-]+/, "res_earlier")
+        )
+    },
+    {
+      name: "an invoice that names no offer",
+      code: "INVOICE_BINDING_MISSING",
+      tamper: (invoice) => setAttr(invoice, "description", "Coffee checkout")
     },
     {
       name: "a payment hash that is not the invoice's",
@@ -292,7 +317,7 @@ class LedgerInvoiceAdapter extends MockInvoiceAdapter {
         timestamp: `0x${Date.now().toString(16)}`,
         payment_hash: issued.payment_hash,
         attrs: [
-          { description: input.offer.description ?? input.offer.offer_id },
+          { description: formatInvoiceDescription(input.offer, input.resolutionId) },
           { expiry_time: { secs: issued.expiry_seconds, nanos: 0 } },
           { payee_public_key: input.offer.node_id },
           ...(isToken ? [{ udt_script: hex(serializeCkbScript(tokenScript)) }] : [])

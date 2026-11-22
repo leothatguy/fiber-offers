@@ -149,12 +149,14 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - `monthly` recurrence clamps to the end of the month (today `Jan 31 + 1 month = Mar 3`); `approval.attempts` is bounded so `localStorage` cannot fill up.
     - Tests cover: later-`Failed` payment does not advance the cycle; crash-and-restart mid-payment; expired-invoice retry.
 
-- [ ] **A8. Bind each invoice to its offer and resolution** *(audit #2, `F-015`)*
+- [x] **A8. Bind each invoice to its offer and resolution** *(audit #2, `F-015`)* — *done 2026-11-22*
   - **Problem:** The Fiber invoice description is `offer.description ?? offer.offer_id`, so nothing in the node-signed invoice ties it to a specific offer or resolution. Receipts (`receipt.json`) are unsigned resolver assertions.
   - **Files:** `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `packages/sdk/src/payment-flow.js`, `docs/spec-v1.md`
   - **Acceptance criteria:**
     - The invoice description carries a specified commitment (for example `fiberoffer:<offer_id>:<resolution_id>`), and the payer check in `A2` verifies it.
     - The spec states what constitutes proof of payment (node-signed invoice + preimage) and what a resolver receipt does and does not prove.
+  - **Outcome:** The resolver sets every invoice description to `<description> (fiberoffer:<offer_id>:<resolution_id>)` (`packages/sdk/src/invoice-binding.js`); the human part is capped at 200 characters and only a commitment at the very end counts. `verifyInvoiceForOffer()` rejects an invoice for another offer (`INVOICE_OFFER_MISMATCH`), another resolution (`INVOICE_RESOLUTION_MISMATCH`), or with no commitment (`INVOICE_BINDING_MISSING`; opt out with `allowUnboundInvoices` for pre-0.2 resolvers). `docs/spec-v1.md` gains "Proof of payment".
+  - **Open point:** whether Fiber limits the description length is unknown; the commitment adds about 115 characters. To confirm on a live node in `F2`.
 
 ---
 
@@ -516,7 +518,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Fixed |
 | **F-013** | 2026-11-22 | Resolver / SDK | No timeout on any Fiber RPC or resolver HTTP call; a hung FNN holds the per-offer invoice lock indefinitely. | Medium | `A6` | Fixed |
 | **F-014** | 2026-11-22 | SDK | `payOffer()` reports `payment_sent` on `send_payment` acceptance (`Created`/`Inflight`) and never calls `get_payment`; the scheduler counts the cycle as paid immediately and re-sends after a crash. | High | `A7` | Open |
-| **F-015** | 2026-11-22 | Protocol / Resolver | Invoices are not bound to an offer or resolution (description is the offer description or ID); receipts are unsigned resolver assertions. | Medium | `A8` | Open |
+| **F-015** | 2026-11-22 | Protocol / Resolver | Invoices are not bound to an offer or resolution (description is the offer description or ID); receipts are unsigned resolver assertions. | Medium | `A8` | Fixed |
 | **F-016** | 2026-11-22 | Resolver / Protocol | Recurrence cycle counter is global per offer and enforced by a unique index; a second payer's cycle 1 gets `409 INVALID_RECURRENCE_CYCLE`. One subscriber per recurring offer. *Reproduced.* | High | `B2`, `D-5` | Open |
 | **F-017** | 2026-11-22 | Resolver / Deploy | Rate limiter keys on the client-controlled first `X-Forwarded-For` value, also behind the bundled Nginx; rotating it bypasses the limit. In-memory buckets never evicted; operator login, revocation and QR are unlimited. *Reproduced.* | High | `B4` | Open |
 | **F-018** | 2026-11-22 | Resolver / Deploy | Response origin trusts `X-Forwarded-Host`/`-Proto`; payment links, lookup URLs, QR payloads and stored webhook payloads can be poisoned. *Reproduced.* | High | `B4` | Open |
@@ -560,3 +562,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `A4` done | `feat(resolver): mint token invoices from a hash-verified script registry` | Fixes `F-001`, `F-012`. Token invoices were never valid Fiber requests before. Suite: 134 tests, 130 pass, 4 skipped. |
 | 2026-11-22 | `A5` done | `fix(resolver): issue invoices that expire and record when they do` | Fixes `F-003`. Suite: 137 tests, 133 pass, 4 skipped. |
 | 2026-11-22 | `A2` done | `feat(sdk): verify offers and invoices before a wallet pays` | Fixes `F-002`, `F-011`. A hostile resolver can no longer redirect a payment made through the SDK. Suite: 145 tests, 141 pass, 4 skipped. |
+| 2026-11-22 | `A8` done | `feat(sdk): bind every invoice to its offer and resolution` | Fixes `F-015`. Suite: 146 tests, 142 pass, 4 skipped. |

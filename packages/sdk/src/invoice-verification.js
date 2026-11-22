@@ -8,10 +8,19 @@
 // never the resolver's description of it.
 import { ckbScriptHash, parseCkbScript, validateResolutionRequest } from "@fiber-offers/protocol";
 import { fiberCurrencyForNetwork } from "./fiber-network.js";
+import { parseInvoiceBinding } from "./invoice-binding.js";
 
 // Returns { ok, checks, failure?, invoice } where `invoice` is the normalized
 // reading (payee, amount, currency, asset script hash, expiry).
-export function verifyInvoiceForOffer({ offer, request, parsed, expectedPaymentHash, now = Date.now() }) {
+export function verifyInvoiceForOffer({
+  offer,
+  request,
+  parsed,
+  expectedPaymentHash,
+  expectedResolutionId,
+  requireBinding = true,
+  now = Date.now()
+}) {
   const checks = [];
   const fail = (id, code, summary, details) => {
     checks.push({ id, status: "fail", code, message: summary, ...(details ? { details } : {}) });
@@ -100,6 +109,31 @@ export function verifyInvoiceForOffer({ offer, request, parsed, expectedPaymentH
     pass("expiry", invoice.expires_at_ms === undefined ? "Invoice states no expiry" : "Invoice has not expired");
   }
 
+  // Binding: the node-signed description must name this offer, so a genuine
+  // invoice issued for a different order cannot be swapped in.
+  const binding = parseInvoiceBinding(invoice.description);
+  if (!binding) {
+    if (requireBinding) {
+      fail(
+        "binding",
+        "INVOICE_BINDING_MISSING",
+        "The invoice does not say which offer it was issued for, so it cannot be tied to this one."
+      );
+    }
+  } else if (binding.offer_id !== offer.offer_id) {
+    fail("binding", "INVOICE_OFFER_MISMATCH", "The invoice was issued for a different offer.", {
+      offer_id: offer.offer_id,
+      invoice_offer_id: binding.offer_id
+    });
+  } else if (expectedResolutionId && binding.resolution_id && binding.resolution_id !== expectedResolutionId) {
+    fail("binding", "INVOICE_RESOLUTION_MISMATCH", "The invoice belongs to a different resolution than the resolver reported.", {
+      reported_resolution_id: expectedResolutionId,
+      invoice_resolution_id: binding.resolution_id
+    });
+  } else {
+    pass("binding", "Invoice was issued for this offer");
+  }
+
   // The payment hash the resolver reported must be the invoice's own.
   if (expectedPaymentHash && invoice.payment_hash && !sameHex(expectedPaymentHash, invoice.payment_hash)) {
     fail(
@@ -142,6 +176,7 @@ export function normalizeParsedInvoice(parsed) {
     payment_hash: typeof invoice.data.payment_hash === "string" ? invoice.data.payment_hash : undefined,
     payee_public_key: payee,
     description: typeof attrs.description === "string" ? attrs.description : undefined,
+    binding: parseInvoiceBinding(attrs.description),
     udt_script_hash: udtScriptHash,
     udt_script_error: udtScriptError,
     expires_at_ms:
@@ -180,6 +215,8 @@ function publicInvoice(invoice) {
     payment_hash: invoice.payment_hash,
     payee_public_key: invoice.payee_public_key,
     description: invoice.description,
+    offer_id: invoice.binding?.offer_id,
+    resolution_id: invoice.binding?.resolution_id,
     type_script_hash: invoice.udt_script_hash,
     expires_at: invoice.expires_at_ms !== undefined ? new Date(invoice.expires_at_ms).toISOString() : undefined
   };

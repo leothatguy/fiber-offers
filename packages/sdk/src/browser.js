@@ -18,6 +18,8 @@ export {
   networkForFiberCurrency,
   normalizeParsedInvoice,
   verifyInvoiceForOffer,
+  formatInvoiceDescription,
+  parseInvoiceBinding,
   normalizeFiberPaymentFailure,
   parseFiberAddress,
   planDirectChannelFixture,

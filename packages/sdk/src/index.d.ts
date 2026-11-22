@@ -402,7 +402,7 @@ export interface FiberParsedInvoice {
 }
 
 export interface InvoiceVerificationCheck {
-  id: "invoice_format" | "payee" | "amount" | "currency" | "asset" | "expiry" | "payment_hash";
+  id: "invoice_format" | "payee" | "amount" | "currency" | "asset" | "expiry" | "binding" | "payment_hash";
   status: "pass" | "fail";
   code?: string;
   message: string;
@@ -416,6 +416,9 @@ export interface VerifiedInvoiceSummary {
   payment_hash?: string;
   payee_public_key?: string;
   description?: string;
+  /** The offer and resolution named by the description's commitment. */
+  offer_id?: string;
+  resolution_id?: string;
   type_script_hash?: string;
   expires_at?: string;
 }
@@ -437,9 +440,26 @@ export function verifyInvoiceForOffer(input: {
   request: PaymentRequest;
   parsed: unknown;
   expectedPaymentHash?: string;
+  /** The resolution the resolver said the invoice belongs to. */
+  expectedResolutionId?: string;
+  /** Default true: an invoice that names no offer is rejected. */
+  requireBinding?: boolean;
   now?: number;
 }): InvoiceVerificationOutcome;
 export function normalizeParsedInvoice(parsed: unknown): JsonObject | undefined;
+
+/**
+ * The description a resolver gives an invoice: the offer's own description
+ * followed by a commitment, `(fiberoffer:<offer_id>:<resolution_id>)`.
+ */
+export function formatInvoiceDescription(
+  offer: { offer_id: string; description?: string },
+  resolutionId?: string
+): string;
+/** Reads the commitment at the end of an invoice description. */
+export function parseInvoiceBinding(
+  description: string | undefined
+): { offer_id: string; resolution_id?: string } | undefined;
 
 export function fiberSendPaymentParams(invoice: string, options?: FiberSendPaymentOptions): FiberSendPaymentParams;
 export function toFiberHexQuantity(value: IntegerLike): string;
@@ -853,6 +873,8 @@ export interface FiberPaymentFlowClientOptions {
   payerPaymentClient?: PaymentFlowPayer;
   /** Accept a resolver other than the `resolver_url` signed into the offer. For tests and local setups. */
   allowResolverMismatch?: boolean;
+  /** Accept an invoice whose description names no offer (a resolver older than 0.2). Unsafe. */
+  allowUnboundInvoices?: boolean;
 }
 
 export interface FiberPaymentFlowOptions extends FiberSendPaymentOptions {
@@ -863,6 +885,8 @@ export interface FiberPaymentFlowOptions extends FiberSendPaymentOptions {
   forceLocalDryRun?: boolean;
   /** Per-call form of the constructor option. */
   allowResolverMismatch?: boolean;
+  /** Per-call form of the constructor option. */
+  allowUnboundInvoices?: boolean;
   /** Pay an invoice that was not checked against the signed offer. Unsafe outside tests. */
   skipInvoiceVerification?: boolean;
 }
@@ -912,6 +936,7 @@ export class FiberPaymentFlowClient {
   resolver: PaymentFlowResolver;
   paymentClient?: PaymentFlowPayer;
   allowResolverMismatch: boolean;
+  allowUnboundInvoices: boolean;
   constructor(options: FiberPaymentFlowClientOptions);
   preparePayment(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
   payOffer(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;

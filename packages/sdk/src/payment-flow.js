@@ -13,6 +13,9 @@ export class FiberPaymentFlowClient {
     // For tests and local setups where the resolver is reached at a different
     // address than the one signed into the offer.
     this.allowResolverMismatch = Boolean(options.allowResolverMismatch);
+    // For paying through a resolver that predates invoice binding. Such an
+    // invoice cannot be told apart from one issued for another order.
+    this.allowUnboundInvoices = Boolean(options.allowUnboundInvoices);
 
     if (!this.resolver) {
       throw new Error("FiberPaymentFlowClient requires a resolverClient");
@@ -57,7 +60,7 @@ export class FiberPaymentFlowClient {
       });
     }
 
-    const verification = await this.#verifyInvoice(offer, request, invoice, invoiceValue);
+    const verification = await this.#verifyInvoice(offer, request, invoice, invoiceValue, options);
     if (verification.attempted && !verification.verified) {
       return paymentFlowResult({
         ok: false,
@@ -244,7 +247,7 @@ export class FiberPaymentFlowClient {
     return undefined;
   }
 
-  async #verifyInvoice(offer, request, invoice, invoiceValue) {
+  async #verifyInvoice(offer, request, invoice, invoiceValue, options = {}) {
     if (!offer) {
       return {
         attempted: false,
@@ -289,7 +292,9 @@ export class FiberPaymentFlowClient {
       offer,
       request,
       parsed,
-      expectedPaymentHash: invoice.payment_hash
+      expectedPaymentHash: invoice.payment_hash,
+      expectedResolutionId: invoice.resolution_id,
+      requireBinding: !(this.allowUnboundInvoices || options.allowUnboundInvoices)
     });
     return {
       attempted: true,

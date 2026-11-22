@@ -229,6 +229,11 @@ The resolver is treated as untrusted. Before any funds move, the flow checks:
    (for a token, the invoice's type script must hash to the offer's
    `type_script_hash`), and it must not have expired. A mismatch gives
    `invoice_rejected` with a code such as `INVOICE_PAYEE_MISMATCH`.
+5. **The binding.** The invoice's node-signed description must end with a
+   commitment naming this offer and the resolution the resolver reported, so a
+   genuine invoice for a different order cannot be swapped in
+   (`INVOICE_OFFER_MISMATCH`, `INVOICE_RESOLUTION_MISMATCH`,
+   `INVOICE_BINDING_MISSING`).
 
 `payOffer` with `execute: true` refuses to send (`invoice_unverified`) when the
 invoice could not be verified, for example because the payment client has no
@@ -236,7 +241,8 @@ invoice could not be verified, for example because the payment client has no
 
 `verifyInvoiceForOffer()` is exported for wallets that run their own flow.
 `allowResolverMismatch` and `skipInvoiceVerification` exist for tests and local
-setups; do not set them in a wallet.
+setups; do not set them in a wallet. `allowUnboundInvoices` accepts invoices from
+a resolver older than 0.2, which did not write the commitment.
 
 ## Fiber Address discovery
 

@@ -17,11 +17,13 @@ import {
   createOffer,
   fiberCurrencyForNetwork,
   fiberSendPaymentParams,
+  formatInvoiceDescription,
   networkForChainHash,
   networkForFiberCurrency,
   normalizeFiberPaymentFailure,
   offerQrUrl,
   parseFiberAddress,
+  parseInvoiceBinding,
   planDirectChannelFixture,
   summarizeFiberChannels,
   toFiberDecimalQuantity,
@@ -244,8 +246,9 @@ test("reads invoices in every attribute form a Fiber node may use", async () => 
     data: { timestamp: `0x${now.toString(16)}`, payment_hash: "0x" + "1".repeat(64), attrs },
     ...extra
   });
+  // This test is about attribute shapes; binding is covered separately below.
   const verify = (parsed, request = { amount: "1000" }) =>
-    verifyInvoiceForOffer({ offer, request, parsed, now: now + 1000 });
+    verifyInvoiceForOffer({ offer, request, parsed, requireBinding: false, now: now + 1000 });
 
   const snakeCase = verify({ invoice: invoice([{ payee_public_key: nodeId }, { expiry_time: { secs: 600, nanos: 0 } }]) });
   const camelCase = verify(invoice([{ PayeePublicKey: `0x${nodeId.toUpperCase()}` }, { ExpiryTime: "0x258" }]));
@@ -271,6 +274,58 @@ test("reads invoices in every attribute form a Fiber node may use", async () => 
   assert.equal(expired.failure.code, "INVOICE_EXPIRED");
   assert.equal(noAmount.failure.code, "INVOICE_AMOUNT_MISSING");
   assert.equal(garbage.failure.code, "INVOICE_UNPARSEABLE");
+});
+
+test("an invoice must name the offer it was issued for", () => {
+  const keys = generateOfferKeyPair();
+  const nodeId = "02" + "f".repeat(64);
+  const offer = createSignedOffer(
+    {
+      node_id: nodeId,
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://resolver.example",
+      // An offer's own text may try to look like a commitment; only the end counts.
+      description: `Sneaky (fiberoffer:0x${"1".repeat(64)}:res_fake) checkout`,
+      assets: [{ asset_type: "ckb", symbol: "CKB" }]
+    },
+    keys.privateKeyPem
+  );
+  const withDescription = (description) => ({
+    currency: "Fibt",
+    amount: "0x3e8",
+    data: { payment_hash: "0x" + "1".repeat(64), attrs: [{ payee_public_key: nodeId }, { description }] }
+  });
+  const verify = (description, extra = {}) =>
+    verifyInvoiceForOffer({ offer, request: { amount: "1000" }, parsed: withDescription(description), ...extra });
+  const bound = formatInvoiceDescription(offer, "res_abc-123");
+
+  assert.equal(bound.endsWith(`(fiberoffer:${offer.offer_id}:res_abc-123)`), true);
+  assert.deepEqual(parseInvoiceBinding(bound), { offer_id: offer.offer_id, resolution_id: "res_abc-123" });
+  assert.deepEqual(parseInvoiceBinding(formatInvoiceDescription({ offer_id: offer.offer_id })), {
+    offer_id: offer.offer_id
+  });
+  assert.equal(parseInvoiceBinding("Coffee checkout"), undefined);
+  assert.equal(parseInvoiceBinding(undefined), undefined);
+  // A very long description is shortened, never the commitment.
+  assert.equal(
+    parseInvoiceBinding(formatInvoiceDescription({ offer_id: offer.offer_id, description: "x".repeat(5000) }, "res_1"))
+      .offer_id,
+    offer.offer_id
+  );
+
+  assert.equal(verify(bound, { expectedResolutionId: "res_abc-123" }).ok, true);
+  assert.equal(verify(bound, { expectedResolutionId: "res_other" }).failure.code, "INVOICE_RESOLUTION_MISMATCH");
+  assert.equal(verify(offer.description).failure.code, "INVOICE_BINDING_MISSING");
+  assert.equal(verify(offer.description, { requireBinding: false }).ok, true);
+  assert.equal(
+    verify(`Order (fiberoffer:0x${"2".repeat(64)}:res_abc-123)`).failure.code,
+    "INVOICE_OFFER_MISMATCH"
+  );
+  // Even with binding optional, a commitment to another offer is a rejection.
+  assert.equal(
+    verify(`Order (fiberoffer:0x${"2".repeat(64)})`, { requireBinding: false }).failure.code,
+    "INVOICE_OFFER_MISMATCH"
+  );
 });
 
 test("FiberPaymentClient reads an invoice through the payer node", async () => {

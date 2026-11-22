@@ -74,7 +74,19 @@ A resolver is an untrusted intermediary. It can return any offer and any invoice
 2. The resolver contacted is the `resolver_url` signed into the offer.
 3. The invoice, as read by the payer's own node, pays `offer.node_id`, for the requested amount, in the currency of `offer.network`, in the requested asset (no token script for CKB; for a token, a type script whose hash is the offer's `type_script_hash`), and has not expired.
 
-A payer that skips step 3 can be made to pay anyone. The reference SDK refuses to send a payment for an invoice it could not verify.
+4. The invoice names this offer. The resolver sets the invoice description to the offer's description followed by a commitment, and the node signs it as part of the invoice:
+
+   ```text
+   <description> (fiberoffer:<offer_id>:<resolution_id>)
+   ```
+
+   The commitment is the last thing in the description; text earlier in it does not count. The payer checks that `offer_id` is the offer it holds and that `resolution_id` is the resolution the resolver reported. Without this, a resolver could hand over a genuine invoice from the right node and for the right amount that belongs to a different order.
+
+A payer that skips steps 3 and 4 can be made to pay anyone, or to pay for someone else's order. The reference SDK refuses to send a payment for an invoice it could not verify.
+
+### Proof of payment
+
+Proof that an offer was paid is the node-signed invoice, whose description names the offer and resolution, together with the payment preimage for its payment hash. Both are verifiable by anyone without trusting the resolver. `GET /offers/:offer_id/resolutions/:resolution_id/receipt.json` is the resolver's own record of the same payment. It is convenient for bookkeeping and is not signed, so on its own it proves only what the resolver asserts.
 
 ## Revocation
 

@@ -199,7 +199,8 @@ test("Fiber RPC adapter creates invoices using Fiber JSON-RPC shape", async () =
       {
         amount: "0x5f5e100",
         currency: "Fibt",
-        description: "test invoice",
+        // The offer's description followed by the commitment naming the offer.
+        description: "test invoice (fiberoffer:0xoffer)",
         // The default 15-minute invoice lifetime, in seconds.
         expiry: "0x384"
       }

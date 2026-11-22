@@ -20,6 +20,7 @@ import {
   networkForFiberCurrency
 } from "./fiber-network.js";
 import { fetchText, normalizeTimeoutMs } from "./http.js";
+import { formatInvoiceDescription, parseInvoiceBinding } from "./invoice-binding.js";
 import { normalizeParsedInvoice, verifyInvoiceForOffer } from "./invoice-verification.js";
 import {
   FiberPaymentClient,
@@ -53,6 +54,8 @@ export {
   networkForFiberCurrency,
   normalizeParsedInvoice,
   verifyInvoiceForOffer,
+  formatInvoiceDescription,
+  parseInvoiceBinding,
   FiberNodeDiagnosticsClient,
   FiberPaymentFlowClient,
   FiberPaymentClient,

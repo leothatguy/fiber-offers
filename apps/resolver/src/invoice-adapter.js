@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { base64UrlEncode } from "../../../packages/protocol/src/index.js";
 import { fiberCurrencyForNetwork, fiberNodeNetwork } from "../../../packages/sdk/src/fiber-network.js";
+import { formatInvoiceDescription } from "../../../packages/sdk/src/invoice-binding.js";
 import {
   loadUdtScriptsFromEnv,
   parseConfiguredUdtScripts,
@@ -85,7 +86,7 @@ export class FiberRpcInvoiceAdapter {
     this.now = options.now ?? Date.now;
   }
 
-  async createInvoice({ offer, amount, asset }) {
+  async createInvoice({ offer, amount, asset, resolutionId }) {
     // Read the clock before asking the node, so the expiry recorded here is
     // never later than the node's own.
     const issuedAt = this.now();
@@ -93,7 +94,9 @@ export class FiberRpcInvoiceAdapter {
     const params = {
       amount: toHexQuantity(amount),
       currency: invoiceCurrency(offer),
-      description: offer.description ?? offer.offer_id,
+      // The node signs the description, so naming the offer and resolution in
+      // it lets the payer prove which order this invoice is for.
+      description: formatInvoiceDescription(offer, resolutionId),
       // Without an expiry a Fiber invoice stays payable forever and is never
       // reported as Expired.
       expiry: toHexQuantity(expirySeconds)
