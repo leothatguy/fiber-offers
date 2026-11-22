@@ -74,9 +74,11 @@ test("PostgreSQL store serializes single-use reservations across pools", { skip:
 test("PostgreSQL lets a recurring cycle be issued again after its invoice lapsed", { skip: !enabled }, async () => {
   const offer = signedOffer({ recurrence: { interval: "daily", amount: "1000", cap_cycles: 2 } });
   await primary.upsertOffer(offer, encodeOffer(offer));
-  const cycle = (number) => ({ request: { amount: "1000", asset: offer.assets[0], recurrence_cycle: number } });
-  const issue = async (store, number, hash) => {
-    const reservation = await store.reserveInvoiceAttempt(offer.offer_id, cycle(number));
+  const cycle = (number, approvalId = "sub_alice") => ({
+    request: { amount: "1000", asset: offer.assets[0], recurrence_cycle: number, approval_id: approvalId }
+  });
+  const issue = async (store, number, hash, approvalId) => {
+    const reservation = await store.reserveInvoiceAttempt(offer.offer_id, cycle(number, approvalId));
     return store.finalizeInvoiceReservation(offer.offer_id, reservation.record.id, {
       invoice: `fibt1cycle${hash}`,
       payment_hash: hash,
@@ -90,8 +92,20 @@ test("PostgreSQL lets a recurring cycle be issued again after its invoice lapsed
   const again = await issue(replica, 1, "0x11");
 
   assert.equal(again.recurrence.cycle, 1);
+  // The same subscription cannot hold two invoices for one cycle.
   await assert.rejects(
     () => primary.reserveInvoiceAttempt(offer.offer_id, cycle(1)),
+    (error) => error.code === "RECURRENCE_CYCLE_OUTSTANDING"
+  );
+  // A second subscriber starts their own cycle 1 on the same offer.
+  const other = await issue(primary, 1, "0x12", "sub_bob");
+  assert.deepEqual([other.recurrence.cycle, other.recurrence.approval_id], [1, "sub_bob"]);
+  // Paying advances only the subscription that paid.
+  await replica.transitionResolution(offer.offer_id, again.id, { from: "invoice_created", status: "invoice_paid" });
+  const aliceTwo = await issue(replica, 2, "0x13", "sub_alice");
+  assert.equal(aliceTwo.recurrence.cycle, 2);
+  await assert.rejects(
+    () => primary.reserveInvoiceAttempt(offer.offer_id, cycle(2, "sub_bob")),
     (error) => error.code === "INVALID_RECURRENCE_CYCLE"
   );
 });

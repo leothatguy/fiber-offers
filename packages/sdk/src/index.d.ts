@@ -8,13 +8,17 @@ export {
   normalizeCkbScript,
   offerToPaymentLink,
   parseCkbScript,
+  signRecurrenceRequest,
+  subscriptionId,
   verifyOffer,
-  verifyOfferRevocation
+  verifyOfferRevocation,
+  verifyRecurrenceRequest
 } from "@fiber-offers/protocol";
 
 export type {
   CkbScript,
   CkbScriptHashType,
+  SignedRecurrenceRequest,
   FiberAsset,
   FiberAssetType,
   FiberOfferInput,
@@ -224,7 +228,8 @@ export class FiberOffersClient {
     options?: InvoiceRequestOptions
   ): Promise<PaymentReadiness>;
   getResolutions(offerOrId: OfferOrId): Promise<ResolutionRecord[]>;
-  getRecurrenceStatus(offerOrId: OfferOrId): Promise<RecurrenceStatus>;
+  /** Pass a subscription ID for that subscription's status; omit it for the offer summary. */
+  getRecurrenceStatus(offerOrId: OfferOrId, approvalId?: string): Promise<RecurrenceStatus>;
   revokeOffer(offerOrId: OfferOrId, revocation: JsonObject): Promise<JsonObject>;
   getResolution(offerOrId: OfferOrId, resolutionId: string): Promise<ResolutionRecord>;
   getReceipt(offerOrId: OfferOrId, resolutionId: string): Promise<JsonObject>;
@@ -990,22 +995,45 @@ export class FiberPaymentFlowClient {
   confirmPayment(paymentHash: string, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
 }
 
+/**
+ * Recurrence status. Asked for one subscription (`approval_id`) it reports
+ * that subscription; otherwise it summarises the offer across all of them.
+ */
 export interface RecurrenceStatus {
   offer_id: string;
   enabled: boolean;
   revoked: boolean;
   terms?: import("@fiber-offers/protocol").FiberOfferRecurrence;
-  cycles_created?: number;
+  /** Cycles that have been paid. */
   cycles_paid?: number;
-  next_cycle?: number;
-  reserved_total?: string;
   paid_total?: string;
+
+  /** Per subscription: the subscription this status is for. */
+  approval_id?: string;
+  /** Per subscription: the cycle to request next. Absent once a cap is reached. */
+  next_cycle?: number;
+  /** Per subscription: true when no further cycle is allowed. */
+  cap_reached?: boolean;
+  /** Per subscription: an invoice issued for the current cycle and not yet paid. */
+  outstanding?: { cycle: number; resolution_id: string; expires_at?: string };
   spending_cap_remaining?: string;
   cycle_cap_remaining?: number;
+
+  /** Offer summary: how many subscriptions have cycles that count. */
+  subscriptions?: number;
+  /** Offer summary: cycles issued and not released (paid or still open). */
+  cycles_created?: number;
+  reserved_total?: string;
 }
 
 export interface RecurringApproval {
+  /** A local name for the approval, chosen by the wallet. */
   id: string;
+  /** The subscription the resolver counts cycles against: `subscriptionId(subscriber_public_key)`. */
+  subscription_id?: string;
+  subscriber_public_key?: string;
+  /** Signs each cycle request. Stays in the approval store; controls no funds. */
+  subscriber_private_key_pem?: string;
   offer_id: string;
   offer: SignedFiberOffer;
   asset: FiberAsset;

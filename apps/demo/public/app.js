@@ -701,7 +701,7 @@ async function requestInvoice() {
   try {
     const resolution = await api(`/offers/${state.offerResponse.offer_id}/invoice`, {
       method: "POST",
-      body: currentPaymentRequest()
+      body: await currentPaymentRequest()
     });
 
     const item = resolutionFromInvoiceResponse(resolution);
@@ -729,7 +729,7 @@ async function checkReadiness() {
   try {
     const readiness = await api(`/offers/${state.offerResponse.offer_id}/check`, {
       method: "POST",
-      body: currentPaymentRequest({ includeInvoice: true })
+      body: await currentPaymentRequest({ includeInvoice: true })
     });
     renderReadiness(readiness);
     toast(readiness.ready ? `Readiness confidence: ${readiness.confidence ?? "unknown"}` : "Payment needs attention", !readiness.ready);
@@ -983,15 +983,25 @@ function renderRecurrenceApproval(offer) {
   els.requestInvoiceButton.disabled = !approved;
 }
 
-function toggleRecurringApproval() {
+async function toggleRecurringApproval() {
   const offer = state.offerResponse?.offer;
   if (!offer?.recurrence) return;
   if (state.recurringApproval?.offer_id === offer.offer_id) {
     state.recurringApproval = undefined;
     toast("Recurring approval revoked");
   } else {
-    state.recurringApproval = { offer_id: offer.offer_id, approved_at: new Date().toISOString() };
-    toast("Recurring payment approved");
+    try {
+      // Approving creates this payer's subscription: a key that signs every
+      // cycle request, so the resolver counts cycles for this payer alone.
+      state.recurringApproval = {
+        offer_id: offer.offer_id,
+        approved_at: new Date().toISOString(),
+        subscription: await FiberOfferSubscription.createSubscription()
+      };
+      toast("Recurring payment approved");
+    } catch (error) {
+      toast(`This browser cannot create a subscription key: ${error.message}`, true);
+    }
   }
   renderRecurrenceApproval(offer);
 }
@@ -1878,15 +1888,25 @@ function resolutionFromRecord(record) {
   };
 }
 
-function currentPaymentRequest(options = {}) {
-  const asset = state.offerResponse.offer.assets[0];
-  const request = {
+async function currentPaymentRequest(options = {}) {
+  const offer = state.offerResponse.offer;
+  const asset = offer.assets[0];
+  let request = {
     amount: inputAmountToProtocol(els.payAmountInput.value, asset),
     asset
   };
-  if (state.offerResponse.offer.recurrence) {
-    request.recurrence_cycle = state.resolutions.filter((resolution) => resolution.recurrence).length + 1;
-    request.approval_id = state.recurringApproval?.offer_id;
+  if (offer.recurrence) {
+    const subscription = state.recurringApproval?.subscription;
+    if (!subscription) throw new Error("Approve the recurring payment before requesting an invoice");
+    // The resolver knows which cycle this subscription is on.
+    const status = await api(
+      `/offers/${offer.offer_id}/recurrence-status?approval_id=${encodeURIComponent(subscription.approval_id)}`
+    );
+    if (status.cap_reached) throw new Error("This recurring approval has reached its cap");
+    request = await FiberOfferSubscription.signCycle(subscription, offer, {
+      ...request,
+      recurrence_cycle: status.next_cycle
+    });
   }
   const latest = state.resolutions[0];
   if (

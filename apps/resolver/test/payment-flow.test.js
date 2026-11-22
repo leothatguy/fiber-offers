@@ -16,7 +16,9 @@ import {
   createSignedOffer,
   encodeOffer,
   generateOfferKeyPair,
-  serializeCkbScript
+  serializeCkbScript,
+  signRecurrenceRequest,
+  subscriptionId
 } from "../../../packages/protocol/src/index.js";
 
 const asset = { asset_type: "ckb", symbol: "CKB" };
@@ -74,24 +76,28 @@ test("SDK payOffer retries a recurring cycle after a transport failure", async (
     });
     const payer = fakePayerNode({ ledger, failFirstSend: true });
     const flow = new FiberPaymentFlowClient({ resolverClient: client, paymentClient: payer });
-    const cycleOne = { amount: "1000", asset, recurrence_cycle: 1, approval_id: "approval-7" };
-    const options = { execute: true, idempotencyKey: "approval-7:1" };
+    const subscriber = generateOfferKeyPair();
+    const subscription = subscriptionId(subscriber.publicKeyPem);
+    const cycle = (number) =>
+      signRecurrenceRequest(created.offer, { amount: "1000", asset, recurrence_cycle: number }, subscriber.privateKeyPem);
+    const options = { execute: true, idempotencyKey: `${subscription}:1` };
 
-    const failed = await flow.payOffer(created.offer_id, cycleOne, options);
-    const retried = await flow.payOffer(created.offer_id, cycleOne, options);
-    const nextCycle = await flow.payOffer(
-      created.offer_id,
-      { ...cycleOne, recurrence_cycle: 2 },
-      { execute: true, idempotencyKey: "approval-7:2" }
-    );
-    const status = await client.getRecurrenceStatus(created.offer_id);
+    const failed = await flow.payOffer(created.offer_id, cycle(1), options);
+    const retried = await flow.payOffer(created.offer_id, cycle(1), options);
+    // The resolver learns the cycle was paid, which is what opens the next one.
+    await client.updateResolutionStatus(created.offer_id, retried.invoice.resolution_id, { status: "invoice_paid" });
+    const nextCycle = await flow.payOffer(created.offer_id, cycle(2), {
+      execute: true,
+      idempotencyKey: `${subscription}:2`
+    });
+    const status = await client.getRecurrenceStatus(created.offer_id, subscription);
 
     assert.equal(failed.status, "payment_failed");
     assert.equal(retried.status, "payment_sent");
     assert.equal(retried.invoice.recurrence.cycle, 1);
     assert.equal(nextCycle.status, "payment_sent");
     assert.equal(nextCycle.invoice.recurrence.cycle, 2);
-    assert.equal(status.cycles_created, 2);
+    assert.deepEqual([status.cycles_paid, status.outstanding.cycle], [1, 2]);
     assert.equal(payer.sent.length, 2);
   });
 });

@@ -91,9 +91,16 @@ export function assertSingleUseCapacity(offer, resolutions, options = {}) {
   }
 }
 
-// Validates a request against the offer's recurrence terms and what has
-// already been issued, and returns the recurrence record to store with the
-// new resolution (undefined for an offer without recurrence).
+// Validates a cycle request against the offer's recurrence terms and what its
+// subscription has already been issued, and returns the recurrence record to
+// store with the new resolution (undefined for an offer without recurrence).
+//
+// Cycles and caps are counted per subscription (`approval_id`), so any number
+// of payers can subscribe to one offer and none can advance or exhaust
+// another's. Within a subscription a cycle is used up when it is paid; an
+// invoice that ends unpaid releases its cycle, and only one cycle can be
+// outstanding at a time. The caller has already verified that the request was
+// signed by the subscription's key.
 export function recurrenceReservation(offer, request, resolutions, options = {}) {
   if (!offer.recurrence) {
     if (request.recurrence_cycle !== undefined && request.recurrence_cycle !== null) {
@@ -102,30 +109,87 @@ export function recurrenceReservation(offer, request, resolutions, options = {})
     return undefined;
   }
   const terms = offer.recurrence;
+  const approvalId = request.approval_id;
+  if (typeof approvalId !== "string" || approvalId.length === 0) {
+    throw ruleError("a recurring cycle request must name its subscription", "SUBSCRIPTION_PROOF_REQUIRED", 400);
+  }
   if (!/^[1-9][0-9]*$/.test(String(request.amount ?? "")) || BigInt(request.amount) !== BigInt(terms.amount)) {
     throw ruleError(`recurring cycle amount must equal ${terms.amount}`, "RECURRENCE_AMOUNT_MISMATCH", 400);
   }
-  const cycles = countedResolutions(resolutions, options).filter((resolution) => resolution.recurrence);
-  const expected = cycles.length + 1;
+
+  const mine = subscriptionResolutions(resolutions, approvalId, options);
+  const paid = mine.filter(isConsumed);
+  const expected = paid.length + 1;
   const requested =
     request.recurrence_cycle === undefined || request.recurrence_cycle === null
       ? expected
       : Number(request.recurrence_cycle);
-  if (!Number.isSafeInteger(requested) || requested !== expected) {
-    throw ruleError(`next recurrence cycle must be ${expected}`, "INVALID_RECURRENCE_CYCLE", 409);
-  }
   if (terms.cap_cycles !== undefined && expected > terms.cap_cycles) {
     throw ruleError("recurring payment cycle cap has been reached", "RECURRENCE_CYCLE_CAP_REACHED", 409);
   }
-  const reserved = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  if (terms.spending_cap_total !== undefined && reserved + BigInt(terms.amount) > BigInt(terms.spending_cap_total)) {
+  const paidTotal = paid.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
+  if (terms.spending_cap_total !== undefined && paidTotal + BigInt(terms.amount) > BigInt(terms.spending_cap_total)) {
     throw ruleError("recurring payment spending cap has been reached", "RECURRENCE_SPENDING_CAP_REACHED", 409);
+  }
+  if (!Number.isSafeInteger(requested) || requested !== expected) {
+    throw ruleError(`the next cycle of this subscription is ${expected}`, "INVALID_RECURRENCE_CYCLE", 409, {
+      next_cycle: expected
+    });
+  }
+  const outstanding = mine.find(isHolding);
+  if (outstanding) {
+    throw ruleError(
+      "this subscription has an unpaid invoice outstanding for its current cycle",
+      "RECURRENCE_CYCLE_OUTSTANDING",
+      409,
+      { outstanding_until: outstanding.invoice?.expires_at ?? outstanding.reservation_expires_at, retryable: true }
+    );
   }
   return {
     cycle: expected,
     interval: terms.interval,
-    ...(request.scheduled_for ? { scheduled_for: request.scheduled_for } : {}),
-    ...(request.approval_id ? { approval_id: request.approval_id } : {})
+    approval_id: approvalId,
+    ...(request.scheduled_for ? { scheduled_for: request.scheduled_for } : {})
+  };
+}
+
+// The resolutions of one subscription that still count.
+export function subscriptionResolutions(resolutions, approvalId, options = {}) {
+  return countedResolutions(resolutions, options).filter(
+    (resolution) => resolution.recurrence?.approval_id === approvalId
+  );
+}
+
+// Where one subscription stands, for its payer.
+export function subscriptionStatus(offer, resolutions, approvalId) {
+  const terms = offer.recurrence;
+  const mine = subscriptionResolutions(resolutions, approvalId);
+  const paid = mine.filter(isConsumed);
+  const outstanding = mine.find(isHolding);
+  const paidTotal = paid.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
+  const capReached =
+    (terms.cap_cycles !== undefined && paid.length >= terms.cap_cycles) ||
+    (terms.spending_cap_total !== undefined && paidTotal + BigInt(terms.amount) > BigInt(terms.spending_cap_total));
+  return {
+    approval_id: approvalId,
+    cycles_paid: paid.length,
+    paid_total: paidTotal.toString(),
+    next_cycle: capReached ? undefined : paid.length + 1,
+    cap_reached: capReached,
+    ...(outstanding
+      ? {
+          outstanding: {
+            cycle: outstanding.recurrence.cycle,
+            resolution_id: outstanding.id,
+            expires_at: outstanding.invoice?.expires_at
+          }
+        }
+      : {}),
+    cycle_cap_remaining: terms.cap_cycles === undefined ? undefined : Math.max(0, terms.cap_cycles - paid.length),
+    spending_cap_remaining:
+      terms.spending_cap_total === undefined
+        ? undefined
+        : (BigInt(terms.spending_cap_total) - paidTotal < 0n ? 0n : BigInt(terms.spending_cap_total) - paidTotal).toString()
   };
 }
 

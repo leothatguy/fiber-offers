@@ -358,6 +358,17 @@ The scheduler enforces signed cycle and spending caps, uses an idempotency key
 per cycle, retries without advancing a failed schedule, and stores payer consent
 outside the merchant resolver.
 
+Each approval is its own subscription. `approve()` generates a key for it and
+stores the key with the approval; every cycle request is signed with that key,
+and the resolver counts cycles and caps against `approval.subscription_id`. Two
+approvals of the same offer, by the same or different payers, never affect each
+other. The key authorizes cycle requests only and controls no funds, but it does
+live in the approval store, so keep that store private to the payer.
+
+A cycle counts as paid only once the payer's node confirms the payment. Ask the
+resolver where a subscription stands with
+`resolver.getRecurrenceStatus(offerId, approval.subscription_id)`.
+
 ## React and React Native
 
 ```jsx

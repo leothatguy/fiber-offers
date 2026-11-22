@@ -12,7 +12,9 @@ import {
   createOfferRevocation,
   createSignedOffer,
   encodeOffer,
-  generateOfferKeyPair
+  generateOfferKeyPair,
+  signRecurrenceRequest,
+  subscriptionId
 } from "../../../packages/protocol/src/index.js";
 
 test("creates a demo offer and resolves fresh invoices from it", async () => {
@@ -413,18 +415,19 @@ test("readiness treats an idempotent retry as a replay instead of a new use", as
       recurrence: { interval: "daily", amount: "1000", cap_cycles: 3 }
     });
     const recurringUrl = `${baseUrl}/offers/${recurring.body.offer_id}`;
-    const cycleKey = { "idempotency-key": "approval-1:1" };
-    const cycleOne = { amount: "1000", asset, recurrence_cycle: 1, approval_id: "approval-1" };
+    const subscriber = generateOfferKeyPair();
+    const cycleKey = { "idempotency-key": "subscription-1:1" };
+    const cycleOne = signRecurrenceRequest(recurring.body.offer, { amount: "1000", asset, recurrence_cycle: 1 }, subscriber.privateKeyPem);
     await postJson(`${recurringUrl}/invoice`, cycleOne, cycleKey);
     const cycleRetry = await postJson(`${recurringUrl}/check`, cycleOne, cycleKey);
     const cycleNoKey = await postJson(`${recurringUrl}/check`, cycleOne);
-    const nextCycle = await postJson(`${recurringUrl}/check`, { ...cycleOne, recurrence_cycle: 2 });
 
     assert.equal(cycleRetry.body.ready, true);
     assert.equal(checkOf(cycleRetry, "recurrence").status, "pass");
+    assert.equal(checkOf(cycleRetry, "subscription").status, "pass");
+    // Without the key it is a second request for a cycle that is still unpaid.
     assert.equal(cycleNoKey.body.ready, false);
-    assert.equal(checkOf(cycleNoKey, "recurrence").code, "INVALID_RECURRENCE_CYCLE");
-    assert.equal(nextCycle.body.ready, true);
+    assert.equal(checkOf(cycleNoKey, "recurrence").code, "RECURRENCE_CYCLE_OUTSTANDING");
   });
 });
 
@@ -1577,24 +1580,127 @@ test("revokes an offer with its signed lifecycle key", async () => {
   });
 });
 
-test("enforces recurring cycle and spending caps", async () => {
+test("each subscriber to a recurring offer has their own cycles and caps", async () => {
   await withServer(async (baseUrl) => {
     const created = await postJson(`${baseUrl}/demo/offers`, {
       amount: "1000",
       recurrence: { interval: "custom_seconds", custom_seconds: 1, amount: "1000", cap_cycles: 2 }
     });
-    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
-    const first = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, { ...request, recurrence_cycle: 1 });
-    const second = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, { ...request, recurrence_cycle: 2 });
-    const blocked = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, { ...request, recurrence_cycle: 3 });
-    const status = await getJson(`${baseUrl}/offers/${created.body.offer_id}/recurrence-status`);
-    assert.equal(first.status, 201);
-    assert.equal(second.status, 201);
-    assert.equal(blocked.status, 409);
-    assert.equal(blocked.body.error.code, "RECURRENCE_CYCLE_CAP_REACHED");
-    assert.equal(status.body.cycles_created, 2);
-    assert.equal(status.body.cycle_cap_remaining, 0);
+    const offer = created.body.offer;
+    const offerUrl = `${baseUrl}/offers/${offer.offer_id}`;
+    const asset = { asset_type: "ckb", symbol: "CKB" };
+    const alice = generateOfferKeyPair();
+    const bob = generateOfferKeyPair();
+    const cycle = (subscriber, number) =>
+      postJson(`${offerUrl}/invoice`, signRecurrenceRequest(offer, { amount: "1000", asset, recurrence_cycle: number }, subscriber.privateKeyPem));
+    const pay = (invoice) => postJson(`${offerUrl}/resolutions/${invoice.body.resolution_id}/status`, { status: "invoice_paid" });
+    const statusOf = async (subscriber) =>
+      (await getJson(`${offerUrl}/recurrence-status?approval_id=${subscriptionId(subscriber.publicKeyPem)}`)).body;
+
+    // Both start at cycle 1. One payer's cycle does not move the other's.
+    const aliceOne = await cycle(alice, 1);
+    const bobOne = await cycle(bob, 1);
+    assert.deepEqual([aliceOne.status, bobOne.status], [201, 201]);
+    assert.equal(aliceOne.body.recurrence.approval_id, subscriptionId(alice.publicKeyPem));
+
+    // Alice cannot skip ahead, or request cycle 1 twice, while it is unpaid.
+    const skipped = await cycle(alice, 2);
+    const repeated = await cycle(alice, 1);
+    assert.deepEqual([skipped.status, skipped.body.error.code], [409, "INVALID_RECURRENCE_CYCLE"]);
+    assert.equal(skipped.body.error.details.next_cycle, 1);
+    assert.deepEqual([repeated.status, repeated.body.error.code], [409, "RECURRENCE_CYCLE_OUTSTANDING"]);
+
+    // Payment is what advances a subscription.
+    await pay(aliceOne);
+    const aliceTwo = await cycle(alice, 2);
+    await pay(aliceTwo);
+    // Both cycles are paid. A wallet cannot even sign a third: the signed terms
+    // rule it out before anything is sent. And the resolver refuses another
+    // request for a cycle within the cap, because the subscription is spent.
+    assert.throws(() => cycle(alice, 3), (error) => error.code === "RECURRENCE_CYCLE_CAP_REACHED");
+    const capped = await cycle(alice, 2);
+    assert.equal(aliceTwo.status, 201);
+    assert.deepEqual([capped.status, capped.body.error.code], [409, "RECURRENCE_CYCLE_CAP_REACHED"]);
+
+    // Bob is untouched by Alice reaching her cap.
+    const aliceStatus = await statusOf(alice);
+    const bobStatus = await statusOf(bob);
+    assert.deepEqual(
+      [aliceStatus.cycles_paid, aliceStatus.cap_reached, aliceStatus.cycle_cap_remaining, aliceStatus.next_cycle],
+      [2, true, 0, undefined]
+    );
+    assert.deepEqual([bobStatus.cycles_paid, bobStatus.next_cycle, bobStatus.outstanding.cycle], [0, 1, 1]);
+    const summary = (await getJson(`${offerUrl}/recurrence-status`)).body;
+    assert.deepEqual([summary.subscriptions, summary.cycles_created, summary.cycles_paid], [2, 3, 2]);
   });
+});
+
+test("a recurring cycle request must be signed by its subscription's key", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, {
+      amount: "1000",
+      recurrence: { interval: "daily", amount: "1000", cap_cycles: 5 }
+    });
+    const offer = created.body.offer;
+    const invoiceUrl = `${baseUrl}/offers/${offer.offer_id}/invoice`;
+    const asset = { asset_type: "ckb", symbol: "CKB" };
+    const alice = generateOfferKeyPair();
+    const mallory = generateOfferKeyPair();
+    const aliceRequest = signRecurrenceRequest(offer, { amount: "1000", asset, recurrence_cycle: 1 }, alice.privateKeyPem);
+    const malloryRequest = signRecurrenceRequest(offer, { amount: "1000", asset, recurrence_cycle: 1 }, mallory.privateKeyPem);
+    const codeOf = async (body) => {
+      const result = await postJson(invoiceUrl, body);
+      return [result.status, result.body.error?.code];
+    };
+
+    // No proof at all, as a pre-subscription client would send.
+    assert.deepEqual(await codeOf({ amount: "1000", asset, recurrence_cycle: 1 }), [400, "SUBSCRIPTION_PROOF_REQUIRED"]);
+    // Mallory names Alice's subscription with her own key and signature.
+    assert.deepEqual(
+      await codeOf({ ...malloryRequest, approval_id: aliceRequest.approval_id }),
+      [403, "SUBSCRIPTION_KEY_MISMATCH"]
+    );
+    // Mallory replays Alice's signature on a different cycle.
+    assert.deepEqual(await codeOf({ ...aliceRequest, recurrence_cycle: 2 }), [403, "INVALID_SUBSCRIPTION_SIGNATURE"]);
+    // None of that created an invoice, so none of it used anything of Alice's.
+    const resolutions = await getJson(`${baseUrl}/offers/${offer.offer_id}/resolutions`);
+    assert.equal(resolutions.body.resolutions.length, 0);
+    assert.deepEqual(await codeOf(aliceRequest), [201, undefined]);
+
+    const readiness = await postJson(`${baseUrl}/offers/${offer.offer_id}/check`, { amount: "1000", asset, recurrence_cycle: 1 });
+    assert.equal(readiness.body.ready, false);
+    assert.equal(readiness.body.checks.find((item) => item.id === "subscription").code, "SUBSCRIPTION_PROOF_REQUIRED");
+  });
+});
+
+test("an unpaid recurring cycle is released when its invoice lapses", async () => {
+  let clock = () => Date.now();
+  const invoiceAdapter = new MockInvoiceAdapter({ invoiceTtlSeconds: 60, now: () => clock() });
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, {
+      amount: "1000",
+      recurrence: { interval: "daily", amount: "1000", cap_cycles: 1 }
+    });
+    const offer = created.body.offer;
+    const subscriber = generateOfferKeyPair();
+    const request = signRecurrenceRequest(
+      offer,
+      { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" }, recurrence_cycle: 1 },
+      subscriber.privateKeyPem
+    );
+    const invoiceUrl = `${baseUrl}/offers/${offer.offer_id}/invoice`;
+
+    // The first invoice for cycle 1 is never paid and runs out.
+    clock = () => Date.now() - 3600_000;
+    const lapsed = await postJson(invoiceUrl, request, { "idempotency-key": "sub:1" });
+    clock = () => Date.now();
+    // Cycle 1 again under a new key: the cap of one cycle was not spent.
+    const fresh = await postJson(invoiceUrl, request, { "idempotency-key": "sub:1:1" });
+
+    assert.deepEqual([lapsed.status, fresh.status], [201, 201]);
+    assert.equal(fresh.body.recurrence.cycle, 1);
+    assert.notEqual(fresh.body.invoice, lapsed.body.invoice);
+  }, { invoiceAdapter });
 });
 
 test("rejects Fiber Address username collisions", async () => {

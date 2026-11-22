@@ -220,6 +220,42 @@ Supported intervals are `daily`, `weekly`, `monthly`, and `custom_seconds`.
 Every recurring offer must include `cap_cycles`, `spending_cap_total`, or both.
 The payer-side SDK scheduler creates a fresh invoice and payment for each cycle.
 
+### Subscriptions
+
+Any number of payers can subscribe to one recurring offer. Each subscription is
+a key the payer generates, and cycles and caps are counted per subscription, so
+`cap_cycles: 12` means twelve payments from each subscriber.
+
+```js
+import {
+  generateOfferKeyPair,
+  signRecurrenceRequest,
+  subscriptionId
+} from "@fiber-offers/protocol";
+
+const subscriber = generateOfferKeyPair();           // once, when the payer approves
+const id = subscriptionId(subscriber.publicKeyPem);  // "sub_…", derived from the key
+
+const request = signRecurrenceRequest(
+  offer,
+  { amount: "500000000", recurrence_cycle: 1 },
+  subscriber.privateKeyPem
+);
+// request now also carries approval_id, subscriber_public_key and
+// subscriber_signature. Send it as the invoice request.
+```
+
+The subscription ID is a hash of the public key, so nobody can claim another
+payer's subscription. The signature covers the offer ID, subscription ID, cycle
+number, amount, asset and schedule, so a request cannot be altered, replayed for
+a later cycle, or moved to another offer. `verifyRecurrenceRequest(offer,
+request)` checks the proof.
+
+`validateResolutionRequest()` applies the recurrence checks that need no
+history: the cycle amount, and that the cycle number is within the signed caps.
+How many cycles a subscription has paid is tracked by the resolver. The
+subscriber key authorizes cycle requests only; it controls no funds.
+
 ## Revoke an offer
 
 ```js

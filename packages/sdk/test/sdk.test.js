@@ -26,6 +26,8 @@ import {
   parseFiberAddress,
   parseInvoiceBinding,
   planDirectChannelFixture,
+  subscriptionId,
+  verifyRecurrenceRequest,
   summarizeFiberChannels,
   toFiberDecimalQuantity,
   toFiberHexQuantity,
@@ -659,7 +661,8 @@ test("a scheduler restarted mid-payment asks the node instead of paying again", 
   });
   await retried.runDue();
   assert.equal((await store.get("approval_never_sent")).cycles_paid, 1);
-  assert.equal(keys.at(-1), "approval_never_sent:1");
+  // The retry replays the same invoice: same key, built from the subscription.
+  assert.equal(keys.at(-1), `${second.subscription_id}:1`);
 });
 
 test("the scheduler asks for a new invoice after one expires, keeps month-end dates, and bounds its history", async () => {
@@ -687,14 +690,16 @@ test("the scheduler asks for a new invoice after one expires, keeps month-end da
   outcome = { ok: true, status: "payment_succeeded", payment_hash: "0x1" };
   await scheduler.runDue();
   // The first key replayed an expired invoice; the second asks for a fresh one.
-  assert.deepEqual(keys, ["plan:1", "plan:1:1"]);
+  const subscription = approval.subscription_id;
+  assert.match(subscription, /^sub_[0-9a-f]{40}$/);
+  assert.deepEqual(keys, [`${subscription}:1`, `${subscription}:1:1`]);
   assert.equal((await store.get(approval.id)).next_due_at, "2026-02-28T00:00:00.000Z");
 
   current = new Date("2026-02-28T00:00:00.000Z");
   await scheduler.runDue();
   // Anchored to the 31st, so March is the 31st again, not the 28th.
   assert.equal((await store.get(approval.id)).next_due_at, "2026-03-31T00:00:00.000Z");
-  assert.equal(keys.at(-1), "plan:2");
+  assert.equal(keys.at(-1), `${subscription}:2`);
 
   for (let month = 3; month <= 30; month += 1) {
     current = new Date((await store.get(approval.id)).next_due_at);
@@ -704,6 +709,41 @@ test("the scheduler asks for a new invoice after one expires, keeps month-end da
   assert.equal(final.cycles_paid, 30);
   assert.equal(final.attempts.length, 20);
   assert.equal(final.attempts.at(-1).cycle, 30);
+});
+
+test("the scheduler signs every cycle with its subscription's own key", async () => {
+  const offer = recurringOffer({ interval: "daily", amount: "1000", cap_cycles: 3 });
+  let current = new Date("2026-01-01T00:00:00.000Z");
+  const requests = [];
+  const flow = { payOffer: async (_offer, request) => (requests.push(request), { ok: true, status: "payment_succeeded" }) };
+  const store = new InMemoryRecurringApprovalStore();
+  const scheduler = new FiberRecurringPaymentScheduler({ paymentFlow: flow, store, now: () => current });
+  const first = await scheduler.approve(offer);
+  const second = await scheduler.approve(offer);
+
+  await scheduler.runDue();
+  current = new Date("2026-01-02T00:00:00.000Z");
+  await scheduler.runDue();
+
+  // Two approvals of one offer are two subscriptions with different keys.
+  assert.notEqual(first.subscription_id, second.subscription_id);
+  assert.equal(first.subscription_id, subscriptionId(first.subscriber_public_key));
+  assert.equal(requests.length, 4);
+  for (const request of requests) {
+    assert.deepEqual(verifyRecurrenceRequest(offer, request), { ok: true });
+  }
+  assert.deepEqual(
+    requests.filter((request) => request.approval_id === first.subscription_id).map((request) => request.recurrence_cycle),
+    [1, 2]
+  );
+
+  // An approval saved before subscriptions had keys gets one on its next run.
+  const { subscription_id, subscriber_public_key, subscriber_private_key_pem, ...legacy } = await store.get(first.id);
+  await store.put({ ...legacy, id: "legacy", cycles_paid: 0, next_due_at: current.toISOString() });
+  await scheduler.runDue();
+  const upgraded = await store.get("legacy");
+  assert.match(upgraded.subscription_id, /^sub_[0-9a-f]{40}$/);
+  assert.deepEqual(verifyRecurrenceRequest(offer, requests.at(-1)), { ok: true });
 });
 
 test("a payment flow that cannot report status needs confirm: false to count sent as paid", async () => {

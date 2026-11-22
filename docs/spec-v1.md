@@ -106,9 +106,42 @@ Recurring offers follow the same rule per cycle: a cycle is used up when its inv
 
 ## Recurrence
 
-Recurring invoice attempts carry `recurrence_cycle`, `approval_id`, and `scheduled_for`. The resolver enforces sequential cycles, the signed per-cycle amount, `cap_cycles`, and `spending_cap_total`.
+A recurring offer can have any number of subscribers. Cycles and caps are counted per subscription, so `cap_cycles` and `spending_cap_total` limit what each subscriber pays.
 
-`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles from its internal timer, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. A cycle counts as paid only once the payer's node reports the payment settled; the scheduler records each payment before sending it, so after a restart it asks the node what happened instead of paying again. Due dates are computed from the approval's fixed start, so a monthly plan begun on the 31st falls on the last day of shorter months. Browser wallets can use `WebStorageRecurringApprovalStore`; Node wallet services can use the private atomic `JsonFileRecurringApprovalStore` export from `@fiber-offers/sdk/node`. Status is available from `GET /offers/:offer_id/recurrence-status`.
+A subscription is an Ed25519 key the payer generates. Its identifier is derived from the public key:
+
+```text
+approval_id = "sub_" + first 40 hex characters of sha256(DER SubjectPublicKeyInfo)
+```
+
+Every invoice request on a recurring offer is a cycle of one subscription and carries its proof:
+
+```json
+{
+  "amount": "500000000",
+  "asset": { "asset_type": "ckb", "symbol": "CKB" },
+  "recurrence_cycle": 1,
+  "scheduled_for": "2026-01-01T00:00:00.000Z",
+  "approval_id": "sub_…",
+  "subscriber_public_key": "-----BEGIN PUBLIC KEY-----…",
+  "subscriber_signature": "base64url(Ed25519 signature)"
+}
+```
+
+The signature is over the canonical JSON of `{ scheme: "fiberoffer-recurrence-v1", offer_id, approval_id, recurrence_cycle, amount, asset, scheduled_for }`, with `scheduled_for` omitted when absent. The resolver refuses a request with no proof (`400 SUBSCRIPTION_PROOF_REQUIRED`), an `approval_id` that does not belong to the key (`403 SUBSCRIPTION_KEY_MISMATCH`), or a bad signature (`403 INVALID_SUBSCRIPTION_SIGNATURE`). Nobody but the payer can therefore request, advance or exhaust a subscription's cycles.
+
+Within a subscription:
+
+- The cycle to request is the number of paid cycles plus one. Any other number is `409 INVALID_RECURRENCE_CYCLE`, with `error.details.next_cycle`.
+- A cycle is used up when its invoice is paid. An invoice that ends unpaid releases the cycle, which can then be requested again.
+- Only one cycle can be outstanding. A second request while an invoice is unpaid is `409 RECURRENCE_CYCLE_OUTSTANDING`.
+- When the caps are spent, further requests are `409 RECURRENCE_CYCLE_CAP_REACHED` or `409 RECURRENCE_SPENDING_CAP_REACHED`.
+
+`GET /offers/:offer_id/recurrence-status?approval_id=sub_…` reports where a subscription stands (`cycles_paid`, `next_cycle`, `outstanding`, remaining caps). Without `approval_id` it summarises the offer across subscriptions.
+
+The checks that need no history (the cycle amount, and that the cycle number fits the signed caps) are made by `validateResolutionRequest()` in the protocol package, so a wallet runs them offline before it contacts the resolver. Payment history is the resolver's to track.
+
+`FiberRecurringPaymentScheduler` runs in the payer environment, where payment authority belongs. It stores explicit approvals, triggers due cycles from its internal timer, retries failures without advancing the schedule, accounts for spending, and supports immediate revocation. A cycle counts as paid only once the payer's node reports the payment settled; the scheduler records each payment before sending it, so after a restart it asks the node what happened instead of paying again. Due dates are computed from the approval's fixed start, so a monthly plan begun on the 31st falls on the last day of shorter months. Browser wallets can use `WebStorageRecurringApprovalStore`; Node wallet services can use the private atomic `JsonFileRecurringApprovalStore` export from `@fiber-offers/sdk/node`. Each approval holds its subscription key and signs every cycle with it.
 
 ## Availability Boundary
 

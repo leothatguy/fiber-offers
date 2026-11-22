@@ -13,7 +13,8 @@ import {
   offerToPaymentLink,
   validateResolutionRequest,
   verifyOffer,
-  verifyOfferRevocation
+  verifyOfferRevocation,
+  verifyRecurrenceRequest
 } from "../../../packages/protocol/src/index.js";
 import { createInvoiceAdapter } from "./invoice-adapter.js";
 import { classifyInvoiceFailure } from "./invoice-errors.js";
@@ -29,6 +30,7 @@ import {
   PUBLIC_RESOLUTION_STATUSES,
   recurrenceReservation,
   resolutionUnderCheck,
+  subscriptionStatus,
   TERMINAL_RESOLUTION_STATUSES
 } from "./resolution-rules.js";
 import { InMemoryOfferStore, JsonOfferStore, normalizeUsername } from "./store.js";
@@ -559,7 +561,7 @@ async function handleRequest(request, response, context) {
     }
 
     if (request.method === "GET" && action === "recurrence-status") {
-      sendJson(response, 200, await recurrenceStatus(entry, context.store));
+      sendJson(response, 200, await recurrenceStatus(entry, context.store, url.searchParams.get("approval_id")));
       return;
     }
 
@@ -674,10 +676,11 @@ async function resolveInvoice(entry, body, context, origin, options = {}) {
       scheduled_for: body?.scheduled_for,
       approval_id: body?.approval_id
     };
+    assertSubscriptionProof(entry.offer, body);
     const idempotencyFingerprint = options.idempotencyKey ? invoiceRequestFingerprint(request) : undefined;
     // Whether this offer can issue another invoice depends on what became of
     // the earlier ones, so their outcomes are brought up to date first.
-    await settleOpenResolutions(context, entry, origin);
+    await settleOpenResolutions(context, entry, origin, request.approval_id);
     const reservation = await context.store.reserveInvoiceAttempt(entry.offer.offer_id, {
       request,
       idempotencyKey: options.idempotencyKey,
@@ -978,11 +981,16 @@ async function settleOverdueResolutions(context, offerId, origin, resolutions = 
 // uses the offer up, expired or cancelled gives the capacity back. A live
 // invoice is settled by asking the node; a mock one by the clock. A plain
 // reusable offer is not limited by its history, so nothing is asked.
-async function settleOpenResolutions(context, entry, origin) {
+async function settleOpenResolutions(context, entry, origin, approvalId = undefined) {
   if (!entry.offer.single_use && !entry.offer.recurrence) return;
   const offerId = entry.offer.offer_id;
-  const open = (await context.store.getResolutions(offerId)).filter((record) =>
-    ["invoice_created", "invoice_received"].includes(record.status)
+  // A recurring offer is limited per subscription, so only the requesting
+  // subscription's invoices matter, however many subscribers the offer has.
+  const onlySubscription = entry.offer.recurrence && !entry.offer.single_use;
+  const open = (await context.store.getResolutions(offerId)).filter(
+    (record) =>
+      ["invoice_created", "invoice_received"].includes(record.status) &&
+      (!onlySubscription || record.recurrence?.approval_id === approvalId)
   );
   if (open.length === 0) return;
 
@@ -1114,7 +1122,7 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
   // the two never disagree. If the node cannot be asked, the check carries on
   // with what is stored and says so.
   try {
-    await settleOpenResolutions(context, entry, origin);
+    await settleOpenResolutions(context, entry, origin, body?.approval_id);
   } catch (error) {
     checks.push(
       warnCheck("settlement", "Earlier invoices could not be brought up to date with the Fiber node", error.code)
@@ -1183,6 +1191,12 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
   }
 
   if (entry.offer.recurrence) {
+    try {
+      assertSubscriptionProof(entry.offer, body);
+      checks.push(passCheck("subscription", "Request is signed by the subscription's key"));
+    } catch (error) {
+      checks.push(failCheck("subscription", error.message, error.code));
+    }
     try {
       if (replayAllowed && current.recurrence) {
         assertReplayedRecurrenceCycle(current, body);
@@ -2266,6 +2280,29 @@ function assertOfferActive(entry) {
   if (entry.disabled) throw httpError(410, "OFFER_REVOKED", "offer has been revoked");
 }
 
+// Every invoice request on a recurring offer is a cycle of one subscription and
+// must be signed by that subscription's key. Without this, anyone could
+// request cycles in a payer's name.
+function assertSubscriptionProof(offer, body) {
+  if (!offer.recurrence) return;
+  const proof = verifyRecurrenceRequest(offer, body);
+  if (proof.ok) return;
+  const status =
+    {
+      SUBSCRIPTION_KEY_MISMATCH: 403,
+      INVALID_SUBSCRIPTION_SIGNATURE: 403,
+      RECURRENCE_CYCLE_CAP_REACHED: 409,
+      RECURRENCE_SPENDING_CAP_REACHED: 409,
+      INVALID_RECURRENCE_CYCLE: 409,
+      AMOUNT_TOO_LOW: 422,
+      AMOUNT_TOO_HIGH: 422,
+      AMOUNT_MUST_MATCH_FIXED_AMOUNT: 422,
+      UNSUPPORTED_ASSET: 422,
+      OFFER_EXPIRED: 422
+    }[proof.code] ?? 400;
+  throw httpError(status, proof.code, proof.message);
+}
+
 // A replayed recurring request must name the cycle its resolution was issued for.
 function assertReplayedRecurrenceCycle(resolution, body) {
   if (body?.recurrence_cycle === undefined) return;
@@ -2278,34 +2315,35 @@ function assertReplayedRecurrenceCycle(resolution, body) {
   }
 }
 
-async function recurrenceStatus(entry, store) {
+// With `approval_id`: where that one subscription stands, for its payer.
+// Without: a summary of the offer across all its subscriptions.
+async function recurrenceStatus(entry, store, approvalId = undefined) {
   const recurrence = entry.offer.recurrence;
   if (!recurrence) {
     return { offer_id: entry.offer.offer_id, enabled: false, revoked: Boolean(entry.disabled) };
   }
   const resolutions = await store.getResolutions(entry.offer.offer_id);
-  // Cycles that ended unpaid were released and are not counted.
-  const cycles = countedResolutions(resolutions).filter((resolution) => resolution.recurrence);
-  const paid = cycles.filter(isConsumed);
-  const reservedTotal = cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  const paidTotal = paid.reduce((total, resolution) => total + BigInt(resolution.amount), 0n);
-  const capRemaining = recurrence.spending_cap_total === undefined
-    ? undefined
-    : (BigInt(recurrence.spending_cap_total) - reservedTotal < 0n
-        ? 0n
-        : BigInt(recurrence.spending_cap_total) - reservedTotal).toString();
-  return {
+  const base = {
     offer_id: entry.offer.offer_id,
     enabled: true,
     revoked: Boolean(entry.disabled),
-    terms: recurrence,
+    terms: recurrence
+  };
+  if (approvalId) {
+    return { ...base, ...subscriptionStatus(entry.offer, resolutions, approvalId) };
+  }
+
+  // Cycles that ended unpaid were released and are not counted.
+  const cycles = countedResolutions(resolutions).filter((resolution) => resolution.recurrence);
+  const paid = cycles.filter(isConsumed);
+  const subscriptions = new Set(cycles.map((resolution) => resolution.recurrence.approval_id));
+  return {
+    ...base,
+    subscriptions: subscriptions.size,
     cycles_created: cycles.length,
     cycles_paid: paid.length,
-    next_cycle: cycles.length + 1,
-    reserved_total: reservedTotal.toString(),
-    paid_total: paidTotal.toString(),
-    spending_cap_remaining: capRemaining,
-    cycle_cap_remaining: recurrence.cap_cycles === undefined ? undefined : Math.max(0, recurrence.cap_cycles - cycles.length)
+    reserved_total: cycles.reduce((total, resolution) => total + BigInt(resolution.amount), 0n).toString(),
+    paid_total: paid.reduce((total, resolution) => total + BigInt(resolution.amount), 0n).toString()
   };
 }
 
@@ -2388,6 +2426,8 @@ async function serveStatic(pathname, response, staticRoot) {
     filePath = join(staticRoot, "../../../docs/system-design.png");
   } else if (pathname === "/app.js") {
     filePath = join(staticRoot, "app.js");
+  } else if (pathname === "/subscription.js") {
+    filePath = join(staticRoot, "subscription.js");
   } else if (pathname === "/styles.css") {
     filePath = join(staticRoot, "styles.css");
   } else if (pathname === "/docs.css") {

@@ -8,8 +8,11 @@ import {
   normalizeCkbScript,
   offerToPaymentLink,
   parseCkbScript,
+  signRecurrenceRequest,
+  subscriptionId,
   verifyOffer,
-  verifyOfferRevocation
+  verifyOfferRevocation,
+  verifyRecurrenceRequest
 } from "@fiber-offers/protocol";
 import { FiberNodeDiagnosticsClient, summarizeFiberChannels } from "./fiber-diagnostics.js";
 import {
@@ -45,6 +48,9 @@ export {
   ckbScriptHash,
   normalizeCkbScript,
   parseCkbScript,
+  signRecurrenceRequest,
+  subscriptionId,
+  verifyRecurrenceRequest,
   createSignedOffer,
   createOfferRevocation,
   decodeOffer,
@@ -238,10 +244,13 @@ export class FiberOffersClient {
     return this.#request(`/offers/${offerId}/resolutions`);
   }
 
-  async getRecurrenceStatus(offerOrId) {
+  // With `approvalId` (a subscription ID): where that subscription stands.
+  // Without: a summary of the offer across all its subscriptions.
+  async getRecurrenceStatus(offerOrId, approvalId = undefined) {
     const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId.offer_id;
     if (!offerId) throw new Error("offer_id is required to get recurrence status");
-    return this.#request(`/offers/${offerId}/recurrence-status`);
+    const query = approvalId ? `?approval_id=${encodeURIComponent(approvalId)}` : "";
+    return this.#request(`/offers/${offerId}/recurrence-status${query}`);
   }
 
   async revokeOffer(offerOrId, revocation) {

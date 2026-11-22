@@ -153,14 +153,20 @@ export class PostgresOfferStore {
       // Only single-use and recurring offers are limited by what was issued
       // before; a plain reusable offer needs no history at all. Resolutions
       // that ended unpaid never count, so they are not even read.
+      // A recurring offer that is not single-use is limited per subscription,
+      // so only that subscription's rows matter, however many payers it has.
       const limited = entry.offer.single_use || entry.offer.recurrence;
+      const onlySubscription =
+        entry.offer.recurrence && !entry.offer.single_use ? input.request.approval_id ?? "" : null;
       const prior = limited
         ? (
             await client.query(
               `SELECT * FROM fiber_resolutions
-               WHERE offer_id = $1 AND status NOT IN ('invoice_expired', 'invoice_failed', 'invoice_cancelled')
+               WHERE offer_id = $1
+                 AND status NOT IN ('invoice_expired', 'invoice_failed', 'invoice_cancelled')
+                 AND ($2::text IS NULL OR recurrence ->> 'approval_id' = $2)
                ORDER BY created_at`,
-              [offerId]
+              [offerId, onlySubscription]
             )
           ).rows.map(resolutionRow)
         : [];

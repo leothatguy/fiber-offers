@@ -1,4 +1,10 @@
-import { decodeOffer, verifyOffer } from "@fiber-offers/protocol";
+import {
+  decodeOffer,
+  generateOfferKeyPair,
+  signRecurrenceRequest,
+  subscriptionId,
+  verifyOffer
+} from "@fiber-offers/protocol";
 
 export class InMemoryRecurringApprovalStore {
   constructor(initial = []) {
@@ -107,8 +113,16 @@ export class FiberRecurringPaymentScheduler {
       throw schedulerError("recurring approval requires a visible spending cap", "RECURRENCE_CAP_REQUIRED");
     }
     const start = new Date(options.startAt ?? this.now());
+    // The subscription's own key. Every cycle request is signed with it, and
+    // the resolver counts cycles and caps against the ID derived from it, so
+    // nobody else can request or exhaust this subscription's cycles. It never
+    // leaves the approval store and controls no funds.
+    const subscriber = generateOfferKeyPair();
     const approval = {
       id: options.id ?? `approval_${globalThis.crypto.randomUUID()}`,
+      subscription_id: subscriptionId(subscriber.publicKeyPem),
+      subscriber_public_key: subscriber.publicKeyPem,
+      subscriber_private_key_pem: subscriber.privateKeyPem,
       offer_id: offer.offer_id,
       offer,
       asset: options.asset ?? offer.assets[0],
@@ -180,13 +194,12 @@ export class FiberRecurringPaymentScheduler {
     }
 
     const scheduledFor = approval.next_due_at;
-    const request = {
-      amount: terms.amount,
-      asset: approval.asset,
-      recurrence_cycle: nextCycle,
-      approval_id: approval.id,
-      scheduled_for: scheduledFor
-    };
+    ensureSubscriberKey(approval);
+    const request = signRecurrenceRequest(
+      approval.offer,
+      { amount: terms.amount, asset: approval.asset, recurrence_cycle: nextCycle, scheduled_for: scheduledFor },
+      approval.subscriber_private_key_pem
+    );
     const idempotencyKey = cycleIdempotencyKey(approval, nextCycle);
     const sendOptions = {
       execute: true,
@@ -353,8 +366,17 @@ const MAX_STORED_ATTEMPTS = 20;
 // A retried cycle replays the same invoice. Only after that invoice has expired
 // does the key change, so the resolver is asked for a new one.
 function cycleIdempotencyKey(approval, cycle) {
-  const base = `${approval.id}:${cycle}`;
+  const base = `${approval.subscription_id ?? approval.id}:${cycle}`;
   return approval.invoice_attempt ? `${base}:${approval.invoice_attempt}` : base;
+}
+
+// An approval stored before subscriptions had keys gets one on its next run.
+function ensureSubscriberKey(approval) {
+  if (approval.subscriber_private_key_pem) return;
+  const subscriber = generateOfferKeyPair();
+  approval.subscription_id = subscriptionId(subscriber.publicKeyPem);
+  approval.subscriber_public_key = subscriber.publicKeyPem;
+  approval.subscriber_private_key_pem = subscriber.privateKeyPem;
 }
 
 // When the cycle after `cyclesPaid` paid cycles falls due.
