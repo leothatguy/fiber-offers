@@ -101,7 +101,7 @@ test("creates fixed pricing from one amount and rejects non-exact invoice reques
   });
 });
 
-test("selects a supported UDT from a multi-asset offer and mints the matching Fiber invoice", async () => {
+test("refuses a token invoice when the token's type script is not configured", async () => {
   const nodeId = "02" + "f".repeat(64);
   const typeScriptHash = "0x" + "1".repeat(64);
   const calls = [];
@@ -135,10 +135,77 @@ test("selects a supported UDT from a multi-asset offer and mints the matching Fi
         asset: { asset_type: "udt", symbol: "USDI", type_script_hash: typeScriptHash }
       });
 
+      const ckbInvoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+        amount: "1000",
+        asset: { asset_type: "ckb", symbol: "CKB" }
+      });
+
+      // Sending the token's script hash as the invoice currency was never a
+      // valid Fiber request. The resolver now refuses before calling the node,
+      // and says retrying will not help.
       assert.equal(created.status, 201);
+      assert.equal(invoice.status, 422);
+      assert.equal(invoice.body.error.code, "ASSET_SCRIPT_NOT_CONFIGURED");
+      assert.equal(invoice.body.error.details.retryable, false);
+      assert.equal(ckbInvoice.status, 201);
+      const minted = calls.filter((call) => call.method === "new_invoice");
+      assert.equal(minted.length, 1);
+      assert.equal(minted[0].params[0].currency, "Fibt");
+    },
+    { invoiceAdapter }
+  );
+});
+
+test("mints invoices in the currency of the node's network and refuses offers for another", async () => {
+  const nodeId = "02" + "9".repeat(64);
+  const mainnetGenesis = "0x92b197aa1fba0f63633922c61c92375c9c074a93e85963554f5499fe1450d0e5";
+  const calls = [];
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(method, params) {
+        calls.push({ method, params });
+        if (method === "node_info") return { pubkey: nodeId, chain_hash: mainnetGenesis };
+        if (method === "new_invoice") {
+          return { invoice_address: "fibb1mainnetinvoice", invoice: { data: { payment_hash: "0x" + "4".repeat(64) } } };
+        }
+        throw new Error(`unexpected Fiber method: ${method}`);
+      }
+    }
+  });
+
+  await withServer(
+    async (baseUrl) => {
+      // A demo offer takes the node's network when none is given.
+      const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+      const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+        amount: "1000",
+        asset: { asset_type: "ckb", symbol: "CKB" }
+      });
+
+      const keys = generateOfferKeyPair();
+      const testnetOffer = createSignedOffer(
+        {
+          node_id: nodeId,
+          network: "testnet",
+          public_key: keys.publicKeyPem,
+          resolver_url: baseUrl,
+          assets: [{ asset_type: "ckb", symbol: "CKB" }]
+        },
+        keys.privateKeyPem
+      );
+      const rejected = await postJson(`${baseUrl}/offers`, { encoded_offer: encodeOffer(testnetOffer) });
+
+      assert.equal(created.body.offer.network, "mainnet");
+      assert.equal(created.body.ownership.network, "mainnet");
       assert.equal(invoice.status, 201);
-      assert.equal(invoice.body.invoice, "fibt1udtinvoice");
-      assert.equal(calls.find((call) => call.method === "new_invoice").params[0].currency, typeScriptHash);
+      assert.equal(calls.find((call) => call.method === "new_invoice").params[0].currency, "Fibb");
+      assert.equal(rejected.status, 422);
+      assert.equal(rejected.body.error.code, "OFFER_NETWORK_MISMATCH");
+      assert.deepEqual(rejected.body.error.details, {
+        offer_network: "testnet",
+        node_network: "mainnet",
+        node_network_source: "chain_hash"
+      });
     },
     { invoiceAdapter }
   );

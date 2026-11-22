@@ -54,6 +54,16 @@ The Ed25519 `public_key` is the portable offer lifecycle key. It signs the offer
 
 In live mode, the resolver calls Fiber `node_info` and requires the returned compressed public key to equal `offer.node_id` before registration and again before invoice minting. Each reference resolver maps to one server-controlled merchant Fiber RPC profile. Arbitrary RPC URLs are never accepted from offers or invoice requests.
 
+The signed `network` decides the currency code of every invoice minted for the offer, for every asset:
+
+| `network` | Fiber invoice currency |
+| --- | --- |
+| `mainnet` | `Fibb` |
+| `testnet` | `Fibt` |
+| `dev` | `Fibd` |
+
+The resolver also checks `network` against its node at registration and before each invoice. It learns the node's network from `node_info.chain_hash` (the CKB mainnet or testnet genesis hash) or from an explicit `FIBER_NETWORK` setting. An offer signed for a different network is refused with `422 OFFER_NETWORK_MISMATCH`. A node on any other chain reports no known network; set `FIBER_NETWORK=dev` there to enforce the check.
+
 ## Revocation
 
 `DELETE /offers/:offer_id` accepts a `fiberoffer-revocation-v1` proof containing the offer ID, node ID, timestamp, optional reason, and Ed25519 signature from the offer lifecycle key. Revoked offers return `410 OFFER_REVOKED` and cannot create more invoices.

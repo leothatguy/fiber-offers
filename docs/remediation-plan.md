@@ -97,13 +97,15 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - *(audit #2)* Fiber's `parse_invoice` returns the payee key, expiry and UDT script as entries in `invoice.data.attrs` (`payee_public_key`, `expiry_time`, `udt_script`), not as top-level fields. Verification reads them from `attrs` and fails closed when the payee key attribute is absent.
     - *(audit #2, `F-011`)* `resolveFiberAddress("user@domain")` resolves against `https://domain`. Today it silently queries the client's configured `resolverUrl` and ignores the address domain. The returned offer is verified and later calls go to its signed `resolver_url`.
 
-- [ ] **A3. Fix Fiber network-to-currency mapping and node chain validation**
+- [x] **A3. Fix Fiber network-to-currency mapping and node chain validation** — *done 2026-11-22; chain-hash assumption to be confirmed on a live node in `F2`*
   - **Problem:** `assetToFiberCurrency()` hardcodes `"Fibt"` regardless of `offer.network`; mainnet (`Fibb`) and devnet (`Fibd`) CKB invoices are rejected by real Fiber nodes, and the offer's `network` is never checked against the merchant node's chain.
   - **Files:** `apps/resolver/src/fiber-rpc.js`, `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/resolver/test/invoice-adapter.test.js`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
     - Map `mainnet` → `"Fibb"`, `testnet` → `"Fibt"`, `dev` → `"Fibd"` for **all** assets (CKB, UDT, RGB++).
     - Validate offer `network` against the configured merchant Fiber node's chain/network (from `node_info` or explicit config) on offer registration and invoice creation.
     - Unit tests cover `mainnet`, `testnet`, and `dev` mappings and mismatch rejection.
+  - **Outcome:** `packages/sdk/src/fiber-network.js` holds the mapping (`Fibb`/`Fibt`/`Fibd`) and the two public genesis hashes, both checked against the public CKB RPC. The adapter takes the currency from the offer's signed network. The resolver learns its node's network from `node_info.chain_hash` or `FIBER_NETWORK` and refuses a mismatched offer with `422 OFFER_NETWORK_MISMATCH` at registration and before each invoice. `createOffer()` and the CLI take the network from the node and refuse a contradicting `--network`. Token requests now fail closed with `422 ASSET_SCRIPT_NOT_CONFIGURED` until `A4` adds the registry; before, the script hash was sent as the currency.
+  - **Open point:** that Fiber's `chain_hash` is the CKB genesis block hash is taken from the RPC reference's wording and has not been seen on a live node (none is installed here). The check only rejects on a proven mismatch, and an unrecognised hash is treated as unknown, so a wrong assumption would disable the check rather than block valid offers.
 
 - [ ] **A4. Fix UDT / RGB++ invoice creation (Asset Registry + CLI support)**
   - **Problem:** `FiberRpcInvoiceAdapter` sends `asset.type_script_hash` in `currency` and omits `udt_type_script`. `resolver.test.js` asserts this broken shape. Also `apps/cli/src/index.js` exposes `--asset-type` without any `--type-script-hash` flag, making non-CKB offer creation impossible via CLI.
@@ -549,3 +551,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | Decisions D-1, D-2, D-3, D-9, D-10 | — | D-9 decided (a) by the owner. D-10 (new, for `F-039`) decided (b) and added as `E6`; `E5` updated to the single-merchant principle. D-1..D-3 adopted as recommended under the owner's standing instruction to take the best approach. Only D-4 (v1 vs. breaking v2) remains open, deliberately deferred until Phases A–D are done. |
 | 2026-11-22 | `A1` done, `B3` partly | `fix(resolver): stop readiness checks counting the invoice under check` | Fixes `F-007` and `F-010`. Suite: 117 tests, 113 pass, 4 infra tests skipped (no local Redis; PostgreSQL has no role for this user yet). |
 | 2026-11-22 | `A6` done, `H2` partly | `fix(resolver): report whether a failed invoice request is retryable` | Fixes `F-013`. One shared RPC client with deadlines. Suite: 122 tests, 118 pass, 4 skipped. |
+| 2026-11-22 | `A3` done | `fix(resolver): mint invoices in the currency of the offer network` | Mainnet and devnet invoices were impossible (`Fibt` was hardcoded). Network checked against the node. Suite: 129 tests, 125 pass, 4 skipped. |

@@ -181,6 +181,7 @@ test("Fiber RPC adapter creates invoices using Fiber JSON-RPC shape", async () =
   const invoice = await adapter.createInvoice({
     offer: {
       offer_id: "0xoffer",
+      network: "testnet",
       description: "test invoice"
     },
     amount: "100000000",
@@ -200,6 +201,83 @@ test("Fiber RPC adapter creates invoices using Fiber JSON-RPC shape", async () =
   assert.equal(invoice.invoice, "fibt1000000001example");
   assert.equal(invoice.payment_hash, "0xabc123");
   assert.equal(invoice.mocked, false);
+});
+
+test("Fiber RPC adapter uses the currency of the offer's network", async () => {
+  const currencies = [];
+  const adapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(_method, params) {
+        currencies.push(params[0].currency);
+        return { invoice_address: "fib1example", invoice: { data: { payment_hash: "0xabc" } } };
+      }
+    }
+  });
+  const invoiceFor = (network) =>
+    adapter.createInvoice({
+      offer: { offer_id: "0xoffer", network },
+      amount: "1000",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    });
+
+  await invoiceFor("mainnet");
+  await invoiceFor("testnet");
+  await invoiceFor("dev");
+
+  assert.deepEqual(currencies, ["Fibb", "Fibt", "Fibd"]);
+  await assert.rejects(
+    () => invoiceFor("signet"),
+    (error) => error.code === "UNSUPPORTED_NETWORK" && error.status === 422
+  );
+  assert.equal(currencies.length, 3);
+});
+
+test("Fiber RPC adapter refuses a token invoice it has no type script for", async () => {
+  const calls = [];
+  const adapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(method) {
+        calls.push(method);
+        return { invoice_address: "fibt1example", invoice: { data: { payment_hash: "0xabc" } } };
+      }
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      adapter.createInvoice({
+        offer: { offer_id: "0xoffer", network: "testnet" },
+        amount: "1000",
+        asset: { asset_type: "udt", symbol: "USDI", type_script_hash: "0x" + "1".repeat(64) }
+      }),
+    (error) => error.code === "ASSET_SCRIPT_NOT_CONFIGURED" && error.status === 422
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("Fiber RPC adapter reports which network its node is on", async () => {
+  const mainnetGenesis = "0x92b197aa1fba0f63633922c61c92375c9c074a93e85963554f5499fe1450d0e5";
+  const testnetGenesis = "0x10639e0895502b5688a6be8cf69460d76541bfa4821629d86d62ba0aae3f9606";
+  const pubkey = "02" + "a".repeat(64);
+  const identityFor = (nodeInfo, options = {}) =>
+    new FiberRpcInvoiceAdapter({ ...options, client: { call: async () => ({ pubkey, ...nodeInfo }) } }).getNodeIdentity();
+
+  const mainnet = await identityFor({ chain_hash: mainnetGenesis });
+  const testnet = await identityFor({ chain_hash: testnetGenesis.toUpperCase().replace("0X", "0x") });
+  const privateChain = await identityFor({ chain_hash: "0x" + "7".repeat(64) });
+  const configured = await identityFor({ chain_hash: "0x" + "7".repeat(64) }, { network: "dev" });
+  const noChainHash = await identityFor({});
+
+  assert.deepEqual([mainnet.network, mainnet.network_source], ["mainnet", "chain_hash"]);
+  assert.equal(testnet.network, "testnet");
+  // An unrecognised chain is unknown, not assumed to be "dev".
+  assert.equal(privateChain.network, undefined);
+  assert.deepEqual([configured.network, configured.network_source], ["dev", "config"]);
+  assert.equal(noChainHash.network, undefined);
+  assert.throws(
+    () => new FiberRpcInvoiceAdapter({ network: "signet", client: { call: async () => ({}) } }),
+    (error) => error.code === "INVALID_FIBER_NETWORK"
+  );
 });
 
 test("Fiber RPC adapter syncs invoice status with get_invoice", async () => {

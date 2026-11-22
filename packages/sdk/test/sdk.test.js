@@ -15,7 +15,10 @@ import {
   analyzeFiberTopology,
   analyzePaymentReadiness,
   createOffer,
+  fiberCurrencyForNetwork,
   fiberSendPaymentParams,
+  networkForChainHash,
+  networkForFiberCurrency,
   normalizeFiberPaymentFailure,
   offerQrUrl,
   parseFiberAddress,
@@ -73,6 +76,51 @@ test("creates an offer from the configured Fiber node identity", async () => {
   assert.equal(created.offer.node_id, nodeId);
   assert.match(created.encoded_offer, /^fbroffer1/);
   assert.match(created.offer_private_key_pem, /PRIVATE KEY/);
+});
+
+test("signs an offer for the network its Fiber node is on", async () => {
+  const mainnetGenesis = "0x92b197aa1fba0f63633922c61c92375c9c074a93e85963554f5499fe1450d0e5";
+  const nodeInfo = { pubkey: "02" + "a".repeat(64), chain_hash: mainnetGenesis };
+  const input = {
+    resolver_url: "https://resolver.example",
+    assets: [{ asset_type: "ckb", symbol: "CKB" }]
+  };
+  const rpcClient = { call: async () => nodeInfo };
+
+  const derived = await createOffer(input, { rpcClient });
+  const matching = await createOffer({ ...input, network: "mainnet" }, { rpcClient });
+  const privateChain = await createOffer(
+    { ...input, network: "dev" },
+    { rpcClient: { call: async () => ({ ...nodeInfo, chain_hash: "0x" + "7".repeat(64) }) } }
+  );
+
+  assert.equal(derived.offer.network, "mainnet");
+  assert.deepEqual(
+    [derived.node_identity.network, derived.node_identity.network_source],
+    ["mainnet", "chain_hash"]
+  );
+  assert.equal(matching.offer.network, "mainnet");
+  assert.equal(privateChain.offer.network, "dev");
+  await assert.rejects(
+    () => createOffer({ ...input, network: "testnet" }, { rpcClient }),
+    (error) => error.code === "OFFER_NETWORK_MISMATCH" && error.details.node_network === "mainnet"
+  );
+});
+
+test("maps offer networks to Fiber currencies and chain hashes", () => {
+  assert.deepEqual(
+    ["mainnet", "testnet", "dev"].map(fiberCurrencyForNetwork),
+    ["Fibb", "Fibt", "Fibd"]
+  );
+  assert.throws(() => fiberCurrencyForNetwork("signet"), (error) => error.code === "UNSUPPORTED_NETWORK");
+  assert.equal(networkForFiberCurrency("Fibd"), "dev");
+  assert.equal(networkForFiberCurrency("0x" + "1".repeat(64)), undefined);
+  assert.equal(
+    networkForChainHash("10639e0895502b5688a6be8cf69460d76541bfa4821629d86d62ba0aae3f9606"),
+    "testnet"
+  );
+  assert.equal(networkForChainHash("0x" + "7".repeat(64)), undefined);
+  assert.equal(networkForChainHash(undefined), undefined);
 });
 
 test("resolves a scanned encoded offer before requesting an invoice", async () => {

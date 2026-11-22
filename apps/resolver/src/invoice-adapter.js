@@ -1,12 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { base64UrlEncode } from "../../../packages/protocol/src/index.js";
-import { assetToFiberCurrency, FiberRpcClient, toHexQuantity } from "./fiber-rpc.js";
+import { fiberCurrencyForNetwork, fiberNodeNetwork } from "../../../packages/sdk/src/fiber-network.js";
+import { FiberRpcClient, toHexQuantity } from "./fiber-rpc.js";
+import { invoiceRequestError } from "./invoice-errors.js";
 
 export class MockInvoiceAdapter {
   constructor(options = {}) {
     this.mode = "mock";
     this.invoiceTtlSeconds = options.invoiceTtlSeconds ?? 900;
     this.nodeId = options.nodeId;
+    this.network = options.network;
   }
 
   async createInvoice({ offer, amount, asset }) {
@@ -35,7 +38,13 @@ export class MockInvoiceAdapter {
   }
 
   async getNodeIdentity() {
-    return this.nodeId ? { node_id: this.nodeId, verified: true, source: "mock-fixture" } : undefined;
+    if (!this.nodeId) return undefined;
+    return {
+      node_id: this.nodeId,
+      verified: true,
+      source: "mock-fixture",
+      ...(this.network ? { network: this.network, network_source: "config" } : {})
+    };
   }
 
   async syncInvoice() {
@@ -53,12 +62,26 @@ export class FiberRpcInvoiceAdapter {
     this.getInvoiceMethod = options.getInvoiceMethod ?? "get_invoice";
     this.probeMethod = options.probeMethod ?? "node_info";
     this.client = options.client ?? new FiberRpcClient(options);
+    // Optional explicit network of the merchant node. When unset it is read
+    // from the node's chain hash.
+    this.network = normalizeConfiguredNetwork(options.network);
   }
 
   async createInvoice({ offer, amount, asset }) {
+    if (asset.asset_type !== "ckb") {
+      // A token invoice needs the token's full type script, which an offer
+      // does not carry. Minting a plain CKB invoice instead would bill the
+      // payer in the wrong asset, so this fails closed.
+      throw invoiceRequestError(
+        "ASSET_SCRIPT_NOT_CONFIGURED",
+        "this resolver has no type script configured for the requested asset",
+        { asset }
+      );
+    }
+
     const params = {
       amount: toHexQuantity(amount),
-      currency: assetToFiberCurrency(asset),
+      currency: invoiceCurrency(offer),
       description: offer.description ?? offer.offer_id
     };
 
@@ -87,7 +110,14 @@ export class FiberRpcInvoiceAdapter {
       error.status = 502;
       throw error;
     }
-    return { node_id: nodeId.toLowerCase(), verified: true, source: this.probeMethod };
+    const { network, source: networkSource } = fiberNodeNetwork(result, this.network);
+    return {
+      node_id: nodeId.toLowerCase(),
+      verified: true,
+      source: this.probeMethod,
+      ...(network ? { network, network_source: networkSource } : {}),
+      ...(result.chain_hash ? { chain_hash: result.chain_hash } : {})
+    };
   }
 
   async probe() {
@@ -172,6 +202,7 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
       method: env.FIBER_RPC_INVOICE_METHOD ?? "new_invoice",
       getInvoiceMethod: env.FIBER_RPC_GET_INVOICE_METHOD ?? "get_invoice",
       probeMethod: env.FIBER_RPC_PROBE_METHOD ?? "node_info",
+      network: env.FIBER_NETWORK,
       timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl: options.fetchImpl
     });
@@ -180,6 +211,30 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
   const error = new Error("FIBER_RPC_URL or MERCHANT_FIBER_RPC_URL is required in live Fiber RPC mode");
   error.code = "FIBER_RPC_URL_REQUIRED";
   throw error;
+}
+
+// The currency code is fixed by the offer's signed network, for every asset.
+function invoiceCurrency(offer) {
+  try {
+    return fiberCurrencyForNetwork(offer.network);
+  } catch {
+    throw invoiceRequestError("UNSUPPORTED_NETWORK", "offer network must be mainnet, testnet, or dev", {
+      network: offer.network
+    });
+  }
+}
+
+function normalizeConfiguredNetwork(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  const network = String(value).trim().toLowerCase();
+  try {
+    fiberCurrencyForNetwork(network);
+  } catch {
+    const error = new Error("FIBER_NETWORK must be mainnet, testnet, or dev");
+    error.code = "INVALID_FIBER_NETWORK";
+    throw error;
+  }
+  return network;
 }
 
 async function safeRpcCall(client, method, params) {
@@ -207,6 +262,7 @@ function summarizeRpcResult(result) {
     "public_key",
     "version",
     "chain",
+    "chain_hash",
     "network",
     "addresses",
     "peers",
@@ -227,8 +283,9 @@ function summarizeNodeInfo(result) {
     node_id: result.node_id,
     pubkey: result.pubkey ?? result.public_key,
     version: result.version,
-    network: result.network,
+    network: result.network ?? fiberNodeNetwork(result).network,
     chain: result.chain,
+    chain_hash: result.chain_hash,
     peers_count: decimalString(result.peers_count ?? result.peers),
     channel_count: decimalString(result.channel_count ?? result.channels),
     addresses: result.addresses

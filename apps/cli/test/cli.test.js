@@ -121,6 +121,43 @@ test("CLI checks node ownership, creates, lists, and cryptographically revokes a
   assert.equal(verifyOfferRevocation(offer, revocation).ok, true);
 });
 
+test("CLI signs offers for the network its Fiber node is on", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "fiber-offers-cli-network-"));
+  const fiberRpcUrl = "http://fiber.example:8227";
+  const mainnetGenesis = "0x92b197aa1fba0f63633922c61c92375c9c074a93e85963554f5499fe1450d0e5";
+  const fetchImpl = async (url, options = {}) => {
+    const body = JSON.parse(options.body);
+    assert.equal(url, fiberRpcUrl);
+    return response({
+      jsonrpc: "2.0",
+      id: body.id,
+      result: { pubkey: `03${"b".repeat(64)}`, chain_hash: mainnetGenesis }
+    });
+  };
+  const common = ["--resolver-url", "https://resolver.example", "--fiber-rpc-url", fiberRpcUrl, "--local-only"];
+
+  const output = captureOutput();
+  await main(["create", ...common, "--description", "Mainnet offer", "--amount", "100000000"], {
+    cwd,
+    stdout: output,
+    fetchImpl
+  });
+  const created = JSON.parse(output.value);
+  const keyRecord = JSON.parse(await readFile(created.key_file, "utf8"));
+
+  assert.equal(created.network, "mainnet");
+  assert.equal(keyRecord.offer.network, "mainnet");
+  await assert.rejects(
+    () =>
+      main(["create", ...common, "--description", "Wrong network", "--amount", "100000000", "--network", "testnet"], {
+        cwd,
+        stdout: captureOutput(),
+        fetchImpl
+      }),
+    (error) => error.code === "OFFER_NETWORK_MISMATCH"
+  );
+});
+
 function captureOutput() {
   return {
     value: "",

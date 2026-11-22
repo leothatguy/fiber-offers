@@ -58,8 +58,27 @@ export interface CreatedOffer {
   offer: SignedFiberOffer;
   encoded_offer: string;
   offer_private_key_pem: string;
-  node_identity: { node_id: string; source: string };
+  node_identity: {
+    node_id: string;
+    source: string;
+    /** Present when the node follows a public CKB chain. */
+    network?: FiberOfferNetwork;
+    network_source?: "config" | "chain_hash";
+  };
 }
+
+/** Fiber invoice currency code for each offer network. */
+export type FiberCurrency = "Fibb" | "Fibt" | "Fibd";
+export const FIBER_CURRENCIES: Readonly<Record<FiberOfferNetwork, FiberCurrency>>;
+/** Throws an error with code `UNSUPPORTED_NETWORK` for an unknown network. */
+export function fiberCurrencyForNetwork(network: FiberOfferNetwork): FiberCurrency;
+export function networkForFiberCurrency(currency: string): FiberOfferNetwork | undefined;
+/** `"mainnet"` or `"testnet"` for a public CKB chain; `undefined` for any other chain. */
+export function networkForChainHash(chainHash: string | undefined): "mainnet" | "testnet" | undefined;
+export function fiberNodeNetwork(
+  nodeInfo: { chain_hash?: string } | undefined,
+  configuredNetwork?: FiberOfferNetwork
+): { network: FiberOfferNetwork | undefined; source: "config" | "chain_hash" | undefined };
 
 export interface RegisterOfferOptions {
   username?: string;

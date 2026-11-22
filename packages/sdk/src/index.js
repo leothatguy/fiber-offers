@@ -9,6 +9,13 @@ import {
   verifyOfferRevocation
 } from "@fiber-offers/protocol";
 import { FiberNodeDiagnosticsClient, summarizeFiberChannels } from "./fiber-diagnostics.js";
+import {
+  FIBER_CURRENCIES,
+  fiberCurrencyForNetwork,
+  fiberNodeNetwork,
+  networkForChainHash,
+  networkForFiberCurrency
+} from "./fiber-network.js";
 import { fetchText, normalizeTimeoutMs } from "./http.js";
 import {
   FiberPaymentClient,
@@ -32,6 +39,11 @@ export {
   createOfferRevocation,
   decodeOffer,
   encodeOffer,
+  FIBER_CURRENCIES,
+  fiberCurrencyForNetwork,
+  fiberNodeNetwork,
+  networkForChainHash,
+  networkForFiberCurrency,
   FiberNodeDiagnosticsClient,
   FiberPaymentFlowClient,
   FiberPaymentClient,
@@ -72,10 +84,24 @@ export async function createOffer(input, options = {}) {
     error.code = "FIBER_NODE_ID_UNAVAILABLE";
     throw error;
   }
+  // The offer's network is signed into it, so it has to be the node's network.
+  // When the node follows a public chain the network is taken from the node and
+  // a conflicting explicit value is refused, rather than producing an offer no
+  // invoice can ever be minted for.
+  const node = fiberNodeNetwork(nodeInfo);
+  if (node.network && input.network && input.network !== node.network) {
+    const error = new Error(
+      `offer network "${input.network}" does not match the Fiber node, which is on ${node.network}`
+    );
+    error.code = "OFFER_NETWORK_MISMATCH";
+    error.details = { offer_network: input.network, node_network: node.network };
+    throw error;
+  }
   const keys = options.keyPair ?? generateOfferKeyPair();
   const offer = createSignedOffer(
     {
       ...input,
+      network: input.network ?? node.network,
       node_id: nodeId.toLowerCase(),
       public_key: keys.publicKeyPem
     },
@@ -85,7 +111,11 @@ export async function createOffer(input, options = {}) {
     offer,
     encoded_offer: encodeOffer(offer),
     offer_private_key_pem: keys.privateKeyPem,
-    node_identity: { node_id: offer.node_id, source: options.nodeInfoMethod ?? "node_info" }
+    node_identity: {
+      node_id: offer.node_id,
+      source: options.nodeInfoMethod ?? "node_info",
+      ...(node.network ? { network: node.network, network_source: node.source } : {})
+    }
   };
 }
 

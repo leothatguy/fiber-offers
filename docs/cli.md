@@ -172,7 +172,7 @@ Useful creation options:
 | `--amount-max N` | Optional maximum for a flexible offer |
 | `--asset-type TYPE` | Protocol asset type; default `ckb` |
 | `--symbol SYMBOL` | Display symbol; default `CKB` |
-| `--network NETWORK` | `mainnet`, `testnet`, or `dev`; default `testnet` |
+| `--network NETWORK` | `mainnet`, `testnet`, or `dev`. Defaults to the Fiber node's own network when it follows a public CKB chain, otherwise `testnet`. A value that contradicts the node is refused with `OFFER_NETWORK_MISMATCH`. |
 | `--expiry UNIX_SECONDS` | Optional offer expiry |
 | `--single-use` | Permit only one invoice resolution |
 | `--username NAME` | Bind a Fiber Address username during registration |

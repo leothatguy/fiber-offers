@@ -581,7 +581,7 @@ async function createDemoOffer(body, origin, context) {
       public_key: keys.publicKeyPem,
       resolver_url: body.resolver_url ?? origin,
       description: body.description ?? "Demo merchant offer",
-      network: body.network ?? "testnet",
+      network: body.network ?? nodeIdentity?.network ?? "testnet",
       assets,
       amount_min: pricing.amount_min,
       amount_max: pricing.amount_max,
@@ -2024,11 +2024,22 @@ async function verifyOfferNodeOwnership(offer, context) {
       configured_node_id: identity.node_id
     });
   }
+  // The node's network is known when it was configured or the node follows a
+  // public chain. An offer signed for another network could never be paid here:
+  // the node would refuse to mint an invoice in that network's currency.
+  if (identity.network && identity.network !== offer.network) {
+    throw httpError(422, "OFFER_NETWORK_MISMATCH", "offer network does not match the resolver's Fiber node", {
+      offer_network: offer.network,
+      node_network: identity.network,
+      node_network_source: identity.network_source
+    });
+  }
   return {
     status: "verified",
     method: "resolver-node-info",
     node_id: identity.node_id,
     source: identity.source,
+    ...(identity.network ? { network: identity.network, network_source: identity.network_source } : {}),
     verified_at: new Date().toISOString()
   };
 }

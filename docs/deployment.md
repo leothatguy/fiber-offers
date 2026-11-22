@@ -163,6 +163,8 @@ FIBER_RPC_PASSWORD=secret \
 npm run dev
 ```
 
+The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node.
+
 With Docker, point `FIBER_RPC_URL` at the host or service address reachable from the container. The payer node is not resolver configuration: each payer wallet uses its own node to dry-run and send the invoice. Set `PAYER_FIBER_RPC_URL` only in controlled topology or E2E test environments.
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.

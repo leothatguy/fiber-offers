@@ -23,7 +23,8 @@ const optionDefinitions = {
   help: { type: "boolean", short: "h", default: false },
   "keys-dir": { type: "string" },
   "local-only": { type: "boolean", default: false },
-  network: { type: "string", default: "testnet" },
+  // No default: the SDK reads the network from the Fiber node when it can.
+  network: { type: "string" },
   reason: { type: "string" },
   "resolver-url": { type: "string" },
   "single-use": { type: "boolean", default: false },
@@ -139,7 +140,7 @@ async function createCommand(options, config, context) {
     {
       resolver_url: config.resolverUrl,
       description: options.description,
-      network: options.network,
+      ...(options.network ? { network: options.network } : {}),
       assets: [{ asset_type: options["asset-type"], symbol: options.symbol }],
       ...pricing,
       ...(options.expiry ? { expiry: positiveInteger(options.expiry, "expiry") } : {}),
@@ -172,6 +173,7 @@ async function createCommand(options, config, context) {
     ok: true,
     offer_id: created.offer.offer_id,
     node_id: created.offer.node_id,
+    network: created.offer.network,
     key_file: keyPath,
     registered: Boolean(registered),
     payment_link: registered?.payment_link,
