@@ -52,6 +52,13 @@ export class FiberPaymentClient {
     }
   }
 
+  // The payer node's own reading of an invoice. Used to verify an invoice
+  // against a signed offer before paying it.
+  async parseInvoice(invoice) {
+    if (typeof invoice !== "string" || invoice.length === 0) throw new Error("invoice is required");
+    return this.rpc.call("parse_invoice", [{ invoice }]);
+  }
+
   async getPayment(paymentHash) {
     if (!paymentHash) throw new Error("payment_hash is required");
     return this.rpc.call("get_payment", [{ payment_hash: paymentHash }]);

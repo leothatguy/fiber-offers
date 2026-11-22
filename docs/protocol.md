@@ -278,6 +278,10 @@ Common codes include `INVALID_SIGNATURE`, `OFFER_ID_MISMATCH`,
 - Treat `resolver_url`, description, assets, amounts, recurrence, metadata, and
   extensions as immutable signed terms.
 - Verify an encoded offer before showing payment confirmation.
+- Treat the resolver as untrusted. Verify every offer it returns, and before
+  paying, have your own node read the invoice and check that it pays `node_id`,
+  for the requested amount, network and asset. `FiberPaymentFlowClient` in
+  `@fiber-offers/sdk` does this; `verifyInvoiceForOffer()` does the comparison.
 - A valid offer does not guarantee that the merchant node is online or that a
   payer has a liquid Fiber route.
 - A `fbroffer1...` value is a reusable offer; a `fibt...` value is a one-time

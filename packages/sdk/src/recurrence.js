@@ -165,8 +165,10 @@ export class FiberRecurringPaymentScheduler {
     }
 
     const scheduledFor = approval.next_due_at;
+    // Pass the signed offer stored with the approval, so each cycle's invoice
+    // is verified against the terms the payer actually approved.
     const result = await this.paymentFlow.payOffer(
-      approval.offer_id,
+      approval.offer,
       {
         amount: terms.amount,
         asset: approval.asset,

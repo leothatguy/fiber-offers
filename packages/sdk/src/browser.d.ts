@@ -16,6 +16,8 @@ export {
   fiberSendPaymentParams,
   networkForChainHash,
   networkForFiberCurrency,
+  normalizeParsedInvoice,
+  verifyInvoiceForOffer,
   normalizeFiberPaymentFailure,
   parseFiberAddress,
   planDirectChannelFixture,

@@ -66,6 +66,16 @@ A token invoice uses the same currency code and names the token in the node's `u
 
 The resolver also checks `network` against its node at registration and before each invoice. It learns the node's network from `node_info.chain_hash` (the CKB mainnet or testnet genesis hash) or from an explicit `FIBER_NETWORK` setting. An offer signed for a different network is refused with `422 OFFER_NETWORK_MISMATCH`. A node on any other chain reports no known network; set `FIBER_NETWORK=dev` there to enforce the check.
 
+### What the payer must verify
+
+A resolver is an untrusted intermediary. It can return any offer and any invoice string, so a payer must check both itself:
+
+1. The offer is validly signed and its `offer_id` is the hash of its contents. An offer fetched by ID must have that ID.
+2. The resolver contacted is the `resolver_url` signed into the offer.
+3. The invoice, as read by the payer's own node, pays `offer.node_id`, for the requested amount, in the currency of `offer.network`, in the requested asset (no token script for CKB; for a token, a type script whose hash is the offer's `type_script_hash`), and has not expired.
+
+A payer that skips step 3 can be made to pay anyone. The reference SDK refuses to send a payment for an invoice it could not verify.
+
 ## Revocation
 
 `DELETE /offers/:offer_id` accepts a `fiberoffer-revocation-v1` proof containing the offer ID, node ID, timestamp, optional reason, and Ed25519 signature from the offer lifecycle key. Revoked offers return `410 OFFER_REVOKED` and cannot create more invoices.

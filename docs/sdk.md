@@ -212,6 +212,32 @@ if (prepared.ok) {
 Real payment is deliberately opt-in. Calling `payOffer` without `execute: true`
 returns `execute_required` instead of sending funds.
 
+### What the flow verifies
+
+The resolver is treated as untrusted. Before any funds move, the flow checks:
+
+1. **The offer.** Pass an offer ID, an encoded `fbroffer1…` string, or a signed
+   offer object. Its signature is verified, and an ID is checked against the
+   contents the resolver returns (the ID is the hash of the contents).
+2. **The resolver.** The resolver being contacted must be the `resolver_url`
+   signed into the offer, otherwise the result is `resolver_mismatch`.
+3. **The request.** Amount and asset are checked against the signed terms before
+   the resolver is asked for anything.
+4. **The invoice.** The payer's own node reads the invoice (`parse_invoice`) and
+   the result is compared with the offer: it must pay `offer.node_id`, for the
+   requested amount, in the offer's network currency and the requested asset
+   (for a token, the invoice's type script must hash to the offer's
+   `type_script_hash`), and it must not have expired. A mismatch gives
+   `invoice_rejected` with a code such as `INVOICE_PAYEE_MISMATCH`.
+
+`payOffer` with `execute: true` refuses to send (`invoice_unverified`) when the
+invoice could not be verified, for example because the payment client has no
+`parseInvoice`. The outcome is on `result.invoice_verification`.
+
+`verifyInvoiceForOffer()` is exported for wallets that run their own flow.
+`allowResolverMismatch` and `skipInvoiceVerification` exist for tests and local
+setups; do not set them in a wallet.
+
 ## Fiber Address discovery
 
 ```js

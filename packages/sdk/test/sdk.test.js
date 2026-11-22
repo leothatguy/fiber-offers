@@ -25,13 +25,16 @@ import {
   planDirectChannelFixture,
   summarizeFiberChannels,
   toFiberDecimalQuantity,
-  toFiberHexQuantity
+  toFiberHexQuantity,
+  verifyInvoiceForOffer
 } from "../src/index.js";
 import { JsonFileRecurringApprovalStore } from "../src/node.js";
 import {
+  ckbScriptHash,
   createSignedOffer,
   encodeOffer,
-  generateOfferKeyPair
+  generateOfferKeyPair,
+  serializeCkbScript
 } from "../../protocol/src/index.js";
 
 test("packages advertise TypeScript declarations for SDK adopters", async () => {
@@ -121,6 +124,169 @@ test("maps offer networks to Fiber currencies and chain hashes", () => {
   );
   assert.equal(networkForChainHash("0x" + "7".repeat(64)), undefined);
   assert.equal(networkForChainHash(undefined), undefined);
+});
+
+test("rejects an offer the resolver tampered with or swapped", async () => {
+  const keys = generateOfferKeyPair();
+  const make = (description) =>
+    createSignedOffer(
+      {
+        node_id: "03" + "b".repeat(64),
+        public_key: keys.publicKeyPem,
+        resolver_url: "https://resolver.example",
+        description,
+        assets: [{ asset_type: "ckb", symbol: "CKB" }]
+      },
+      keys.privateKeyPem
+    );
+  const offer = make("Genuine offer");
+  const other = make("Another validly signed offer");
+  const clientReturning = (body) =>
+    new FiberOffersClient({
+      resolverUrl: "https://resolver.example",
+      fetchImpl: async () => new Response(JSON.stringify(body), { status: 200 })
+    });
+  const failureOf = async (body, call = (client) => client.getOffer(offer.offer_id)) => {
+    try {
+      await call(clientReturning(body));
+    } catch (error) {
+      return error.code;
+    }
+    return "accepted";
+  };
+
+  assert.equal(await failureOf({ offer_id: offer.offer_id, offer, encoded_offer: encodeOffer(offer) }), "accepted");
+  // Fields changed after signing.
+  assert.equal(
+    await failureOf({ offer_id: offer.offer_id, offer: { ...offer, node_id: "02" + "c".repeat(64) } }),
+    "OFFER_ID_MISMATCH"
+  );
+  // A different, validly signed offer in place of the one requested.
+  assert.equal(await failureOf({ offer_id: other.offer_id, offer: other }), "RESOLVED_OFFER_MISMATCH");
+  assert.equal(await failureOf({ offer_id: offer.offer_id, offer: other }), "RESOLVED_OFFER_MISMATCH");
+  // The right offer with someone else's encoded payload attached.
+  assert.equal(
+    await failureOf({ offer_id: offer.offer_id, offer, encoded_offer: encodeOffer(other) }),
+    "RESOLVED_OFFER_MISMATCH"
+  );
+  assert.equal(await failureOf({ offer_id: offer.offer_id }), "INVALID_OFFER");
+  // The scanned-payload path goes through the same checks.
+  assert.equal(
+    await failureOf({ offer_id: other.offer_id, offer: other }, (client) => client.resolveOffer(encodeOffer(offer))),
+    "RESOLVED_OFFER_MISMATCH"
+  );
+});
+
+test("resolves a Fiber Address at its own domain and verifies the answer", async () => {
+  const keys = generateOfferKeyPair();
+  const offer = createSignedOffer(
+    {
+      node_id: "02" + "d".repeat(64),
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://shop.example",
+      assets: [{ asset_type: "ckb", symbol: "CKB" }]
+    },
+    keys.privateKeyPem
+  );
+  const calls = [];
+  let answer = { username: "alice", offer_id: offer.offer_id, offer };
+  const client = new FiberOffersClient({
+    resolverUrl: "https://my-resolver.example",
+    apiKey: "operator-secret",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, authorization: init.headers.authorization });
+      return new Response(JSON.stringify(answer), { status: 200 });
+    }
+  });
+
+  const foreign = await client.resolveFiberAddress("Alice@Shop.Example");
+  await client.resolveFiberAddress("alice@my-resolver.example");
+  await client.getOffer(offer.offer_id).catch(() => {});
+
+  // An address on another domain is looked up there, without the API key.
+  assert.equal(foreign.offer.offer_id, offer.offer_id);
+  assert.deepEqual(calls[0], { url: "https://shop.example/.well-known/fiberoffer/alice", authorization: undefined });
+  // The configured resolver serves its own addresses.
+  assert.equal(calls[1].url, "https://my-resolver.example/.well-known/fiberoffer/alice");
+  assert.equal(calls[2].authorization, "Bearer operator-secret");
+
+  answer = { username: "mallory", offer_id: offer.offer_id, offer };
+  await assert.rejects(
+    () => client.resolveFiberAddress("alice@shop.example"),
+    (error) => error.code === "FIBER_ADDRESS_MISMATCH"
+  );
+  answer = { username: "alice", offer_id: offer.offer_id, offer: { ...offer, description: "edited" } };
+  await assert.rejects(
+    () => client.resolveFiberAddress("alice@shop.example"),
+    (error) => error.code === "OFFER_ID_MISMATCH"
+  );
+});
+
+test("reads invoices in every attribute form a Fiber node may use", async () => {
+  const keys = generateOfferKeyPair();
+  const script = { code_hash: "0x" + "aa".repeat(32), hash_type: "type", args: "0x" + "01".repeat(32) };
+  const tokenAsset = { asset_type: "udt", symbol: "USDI", type_script_hash: ckbScriptHash(script) };
+  const nodeId = "02" + "e".repeat(64);
+  const offer = createSignedOffer(
+    {
+      node_id: nodeId,
+      network: "mainnet",
+      public_key: keys.publicKeyPem,
+      resolver_url: "https://resolver.example",
+      assets: [{ asset_type: "ckb", symbol: "CKB" }, tokenAsset]
+    },
+    keys.privateKeyPem
+  );
+  const now = Date.parse("2026-01-01T00:00:00.000Z");
+  const invoice = (attrs, extra = {}) => ({
+    currency: "Fibb",
+    amount: "0x3e8",
+    data: { timestamp: `0x${now.toString(16)}`, payment_hash: "0x" + "1".repeat(64), attrs },
+    ...extra
+  });
+  const verify = (parsed, request = { amount: "1000" }) =>
+    verifyInvoiceForOffer({ offer, request, parsed, now: now + 1000 });
+
+  const snakeCase = verify({ invoice: invoice([{ payee_public_key: nodeId }, { expiry_time: { secs: 600, nanos: 0 } }]) });
+  const camelCase = verify(invoice([{ PayeePublicKey: `0x${nodeId.toUpperCase()}` }, { ExpiryTime: "0x258" }]));
+  const moleculeScript = `0x${Buffer.from(serializeCkbScript(script)).toString("hex")}`;
+  const tokenAsHex = verify(invoice([{ payee_public_key: nodeId }, { udt_script: moleculeScript }]), {
+    amount: "1000",
+    asset: tokenAsset
+  });
+  const tokenAsObject = verify(invoice([{ payee_public_key: nodeId }, { udt_script: script }]), {
+    amount: "1000",
+    asset: tokenAsset
+  });
+  const expired = verify(invoice([{ payee_public_key: nodeId }, { expiry_time: 0 }]));
+  const noAmount = verify(invoice([{ payee_public_key: nodeId }], { amount: undefined }));
+  const garbage = verify({ unexpected: true });
+
+  assert.equal(snakeCase.ok, true);
+  assert.equal(snakeCase.invoice.expires_at, new Date(now + 600_000).toISOString());
+  assert.equal(camelCase.ok, true);
+  assert.equal(camelCase.invoice.payee_public_key, nodeId);
+  assert.equal(tokenAsHex.ok, true);
+  assert.equal(tokenAsObject.ok, true);
+  assert.equal(expired.failure.code, "INVOICE_EXPIRED");
+  assert.equal(noAmount.failure.code, "INVOICE_AMOUNT_MISSING");
+  assert.equal(garbage.failure.code, "INVOICE_UNPARSEABLE");
+});
+
+test("FiberPaymentClient reads an invoice through the payer node", async () => {
+  const calls = [];
+  const client = new FiberPaymentClient({
+    rpc: {
+      async call(method, params) {
+        calls.push({ method, params });
+        return { invoice: { currency: "Fibt" } };
+      }
+    }
+  });
+
+  assert.deepEqual(await client.parseInvoice("fibt1example"), { invoice: { currency: "Fibt" } });
+  assert.deepEqual(calls, [{ method: "parse_invoice", params: [{ invoice: "fibt1example" }] }]);
+  await assert.rejects(() => client.parseInvoice(""), /invoice is required/);
 });
 
 test("resolves a scanned encoded offer before requesting an invoice", async () => {
@@ -1033,13 +1199,27 @@ test("FiberPaymentFlowClient requires explicit execute before sending payment", 
     amount: "1200",
     asset: { asset_type: "ckb", symbol: "CKB" }
   });
-  const sent = await flow.payOffer(
+  // This resolver stub cannot return the signed offer, so there is nothing to
+  // verify the invoice against: executing is refused unless that is overridden.
+  const unverified = await flow.payOffer(
     "0x" + "a".repeat(64),
     {
       amount: "1200",
       asset: { asset_type: "ckb", symbol: "CKB" }
     },
     { execute: true }
+  );
+  assert.equal(unverified.status, "invoice_unverified");
+  assert.equal(unverified.failure.code, "INVOICE_NOT_VERIFIED");
+  assert.equal(sendCount, 0);
+
+  const sent = await flow.payOffer(
+    "0x" + "a".repeat(64),
+    {
+      amount: "1200",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    },
+    { execute: true, skipInvoiceVerification: true }
   );
 
   assert.equal(preparedOnly.ok, true);

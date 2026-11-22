@@ -1,10 +1,18 @@
-import { normalizeFiberPaymentFailure } from "./failures.js";
-import { decodeOffer, verifyOffer } from "@fiber-offers/protocol";
+import { fiberNodeError, normalizeFiberPaymentFailure } from "./failures.js";
+import { verifyInvoiceForOffer } from "./invoice-verification.js";
+import { decodeOffer, validateResolutionRequest, verifyOffer } from "@fiber-offers/protocol";
 
+// Runs a payment from a signed offer to a sent Fiber payment, treating the
+// resolver as untrusted: the offer's signature is checked, the resolver must be
+// the one the offer names, and the invoice it returns is read by the payer's
+// own node and matched against the offer before any funds move.
 export class FiberPaymentFlowClient {
   constructor(options = {}) {
     this.resolver = options.resolverClient ?? options.resolver;
     this.paymentClient = options.paymentClient ?? options.payerPaymentClient;
+    // For tests and local setups where the resolver is reached at a different
+    // address than the one signed into the offer.
+    this.allowResolverMismatch = Boolean(options.allowResolverMismatch);
 
     if (!this.resolver) {
       throw new Error("FiberPaymentFlowClient requires a resolverClient");
@@ -12,7 +20,13 @@ export class FiberPaymentFlowClient {
   }
 
   async preparePayment(offerOrId, request, options = {}) {
-    const offerReference = normalizeOfferReference(offerOrId);
+    const { offerId: offerReference, offer } = await this.#signedOffer(offerOrId);
+
+    if (offer) {
+      const blocked = this.#checkBeforeContact(offer, request, options);
+      if (blocked) return blocked;
+    }
+
     const initialReadiness = options.skipInitialReadiness
       ? undefined
       : await this.resolver.checkPayment(offerReference, request, invoiceRequestOptions(options));
@@ -43,6 +57,19 @@ export class FiberPaymentFlowClient {
       });
     }
 
+    const verification = await this.#verifyInvoice(offer, request, invoice, invoiceValue);
+    if (verification.attempted && !verification.verified) {
+      return paymentFlowResult({
+        ok: false,
+        status: "invoice_rejected",
+        request,
+        invoice,
+        invoice_verification: verification,
+        failure: verification.failure,
+        next_action: "do_not_pay"
+      });
+    }
+
     const invoiceReadiness = await this.resolver.checkPayment(
       offerReference,
       {
@@ -60,6 +87,7 @@ export class FiberPaymentFlowClient {
       status: readiness.ready && readiness.payable ? "ready_to_send" : "blocked_after_invoice",
       request,
       invoice,
+      invoice_verification: verification,
       readiness,
       route_check: routeCheck,
       failure: readiness.ready && readiness.payable ? undefined : readiness.failure ?? failureFromReadiness(readiness)
@@ -92,6 +120,26 @@ export class FiberPaymentFlowClient {
       });
     }
 
+    // Funds only move for an invoice that was matched against the signed offer.
+    if (!prepared.invoice_verification?.verified && !options.skipInvoiceVerification) {
+      return paymentFlowResult({
+        ...prepared,
+        ok: false,
+        status: "invoice_unverified",
+        failure: {
+          code: "INVOICE_NOT_VERIFIED",
+          summary:
+            prepared.invoice_verification?.summary ??
+            "The invoice could not be checked against the signed offer, so it was not paid.",
+          next_actions: [
+            "Pass the signed offer (or its encoded form) to payOffer, or use a resolver client that can fetch it.",
+            "Use a payment client that supports parse_invoice."
+          ]
+        },
+        next_action: "do_not_pay"
+      });
+    }
+
     const invoiceValue = prepared.invoice.invoice?.invoice ?? prepared.invoice.invoice;
     try {
       const payment = await this.paymentClient.sendPayment(invoiceValue, paymentOptions(options));
@@ -118,18 +166,163 @@ export class FiberPaymentFlowClient {
       });
     }
   }
+
+  // The signed offer behind whatever the caller passed: an encoded offer, a
+  // signed offer object, or an offer ID (fetched from the resolver). Whichever
+  // way it arrives its signature is checked here. An offer's ID is the hash of
+  // its contents, so an ID alone still pins down exactly one offer.
+  async #signedOffer(offerOrId) {
+    if (typeof offerOrId === "string" && offerOrId.startsWith("fbroffer1")) {
+      const offer = assertVerifiedOffer(decodeOffer(offerOrId));
+      return { offerId: offer.offer_id, offer };
+    }
+
+    const candidate = offerOrId && typeof offerOrId === "object" ? offerOrId.offer ?? offerOrId : undefined;
+    if (candidate?.scheme && candidate?.signature) {
+      const offer = assertVerifiedOffer(candidate);
+      return { offerId: offer.offer_id, offer };
+    }
+
+    const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId?.offer_id;
+    if (offerId && typeof this.resolver.getOffer === "function") {
+      const resolved = await this.resolver.getOffer(offerId);
+      const offer = assertVerifiedOffer(resolved?.offer);
+      if (offer.offer_id !== offerId) {
+        const error = new Error("resolver returned a different offer than the one requested");
+        error.code = "RESOLVED_OFFER_MISMATCH";
+        throw error;
+      }
+      return { offerId, offer };
+    }
+
+    // A resolver client that cannot fetch offers: the flow can prepare a
+    // payment but has nothing to verify the invoice against.
+    return { offerId: offerOrId, offer: undefined };
+  }
+
+  // Checks that need no network: the resolver being used is the one the offer
+  // signed, and the request fits the offer's signed terms.
+  #checkBeforeContact(offer, request, options) {
+    const contacted = originOf(this.resolver.resolverUrl);
+    const signed = originOf(offer.resolver_url);
+    if (
+      contacted &&
+      signed &&
+      contacted !== signed &&
+      !this.allowResolverMismatch &&
+      !options.allowResolverMismatch
+    ) {
+      return paymentFlowResult({
+        ok: false,
+        status: "resolver_mismatch",
+        request,
+        failure: {
+          code: "RESOLVER_URL_MISMATCH",
+          summary: "This resolver is not the one named in the signed offer.",
+          details: { offer_resolver: signed, contacted_resolver: contacted },
+          next_actions: ["Request the invoice from the resolver_url signed into the offer."]
+        },
+        next_action: "do_not_pay"
+      });
+    }
+
+    try {
+      validateResolutionRequest(offer, request);
+    } catch (error) {
+      return paymentFlowResult({
+        ok: false,
+        status: "blocked_before_invoice",
+        request,
+        failure: {
+          code: error.code ?? "INVALID_REQUEST",
+          summary: error.message,
+          next_actions: ["Change the amount or asset to one the offer accepts."]
+        },
+        next_action: "fix_request"
+      });
+    }
+    return undefined;
+  }
+
+  async #verifyInvoice(offer, request, invoice, invoiceValue) {
+    if (!offer) {
+      return {
+        attempted: false,
+        verified: false,
+        code: "OFFER_NOT_AVAILABLE",
+        summary: "The signed offer was not available, so the invoice was not checked against it."
+      };
+    }
+    if (typeof this.paymentClient?.parseInvoice !== "function") {
+      return {
+        attempted: false,
+        verified: false,
+        code: "PAYMENT_CLIENT_REQUIRED",
+        summary: "No payer node client was available to read the invoice, so it was not checked against the offer."
+      };
+    }
+
+    let parsed;
+    try {
+      parsed = await this.paymentClient.parseInvoice(invoiceValue);
+    } catch (error) {
+      // A node that cannot be reached is a different problem from a node that
+      // says the invoice is not an invoice.
+      const unavailable = error?.retryable === true;
+      return {
+        attempted: true,
+        verified: false,
+        failure: {
+          code: unavailable ? "INVOICE_VERIFICATION_UNAVAILABLE" : "INVOICE_UNPARSEABLE",
+          summary: unavailable
+            ? "The payer node could not be reached to read the invoice."
+            : "The payer node could not read the invoice the resolver returned.",
+          fiber_error: fiberNodeError(error),
+          next_actions: unavailable
+            ? ["Check the payer node and retry."]
+            : ["Do not pay this invoice.", "Request a new invoice."]
+        }
+      };
+    }
+
+    const outcome = verifyInvoiceForOffer({
+      offer,
+      request,
+      parsed,
+      expectedPaymentHash: invoice.payment_hash
+    });
+    return {
+      attempted: true,
+      verified: outcome.ok,
+      checks: outcome.checks,
+      invoice: outcome.invoice,
+      ...(outcome.failure ? { failure: outcome.failure } : {})
+    };
+  }
 }
 
-function normalizeOfferReference(offerOrId) {
-  if (typeof offerOrId !== "string" || !offerOrId.startsWith("fbroffer1")) return offerOrId;
-  const offer = decodeOffer(offerOrId);
-  const verification = verifyOffer(offer);
+function assertVerifiedOffer(offer) {
+  let verification;
+  try {
+    verification = verifyOffer(offer);
+  } catch (error) {
+    verification = { ok: false, code: error.code ?? "INVALID_OFFER", message: error.message };
+  }
   if (!verification.ok) {
     const error = new Error(verification.message);
     error.code = verification.code;
     throw error;
   }
-  return offer.offer_id;
+  return offer;
+}
+
+function originOf(url) {
+  if (typeof url !== "string" || url.length === 0) return undefined;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 async function routeCheckForInvoice(readiness, invoice, paymentClient, options) {
@@ -186,6 +379,7 @@ function paymentFlowResult(result) {
     status: result.status,
     request: result.request,
     invoice: result.invoice,
+    invoice_verification: result.invoice_verification,
     readiness: result.readiness,
     route_check: result.route_check,
     payment: result.payment,

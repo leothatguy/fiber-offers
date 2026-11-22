@@ -20,6 +20,7 @@ import {
   networkForFiberCurrency
 } from "./fiber-network.js";
 import { fetchText, normalizeTimeoutMs } from "./http.js";
+import { normalizeParsedInvoice, verifyInvoiceForOffer } from "./invoice-verification.js";
 import {
   FiberPaymentClient,
   FiberRpcClient,
@@ -50,6 +51,8 @@ export {
   fiberNodeNetwork,
   networkForChainHash,
   networkForFiberCurrency,
+  normalizeParsedInvoice,
+  verifyInvoiceForOffer,
   FiberNodeDiagnosticsClient,
   FiberPaymentFlowClient,
   FiberPaymentClient,
@@ -177,13 +180,9 @@ export class FiberOffersClient {
         throw error;
       }
     }
-    const resolved = await this.getOffer(offerId);
-    if (decoded && typeof decoded === "object" && resolved.offer_id !== decoded.offer_id) {
-      const error = new Error("resolver returned a different offer than the scanned payload");
-      error.code = "RESOLVED_OFFER_MISMATCH";
-      throw error;
-    }
-    return resolved;
+    // getOffer verifies the returned offer and that it is the one asked for.
+    // Its ID is the hash of its contents, so an equal ID is an equal offer.
+    return this.getOffer(offerId);
   }
 
   async resolveAndRequestInvoice(offerOrEncoded, request, options = {}) {
@@ -192,8 +191,12 @@ export class FiberOffersClient {
     return { offer: resolved, invoice };
   }
 
+  // The resolver is not trusted to hand back the right offer. The returned
+  // offer must be validly signed and must be the one that was asked for;
+  // otherwise this throws (code RESOLVED_OFFER_MISMATCH or the verification code).
   async getOffer(offerId) {
-    return this.#request(`/offers/${offerId}`);
+    const resolved = await this.#request(`/offers/${offerId}`);
+    return verifiedOfferResponse(resolved, offerId);
   }
 
   async listOffers() {
@@ -420,12 +423,34 @@ export class FiberOffersClient {
     });
   }
 
-  async resolveFiberAddress(address) {
+  // Looks up `user@domain` at that domain. The configured resolver is used
+  // only when it is that domain (which also lets a local http resolver serve
+  // its own addresses); an address on another domain is never silently looked
+  // up somewhere else. The returned offer is verified like any other.
+  async resolveFiberAddress(address, options = {}) {
     const { username, domain } = parseFiberAddress(address);
-    const baseUrl = this.resolverUrl || `https://${domain}`;
-    return this.#request(`/.well-known/fiberoffer/${encodeURIComponent(username)}`, {
+    const baseUrl = trimTrailingSlash(options.baseUrl ?? this.#fiberAddressBaseUrl(domain));
+    const resolved = await this.#request(`/.well-known/fiberoffer/${encodeURIComponent(username)}`, {
       baseUrl
     });
+    verifiedOfferResponse(resolved);
+    if (resolved.username !== undefined && String(resolved.username).toLowerCase() !== username) {
+      const error = new Error("resolver answered for a different Fiber Address than the one requested");
+      error.code = "FIBER_ADDRESS_MISMATCH";
+      throw error;
+    }
+    return resolved;
+  }
+
+  #fiberAddressBaseUrl(domain) {
+    if (this.resolverUrl) {
+      try {
+        if (new URL(this.resolverUrl).host.toLowerCase() === domain) return this.resolverUrl;
+      } catch {
+        // An unparseable resolverUrl cannot be the address's domain.
+      }
+    }
+    return `https://${domain}`;
   }
 
   async demoCreateOffer(input) {
@@ -443,7 +468,9 @@ export class FiberOffersClient {
       method: options.method ?? "GET",
       headers: {
         accept: "application/json",
-        ...authHeaders(this.apiKey),
+        // The API key belongs to the configured resolver and is never sent to
+        // another host, such as the domain of someone else's Fiber Address.
+        ...(baseUrl === this.resolverUrl ? authHeaders(this.apiKey) : {}),
         ...options.headers,
         ...(options.body ? { "content-type": "application/json" } : {})
       },
@@ -512,6 +539,42 @@ export class FiberOffersClient {
       throw failure;
     }
   }
+}
+
+// Checks an offer a resolver returned: validly signed, self-consistent, and,
+// when `expectedOfferId` is given, the one that was asked for.
+function verifiedOfferResponse(resolved, expectedOfferId = undefined) {
+  const offer = resolved?.offer;
+  let verification;
+  try {
+    verification = verifyOffer(offer);
+  } catch (error) {
+    verification = { ok: false, code: error.code ?? "INVALID_OFFER", message: error.message };
+  }
+  if (!verification.ok) {
+    const error = new Error(`resolver returned an offer that failed verification: ${verification.message}`);
+    error.code = verification.code;
+    throw error;
+  }
+
+  let encodedOfferId;
+  if (typeof resolved.encoded_offer === "string") {
+    try {
+      encodedOfferId = decodeOffer(resolved.encoded_offer).offer_id;
+    } catch {
+      encodedOfferId = null;
+    }
+  }
+  if (
+    (expectedOfferId !== undefined && offer.offer_id !== expectedOfferId) ||
+    (resolved.offer_id !== undefined && resolved.offer_id !== offer.offer_id) ||
+    (encodedOfferId !== undefined && encodedOfferId !== offer.offer_id)
+  ) {
+    const error = new Error("resolver returned a different offer than the one requested");
+    error.code = "RESOLVED_OFFER_MISMATCH";
+    throw error;
+  }
+  return resolved;
 }
 
 export function parseFiberAddress(address) {

@@ -384,8 +384,62 @@ export class FiberPaymentClient {
   sendPayment<T = FiberPaymentResult>(invoice: string, options?: FiberSendPaymentOptions): Promise<T>;
   dryRunPayment<T = FiberPaymentResult>(invoice: string, options?: FiberSendPaymentOptions): Promise<T>;
   checkPaymentRoute(invoice: string, options?: FiberSendPaymentOptions): Promise<FiberRouteCheckResult>;
+  /** The payer node's own reading of an invoice (`parse_invoice`). */
+  parseInvoice<T = { invoice: FiberParsedInvoice }>(invoice: string): Promise<T>;
   getPayment<T = FiberPaymentResult>(paymentHash: string): Promise<T>;
 }
+
+/** A Fiber invoice as a node reports it. Optional fields arrive in `data.attrs`. */
+export interface FiberParsedInvoice {
+  currency: string;
+  amount?: string;
+  signature?: string;
+  data: {
+    timestamp?: string;
+    payment_hash?: string;
+    attrs?: Array<Record<string, unknown>>;
+  };
+}
+
+export interface InvoiceVerificationCheck {
+  id: "invoice_format" | "payee" | "amount" | "currency" | "asset" | "expiry" | "payment_hash";
+  status: "pass" | "fail";
+  code?: string;
+  message: string;
+  details?: JsonObject;
+}
+
+/** What the invoice really commits to, as read by the payer node. */
+export interface VerifiedInvoiceSummary {
+  currency?: string;
+  amount?: string;
+  payment_hash?: string;
+  payee_public_key?: string;
+  description?: string;
+  type_script_hash?: string;
+  expires_at?: string;
+}
+
+export interface InvoiceVerificationOutcome {
+  ok: boolean;
+  checks: InvoiceVerificationCheck[];
+  invoice?: VerifiedInvoiceSummary;
+  failure?: { code: string; summary: string; details?: JsonObject; next_actions: string[] };
+}
+
+/**
+ * Checks that an invoice is the one a signed offer entitles the payer to: same
+ * payee node, amount, network and asset, and not expired. `parsed` must come
+ * from the payer's own node. Verify the offer's signature first.
+ */
+export function verifyInvoiceForOffer(input: {
+  offer: SignedFiberOffer;
+  request: PaymentRequest;
+  parsed: unknown;
+  expectedPaymentHash?: string;
+  now?: number;
+}): InvoiceVerificationOutcome;
+export function normalizeParsedInvoice(parsed: unknown): JsonObject | undefined;
 
 export function fiberSendPaymentParams(invoice: string, options?: FiberSendPaymentOptions): FiberSendPaymentParams;
 export function toFiberHexQuantity(value: IntegerLike): string;
@@ -784,11 +838,21 @@ export function normalizeFiberPaymentFailure(
 ): FiberPaymentFailure | undefined;
 export function fiberNodeError(error: unknown): FiberNodeError;
 
+/** `getOffer` lets the flow fetch and verify the signed offer when given only an ID. */
+export type PaymentFlowResolver = Pick<FiberOffersClient, "checkPayment" | "requestInvoice"> &
+  Partial<Pick<FiberOffersClient, "getOffer" | "resolverUrl">>;
+/** `parseInvoice` is required to verify an invoice, and so to execute a payment. */
+export type PaymentFlowPayer = Partial<
+  Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment" | "parseInvoice">
+>;
+
 export interface FiberPaymentFlowClientOptions {
-  resolverClient?: Pick<FiberOffersClient, "checkPayment" | "requestInvoice">;
-  resolver?: Pick<FiberOffersClient, "checkPayment" | "requestInvoice">;
-  paymentClient?: Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment">;
-  payerPaymentClient?: Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment">;
+  resolverClient?: PaymentFlowResolver;
+  resolver?: PaymentFlowResolver;
+  paymentClient?: PaymentFlowPayer;
+  payerPaymentClient?: PaymentFlowPayer;
+  /** Accept a resolver other than the `resolver_url` signed into the offer. For tests and local setups. */
+  allowResolverMismatch?: boolean;
 }
 
 export interface FiberPaymentFlowOptions extends FiberSendPaymentOptions {
@@ -797,21 +861,40 @@ export interface FiberPaymentFlowOptions extends FiberSendPaymentOptions {
   skipInitialReadiness?: boolean;
   requireInitialReadiness?: boolean;
   forceLocalDryRun?: boolean;
+  /** Per-call form of the constructor option. */
+  allowResolverMismatch?: boolean;
+  /** Pay an invoice that was not checked against the signed offer. Unsafe outside tests. */
+  skipInvoiceVerification?: boolean;
+}
+
+export interface PaymentFlowInvoiceVerification {
+  /** False when there was no signed offer or no payer node to verify with. */
+  attempted: boolean;
+  verified: boolean;
+  code?: string;
+  summary?: string;
+  checks?: InvoiceVerificationCheck[];
+  invoice?: VerifiedInvoiceSummary;
+  failure?: FiberPaymentFailure | ReadinessIssue;
 }
 
 export interface PaymentFlowResult {
   ok: boolean;
   status:
+    | "resolver_mismatch"
     | "blocked_before_invoice"
     | "invoice_unavailable"
+    | "invoice_rejected"
     | "ready_to_send"
     | "blocked_after_invoice"
     | "payment_client_required"
+    | "invoice_unverified"
     | "payment_sent"
     | "payment_failed"
     | string;
   request?: PaymentRequest;
   invoice?: InvoiceResolutionResponse;
+  invoice_verification?: PaymentFlowInvoiceVerification;
   readiness?: PaymentReadiness;
   route_check?: FiberRouteCheckResult;
   payment?: FiberPaymentResult;
@@ -822,12 +905,16 @@ export interface PaymentFlowResult {
   failure?: FiberPaymentFailure | ReadinessIssue;
 }
 
+/** An offer ID, an encoded `fbroffer1…` string, a signed offer, or a resolver response containing one. */
+export type PayableOffer = OfferOrId | SignedFiberOffer | { offer: SignedFiberOffer };
+
 export class FiberPaymentFlowClient {
-  resolver: Pick<FiberOffersClient, "checkPayment" | "requestInvoice">;
-  paymentClient?: Pick<FiberPaymentClient, "checkPaymentRoute" | "sendPayment">;
+  resolver: PaymentFlowResolver;
+  paymentClient?: PaymentFlowPayer;
+  allowResolverMismatch: boolean;
   constructor(options: FiberPaymentFlowClientOptions);
-  preparePayment(offerOrId: OfferOrId, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
-  payOffer(offerOrId: OfferOrId, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
+  preparePayment(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
+  payOffer(offer: PayableOffer, request: PaymentRequest, options?: FiberPaymentFlowOptions): Promise<PaymentFlowResult>;
 }
 
 export interface RecurrenceStatus {

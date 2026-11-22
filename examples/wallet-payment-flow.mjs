@@ -32,6 +32,7 @@ console.log(
       offer_id: offer.offer_id,
       payment_link: offer.payment_link,
       status: prepared.status,
+      invoice_verified: prepared.invoice_verification?.verified ?? false,
       ready: prepared.readiness?.ready,
       payable: prepared.readiness?.payable,
       confidence: prepared.readiness?.confidence,
