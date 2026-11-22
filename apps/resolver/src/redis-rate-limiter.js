@@ -22,14 +22,15 @@ export class RedisRateLimiter {
     this.ownsRedis = !options.redis;
   }
 
-  async take(key, now = Date.now()) {
-    if (this.max === 0 || this.windowMs === 0) return { allowed: true };
+  async take(key, now = Date.now(), limits = {}) {
+    const max = limits.max ?? this.max;
+    if (max === 0 || this.windowMs === 0) return { allowed: true };
     const bucket = Math.floor(now / this.windowMs);
     const redisKey = `${this.prefix}:rate-limit:${bucket}:${key}`;
     const [count, ttl] = await this.redis.eval(takeScript, 1, redisKey, this.windowMs);
     return {
-      allowed: Number(count) <= this.max,
-      remaining: Math.max(0, this.max - Number(count)),
+      allowed: Number(count) <= max,
+      remaining: Math.max(0, max - Number(count)),
       resetAt: now + Math.max(0, Number(ttl))
     };
   }

@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, InMemoryOfferStore, JsonOfferStore } from "../src/server.js";
+import { createMemoryRateLimiter, createServer, InMemoryOfferStore, JsonOfferStore } from "../src/server.js";
 import { FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
 import { deliverWebhookEvent, signWebhookPayload } from "../src/webhook-delivery.js";
 import {
@@ -1563,6 +1563,111 @@ test("rate limits repeated public invoice creation", async () => {
   }, { rateLimitMax: 1 });
 });
 
+test("forwarding headers a client sends do not move the rate limit or the links", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const checkUrl = `${baseUrl}/offers/${created.body.offer_id}/check`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+
+    const statuses = [];
+    for (let index = 0; index < 6; index += 1) {
+      const result = await postJson(checkUrl, request, { "x-forwarded-for": `198.51.100.${index}` });
+      statuses.push(result.status);
+    }
+    const spoofed = await fetch(`${baseUrl}/offers/${created.body.offer_id}`, {
+      headers: { "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" }
+    }).then((response) => response.json());
+
+    // A different X-Forwarded-For on every request is still one client.
+    assert.deepEqual(statuses, [200, 200, 200, 429, 429, 429]);
+    assert.equal(spoofed.payment_link, `${baseUrl}/pay/${created.body.offer_id}`);
+  }, { rateLimitMax: 3 });
+});
+
+test("a configured public URL is the only origin in responses", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000", username: "shop" });
+    const fetched = await fetch(`${baseUrl}/offers/${created.body.offer_id}`, {
+      headers: { "x-forwarded-host": "evil.example", host: "also-evil.example" }
+    }).then((response) => response.json());
+
+    assert.equal(created.body.offer.resolver_url, "https://offers.merchant.example");
+    assert.equal(fetched.payment_link, `https://offers.merchant.example/pay/${created.body.offer_id}`);
+    assert.equal(fetched.fiber_address, "shop@offers.merchant.example");
+    assert.equal(fetched.lookup_url, "https://offers.merchant.example/.well-known/fiberoffer/shop");
+  }, { publicOrigin: "https://offers.merchant.example/" });
+
+  assert.throws(
+    () => createServer({ store: new InMemoryOfferStore(), invoiceAdapter: new MockInvoiceAdapter(), publicOrigin: "not a url" }),
+    (error) => error.code === "INVALID_PUBLIC_URL"
+  );
+});
+
+test("behind a trusted proxy the client is the address that proxy saw", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const checkUrl = `${baseUrl}/offers/${created.body.offer_id}/check`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+    const check = (forwardedFor) => postJson(checkUrl, request, { "x-forwarded-for": forwardedFor });
+
+    // The proxy appends the real client last; whatever the client put before it is ignored.
+    const sameClient = [];
+    for (let index = 0; index < 4; index += 1) {
+      sameClient.push((await check(`10.9.9.${index}, 203.0.113.7`)).status);
+    }
+    const otherClient = await check("10.9.9.9, 203.0.113.8");
+    const forwarded = await fetch(`${baseUrl}/offers/${created.body.offer_id}`, {
+      headers: { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https" }
+    }).then((response) => response.json());
+
+    assert.deepEqual(sameClient, [200, 200, 429, 429]);
+    assert.equal(otherClient.status, 200);
+    assert.equal(forwarded.payment_link, `https://shop.example/pay/${created.body.offer_id}`);
+  }, { rateLimitMax: 2, trustedProxyHops: 1 });
+});
+
+test("limits API key guesses and survives a rate limiter outage", async () => {
+  await withServer(async (baseUrl) => {
+    const statuses = [];
+    for (let index = 0; index < 12; index += 1) {
+      const attempt = await postJson(`${baseUrl}/operator/session`, { api_key: `guess-${index}` });
+      statuses.push(attempt.status);
+    }
+    assert.deepEqual(statuses.slice(0, 10), Array(10).fill(401));
+    assert.deepEqual(statuses.slice(10), [429, 429]);
+  }, { apiKey: "operator-secret" });
+
+  const brokenLimiter = {
+    async take() {
+      throw new Error("redis is down");
+    }
+  };
+  const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, request);
+    assert.equal(invoice.status, 201);
+  }, { rateLimiter: brokenLimiter });
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, request);
+    assert.equal(invoice.status, 503);
+    assert.equal(invoice.body.error.code, "RATE_LIMITER_UNAVAILABLE");
+  }, { rateLimiter: brokenLimiter, rateLimitFailOpen: false });
+});
+
+test("the in-memory rate limiter forgets expired buckets", () => {
+  const limiter = createMemoryRateLimiter({ windowMs: 1000, max: 5 });
+  for (let index = 0; index < 5000; index += 1) limiter.take(`scope:client-${index}`, 0);
+  assert.equal(limiter.size(), 5000);
+  // Once their window has passed, the next sweep drops them.
+  for (let index = 0; index < 1000; index += 1) limiter.take(`scope:later-${index}`, 2000);
+  assert.ok(limiter.size() <= 1000);
+  // A per-call limit overrides the default.
+  assert.equal(limiter.take("login:a", 5000, { max: 1 }).allowed, true);
+  assert.equal(limiter.take("login:a", 5000, { max: 1 }).allowed, false);
+});
+
 function readyDirectTopology() {
   return {
     ok: true,
@@ -1627,6 +1732,9 @@ async function withServer(callback, options = {}) {
     allowPrivateWebhookTargets: options.allowPrivateWebhookTargets,
     rateLimitMax: options.rateLimitMax,
     rateLimitWindowMs: options.rateLimitWindowMs,
+    rateLimiter: options.rateLimiter,
+    rateLimitFailOpen: options.rateLimitFailOpen,
+    trustedProxyHops: options.trustedProxyHops,
     logger: options.logger ?? { error() {} }
   });
 

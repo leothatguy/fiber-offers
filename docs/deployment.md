@@ -89,6 +89,32 @@ All API replicas are stateless. PostgreSQL owns offer, address, resolution,
 idempotency, recurrence-cycle, webhook, and outbox state. Redis owns distributed
 rate-limit counters and BullMQ scheduling state.
 
+## Public URL and reverse proxies
+
+Set `RESOLVER_PUBLIC_URL` to the address others reach the resolver at. Every link
+it returns (payment links, Fiber Addresses, QR payloads, webhook payloads) uses
+that value, and no request header can change it. Without it, links follow the
+`Host` header of each request, which is only suitable for local development.
+
+Rate limits are per client address. Behind reverse proxies the resolver reads
+that address from `X-Forwarded-For`, counting `RESOLVER_TRUSTED_PROXY_HOPS`
+entries from the right, because each proxy appends the address it received the
+request from and anything further left is whatever the client chose to send:
+
+| Deployment | `RESOLVER_TRUSTED_PROXY_HOPS` |
+| --- | --- |
+| Clients connect straight to the resolver | `0` (default; the header is ignored) |
+| The bundled Compose gateway only | `1` (Compose default) |
+| Host Nginx in front of the Compose gateway | `2` (set by `docker-compose.production.yml`) |
+
+A value that is too high lets a client choose its own address and evade the
+limits; a value that is too low limits your proxy instead of your clients.
+
+Operator login, offer revocation and QR rendering are rate limited along with
+readiness checks and invoice creation. If the limiter's Redis is unreachable,
+requests are served unlimited and the failure is logged; set
+`RESOLVER_RATE_LIMIT_FAIL_OPEN=false` to answer `503` instead.
+
 ## PostgreSQL
 
 Set `DATABASE_URL` to select the PostgreSQL store. Without it, the resolver uses

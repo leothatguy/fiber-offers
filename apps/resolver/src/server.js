@@ -53,7 +53,7 @@ const webhookSubscriptionEventTypes = new Set([
 const webhookEventTypes = new Set([...webhookSubscriptionEventTypes, "webhook.test"]);
 const operatorSessionCookie = "fiber_offers_operator";
 
-export { InMemoryOfferStore, JsonOfferStore, PostgresOfferStore };
+export { InMemoryOfferStore, JsonOfferStore, PostgresOfferStore, createRateLimiter as createMemoryRateLimiter };
 
 export function createServer(options = {}) {
   const encryptionKey = options.encryptionKey ?? process.env.RESOLVER_SECRET_ENCRYPTION_KEY;
@@ -76,7 +76,13 @@ export function createServer(options = {}) {
   const topologyClient = options.topologyClient ?? createTopologyClientFromEnv(process.env, fetchImpl);
   const demoWebhookInbox = options.demoWebhookInbox ?? [];
   const logger = options.logger ?? console;
-  const publicOrigin = options.publicOrigin ?? process.env.RESOLVER_PUBLIC_URL;
+  const publicOrigin = normalizePublicOrigin(options.publicOrigin ?? process.env.RESOLVER_PUBLIC_URL);
+  // How many reverse proxies this resolver sits behind. Forwarding headers are
+  // believed only from that many trusted hops; with 0 they are ignored.
+  const trustedProxyHops = positiveInteger(
+    options.trustedProxyHops ?? process.env.RESOLVER_TRUSTED_PROXY_HOPS,
+    0
+  );
   const webhookDeliveryTimeoutMs = positiveInteger(
     options.webhookDeliveryTimeoutMs ?? process.env.RESOLVER_WEBHOOK_TIMEOUT_MS,
     10000
@@ -93,6 +99,12 @@ export function createServer(options = {}) {
     demoWebhookInbox,
     logger,
     publicOrigin,
+    trustedProxyHops,
+    rateLimitFailOpen:
+      options.rateLimitFailOpen ??
+      (process.env.RESOLVER_RATE_LIMIT_FAIL_OPEN === undefined
+        ? true
+        : booleanEnv(process.env.RESOLVER_RATE_LIMIT_FAIL_OPEN)),
     webhookDeliveryTimeoutMs,
     allowPrivateWebhookTargets:
       options.allowPrivateWebhookTargets ??
@@ -142,6 +154,10 @@ export function createServer(options = {}) {
 }
 
 async function handleRequest(request, response, context) {
+  // Decided once per request from configuration and trusted hops, so no later
+  // code reads a forwarding header a client could have set.
+  request.resolverOrigin = resolveRequestOrigin(request, context);
+  request.clientAddress = resolveClientAddress(request, context);
   setCorsHeaders(response);
   if (request.method === "OPTIONS") {
     response.writeHead(204);
@@ -194,6 +210,8 @@ async function handleRequest(request, response, context) {
         sendJson(response, 200, { authenticated: true, auth_required: false });
         return;
       }
+      // Each attempt is a guess at the API key.
+      await enforceRateLimit(request, context, "operator-login", { max: 10 });
       const body = await readJsonBody(request);
       if (!safeSecretEqual(body.api_key, context.apiKey)) {
         throw httpError(401, "UNAUTHORIZED", "valid API key is required");
@@ -320,6 +338,7 @@ async function handleRequest(request, response, context) {
   const qrMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/qr\.svg$/);
   if (request.method === "GET" && qrMatch) {
     const [, offerId] = qrMatch;
+    await enforceRateLimit(request, context, "offer-qr");
     const entry = await context.store.getOffer(offerId);
     if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
 
@@ -520,6 +539,8 @@ async function handleRequest(request, response, context) {
     if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
 
     if (request.method === "DELETE" && !action) {
+      // Unauthenticated and costs a signature verification per call.
+      await enforceRateLimit(request, context, "offer-revoke");
       const body = await readJsonBody(request);
       const verification = verifyOfferRevocation(entry.offer, body.revocation ?? body);
       if (!verification.ok) throw httpError(400, verification.code, verification.message);
@@ -1770,21 +1791,36 @@ function booleanEnv(value) {
 
 function createRateLimiter(options) {
   const buckets = new Map();
+  let takesSinceSweep = 0;
+  // Expired buckets are dropped as they are found, and swept periodically, so
+  // a caller cycling through keys cannot grow this map without bound.
+  const sweep = (now) => {
+    takesSinceSweep = 0;
+    for (const [key, bucket] of buckets) {
+      if (now >= bucket.resetAt) buckets.delete(key);
+    }
+  };
   return {
     async healthCheck() {
       return { ok: true, backend: "memory" };
     },
-    take(key, now = Date.now()) {
-      if (options.max === 0 || options.windowMs === 0) return { allowed: true };
+    size() {
+      return buckets.size;
+    },
+    take(key, now = Date.now(), limits = {}) {
+      const max = limits.max ?? options.max;
+      if (max === 0 || options.windowMs === 0) return { allowed: true };
+      takesSinceSweep += 1;
+      if (takesSinceSweep >= 1000 || buckets.size >= 10000) sweep(now);
       const bucket = buckets.get(key);
       if (!bucket || now >= bucket.resetAt) {
         buckets.set(key, { count: 1, resetAt: now + options.windowMs });
-        return { allowed: true, remaining: options.max - 1, resetAt: now + options.windowMs };
+        return { allowed: true, remaining: max - 1, resetAt: now + options.windowMs };
       }
       bucket.count += 1;
       return {
-        allowed: bucket.count <= options.max,
-        remaining: Math.max(0, options.max - bucket.count),
+        allowed: bucket.count <= max,
+        remaining: Math.max(0, max - bucket.count),
         resetAt: bucket.resetAt
       };
     }
@@ -1818,10 +1854,20 @@ async function invoiceSourceHealth(invoiceAdapter) {
   };
 }
 
-async function enforceRateLimit(request, context, scope) {
-  const forwarded = request.headers["x-forwarded-for"];
-  const address = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0])?.trim() ?? request.socket.remoteAddress ?? "unknown";
-  const result = await context.rateLimiter.take(`${scope}:${address}`);
+async function enforceRateLimit(request, context, scope, limits = {}) {
+  const address = request.clientAddress ?? request.socket?.remoteAddress ?? "unknown";
+  let result;
+  try {
+    result = await context.rateLimiter.take(`${scope}:${address}`, Date.now(), limits);
+  } catch (error) {
+    // The limiter's backing store is down. Payments stay available by default;
+    // set RESOLVER_RATE_LIMIT_FAIL_OPEN=false to refuse requests instead.
+    context.logger.error?.(error);
+    if (context.rateLimitFailOpen) return;
+    throw httpError(503, "RATE_LIMITER_UNAVAILABLE", "request limiting is temporarily unavailable, try again", {
+      retryable: true
+    });
+  }
   if (!result.allowed) {
     throw httpError(429, "RATE_LIMITED", "too many requests, retry after the current rate-limit window", {
       retry_after_seconds: Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))
@@ -2358,14 +2404,58 @@ function setCorsHeaders(response) {
   response.setHeader("access-control-allow-headers", "content-type,authorization,x-api-key,idempotency-key");
 }
 
+// The origin used in every link this response contains.
 function requestOrigin(request) {
-  const forwardedProto = request.headers["x-forwarded-proto"];
-  const forwardedHost = request.headers["x-forwarded-host"];
-  const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : (forwardedProto?.split(",")[0] ?? "http");
-  const host = Array.isArray(forwardedHost)
-    ? forwardedHost[0]
-    : (forwardedHost?.split(",")[0] ?? request.headers.host ?? "localhost");
+  return request.resolverOrigin ?? resolveRequestOrigin(request, {});
+}
+
+// 1. A configured public URL always wins: links never depend on request headers.
+// 2. Behind trusted proxies, the forwarding headers those proxies set are used.
+// 3. Otherwise the Host header of a direct connection, which is how a local or
+//    test resolver knows its own port.
+function resolveRequestOrigin(request, context) {
+  if (context.publicOrigin) return context.publicOrigin;
+  const trusted = (context.trustedProxyHops ?? 0) > 0;
+  const proto = (trusted && lastHeaderValue(request.headers["x-forwarded-proto"])) || "http";
+  const host =
+    (trusted && lastHeaderValue(request.headers["x-forwarded-host"])) || request.headers.host || "localhost";
   return `${proto}://${host}`;
+}
+
+// The address to rate-limit by. Each trusted proxy appends the address it
+// received the request from to X-Forwarded-For, so with N trusted hops the real
+// client is the Nth entry from the right. Anything further left was supplied by
+// the client and is ignored; with no trusted hops the header is not read at all.
+function resolveClientAddress(request, context) {
+  const remote = request.socket?.remoteAddress ?? "unknown";
+  const hops = context.trustedProxyHops ?? 0;
+  if (hops <= 0) return remote;
+  const forwarded = request.headers["x-forwarded-for"];
+  const chain = (Array.isArray(forwarded) ? forwarded.join(",") : forwarded ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return chain[chain.length - hops] ?? chain[0] ?? remote;
+}
+
+function lastHeaderValue(value) {
+  const text = Array.isArray(value) ? value[value.length - 1] : value;
+  if (typeof text !== "string") return undefined;
+  const last = text.split(",").pop().trim();
+  return last.length > 0 ? last : undefined;
+}
+
+function normalizePublicOrigin(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  try {
+    const parsed = new URL(String(value).trim());
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("protocol must be http or https");
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  } catch (error) {
+    const failure = new Error(`RESOLVER_PUBLIC_URL must be an absolute http(s) URL: ${error.message}`);
+    failure.code = "INVALID_PUBLIC_URL";
+    throw failure;
+  }
 }
 
 function hostOnly(request) {

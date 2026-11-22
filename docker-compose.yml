@@ -47,6 +47,8 @@ services:
       RESOLVER_PUBLIC_OPERATOR_ACCESS: ${RESOLVER_PUBLIC_OPERATOR_ACCESS:-false}
       RESOLVER_ALLOW_PRIVATE_WEBHOOKS: "false"
       RESOLVER_PUBLIC_URL: ${RESOLVER_PUBLIC_URL:-http://localhost:8787}
+      # The gateway below is one trusted proxy. Use 2 behind a host Nginx.
+      RESOLVER_TRUSTED_PROXY_HOPS: ${RESOLVER_TRUSTED_PROXY_HOPS:-1}
       RESOLVER_WORKERS_ENABLED: "false"
     depends_on:
       postgres:

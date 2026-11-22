@@ -5,8 +5,11 @@ services:
   redis:
     restart: unless-stopped
 
+  # Production runs behind the host Nginx and the gateway: two trusted proxies.
   fiber-offers:
     restart: unless-stopped
+    environment:
+      RESOLVER_TRUSTED_PROXY_HOPS: ${RESOLVER_TRUSTED_PROXY_HOPS:-2}
 
   worker:
     restart: unless-stopped
