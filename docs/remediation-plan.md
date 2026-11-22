@@ -107,7 +107,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
   - **Outcome:** `packages/sdk/src/fiber-network.js` holds the mapping (`Fibb`/`Fibt`/`Fibd`) and the two public genesis hashes, both checked against the public CKB RPC. The adapter takes the currency from the offer's signed network. The resolver learns its node's network from `node_info.chain_hash` or `FIBER_NETWORK` and refuses a mismatched offer with `422 OFFER_NETWORK_MISMATCH` at registration and before each invoice. `createOffer()` and the CLI take the network from the node and refuse a contradicting `--network`. Token requests now fail closed with `422 ASSET_SCRIPT_NOT_CONFIGURED` until `A4` adds the registry; before, the script hash was sent as the currency.
   - **Open point:** that Fiber's `chain_hash` is the CKB genesis block hash is taken from the RPC reference's wording and has not been seen on a live node (none is installed here). The check only rejects on a proven mismatch, and an unrecognised hash is treated as unknown, so a wrong assumption would disable the check rather than block valid offers.
 
-- [~] **A4. Fix UDT / RGB++ invoice creation (Asset Registry + CLI support)** — *in progress: script hashing landed in `@fiber-offers/protocol`; registry and CLI flags next*
+- [x] **A4. Fix UDT / RGB++ invoice creation (Asset Registry + CLI support)** — *done 2026-11-22; a real token payment still needs a live node with a UDT channel (`F2`)*
   - **Problem:** `FiberRpcInvoiceAdapter` sends `asset.type_script_hash` in `currency` and omits `udt_type_script`. `resolver.test.js` asserts this broken shape. Also `apps/cli/src/index.js` exposes `--asset-type` without any `--type-script-hash` flag, making non-CKB offer creation impossible via CLI.
   - **Files:** `apps/resolver/src/fiber-rpc.js`, `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/cli/src/index.js`, `apps/resolver/test/invoice-adapter.test.js`, `apps/resolver/test/resolver.test.js`, `apps/cli/test/cli.test.js`
   - **Acceptance criteria:**
@@ -117,6 +117,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - CLI `create` supports `--type-script-hash` (validating format for `udt`/`rgbpp`).
     - Fix `apps/resolver/test/resolver.test.js` to assert the real Fiber RPC schema.
     - *(audit #2, `F-012`)* CLI `create` also gains recurrence flags (`--recurrence-interval`, `--recurrence-amount`, `--cap-cycles`, `--spending-cap-total`, `--custom-seconds`); recurring offers cannot be created from the CLI today.
+  - **Outcome:** `@fiber-offers/protocol` computes CKB script hashes (`ckbScriptHash()`, `parseCkbScript()`), checked against three mainnet system scripts. The resolver keeps a registry (`apps/resolver/src/asset-registry.js`) fed by `FIBER_UDT_SCRIPTS`, `FIBER_UDT_SCRIPTS_FILE` and the exact scripts in `node_info.udt_cfg_infos`; every entry is verified by hash at load, and a bad entry stops startup. `new_invoice` now sends the network currency plus `udt_type_script`. A token with no script is refused with `422 ASSET_SCRIPT_NOT_CONFIGURED` at registration, in `/check` (`asset_source`) and at invoice time. The CLI accepts `--type-script-hash` or `--type-script` (which it hashes) and the recurrence flags.
 
 - [ ] **A5. Pass `expiry` to Fiber RPC and populate `expires_at` on live invoices**
   - **Problem:** `FiberRpcInvoiceAdapter.createInvoice()` never passes `expiry` to `new_invoice` and never sets `expires_at`. Live invoices never expire on Fiber `v0.9.0-rc1` and resolver expiry-on-read only works in mock mode.
@@ -498,7 +499,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 
 | ID | Date | Area | Finding | Severity | Mapped To | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| **F-001** | 2026-11-22 | CLI | `apps/cli/src/index.js` accepts `--asset-type` (`udt`/`rgbpp`) without a `--type-script-hash` option, so non-CKB offer creation always fails validation. | Medium | `A4` | Open |
+| **F-001** | 2026-11-22 | CLI | `apps/cli/src/index.js` accepts `--asset-type` (`udt`/`rgbpp`) without a `--type-script-hash` option, so non-CKB offer creation always fails validation. | Medium | `A4` | Fixed |
 | **F-002** | 2026-11-22 | SDK | `FiberOffersClient.getOffer()` and `resolveFiberAddress()` skip `verifyOffer()` on resolver responses (not just `resolveOffer()`). | High | `A2` | Open |
 | **F-003** | 2026-11-22 | Adapter / Fiber `v0.9.0-rc1` | `FiberRpcInvoiceAdapter` omits `expiry` in `new_invoice` and omits `expires_at` in its return value; Fiber `v0.9.0-rc1` never marks invoices without `expiry` as `Expired`, so expiry only works in mock mode. | High | `A5` | Open |
 | **F-004** | 2026-11-22 | Protocol | `canonicalize()` silently drops `"__proto__"` from signed bytes and reorders integer-like object keys numerically instead of lexicographically. | High | `C1` | Open |
@@ -509,7 +510,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-009** | 2026-11-22 | Resolver / Docker | `Dockerfile` sets `NODE_ENV=production`, yet running without `DATABASE_URL` silently falls back to non-atomic `JsonOfferStore`. | Medium | `E3` | Open |
 | **F-010** | 2026-11-22 | SDK / Resolver | Idempotent retry is blocked by the pre-invoice `/check` (`OFFER_ALREADY_USED` for single-use, `INVALID_RECURRENCE_CYCLE` for recurring), so a transient failure after invoice issuance strands the payment; the scheduler burns its 8 retries and marks the approval failed. *Reproduced.* | High | `A1` | Fixed |
 | **F-011** | 2026-11-22 | SDK | `resolveFiberAddress("alice@other.example")` queries the configured `resolverUrl` and ignores the address domain. *Reproduced.* | Medium | `A2` | Open |
-| **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Open |
+| **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Fixed |
 | **F-013** | 2026-11-22 | Resolver / SDK | No timeout on any Fiber RPC or resolver HTTP call; a hung FNN holds the per-offer invoice lock indefinitely. | Medium | `A6` | Fixed |
 | **F-014** | 2026-11-22 | SDK | `payOffer()` reports `payment_sent` on `send_payment` acceptance (`Created`/`Inflight`) and never calls `get_payment`; the scheduler counts the cycle as paid immediately and re-sends after a crash. | High | `A7` | Open |
 | **F-015** | 2026-11-22 | Protocol / Resolver | Invoices are not bound to an offer or resolution (description is the offer description or ID); receipts are unsigned resolver assertions. | Medium | `A8` | Open |
@@ -553,3 +554,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `A6` done, `H2` partly | `fix(resolver): report whether a failed invoice request is retryable` | Fixes `F-013`. One shared RPC client with deadlines. Suite: 122 tests, 118 pass, 4 skipped. |
 | 2026-11-22 | `A3` done | `fix(resolver): mint invoices in the currency of the offer network` | Mainnet and devnet invoices were impossible (`Fibt` was hardcoded). Network checked against the node. Suite: 129 tests, 125 pass, 4 skipped. |
 | 2026-11-22 | `A4` step 1 | `feat(protocol): compute CKB script hashes for token asset verification` | Adds `ckbScriptHash()` / `parseCkbScript()`, verified against three mainnet system script hashes. New dependency `@noble/hashes` (first step of `E2`); minimum Node is now 20.19. Suite: 132 tests, 128 pass, 4 skipped. |
+| 2026-11-22 | `A4` done | `feat(resolver): mint token invoices from a hash-verified script registry` | Fixes `F-001`, `F-012`. Token invoices were never valid Fiber requests before. Suite: 134 tests, 130 pass, 4 skipped. |

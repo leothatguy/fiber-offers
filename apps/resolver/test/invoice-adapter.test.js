@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadUdtScriptsFromEnv, parseConfiguredUdtScripts } from "../src/asset-registry.js";
 import { createInvoiceAdapter, FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
+import { ckbScriptHash } from "../../../packages/protocol/src/index.js";
 
 test("live Fiber RPC is required unless mock mode is explicitly selected", () => {
   assert.throws(
@@ -252,7 +257,48 @@ test("Fiber RPC adapter refuses a token invoice it has no type script for", asyn
       }),
     (error) => error.code === "ASSET_SCRIPT_NOT_CONFIGURED" && error.status === 422
   );
-  assert.deepEqual(calls, []);
+  // The node may be asked which tokens it lists, but no invoice is requested.
+  assert.equal(calls.includes("new_invoice"), false);
+});
+
+test("token script configuration is verified by hash when it is loaded", async () => {
+  const script = { code_hash: "0x" + "aa".repeat(32), hash_type: "type", args: "0x" + "01".repeat(32) };
+  const hash = ckbScriptHash(script);
+  const directory = await mkdtemp(join(tmpdir(), "fiber-offers-udt-"));
+  const file = join(directory, "udt-scripts.json");
+  await writeFile(file, JSON.stringify([{ name: "FILE", script: { ...script, args: "0x02" } }]));
+
+  try {
+    const fromEnv = loadUdtScriptsFromEnv({
+      FIBER_UDT_SCRIPTS: JSON.stringify([{ name: "USDI", type_script_hash: hash.toUpperCase().replace("0X", "0x"), ...script }]),
+      FIBER_UDT_SCRIPTS_FILE: file
+    });
+    const adapter = createInvoiceAdapter({
+      FIBER_RPC_URL: "http://127.0.0.1:8227",
+      FIBER_UDT_SCRIPTS: JSON.stringify([script])
+    });
+
+    assert.deepEqual(fromEnv.get(hash), { type_script_hash: hash, script, name: "USDI", source: "FIBER_UDT_SCRIPTS" });
+    assert.equal(fromEnv.size, 2);
+    assert.equal([...fromEnv.values()][1].source, "FIBER_UDT_SCRIPTS_FILE");
+    assert.equal(adapter.udtScripts.has(hash), true);
+    assert.equal(parseConfiguredUdtScripts(undefined).size, 0);
+
+    // A hash copied from the wrong token must not be accepted.
+    assert.throws(
+      () => parseConfiguredUdtScripts([{ ...script, type_script_hash: "0x" + "9".repeat(64) }]),
+      (error) => error.code === "UDT_SCRIPT_HASH_MISMATCH"
+    );
+    for (const invalid of ["{not json", { not: "an array" }, [{ ...script, hash_type: "nope" }], [{ ...script, args: "0x.*" }]]) {
+      assert.throws(() => parseConfiguredUdtScripts(invalid), (error) => error.code === "INVALID_UDT_SCRIPTS");
+    }
+    assert.throws(
+      () => loadUdtScriptsFromEnv({ FIBER_UDT_SCRIPTS_FILE: join(directory, "missing.json") }),
+      (error) => error.code === "INVALID_UDT_SCRIPTS"
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("Fiber RPC adapter reports which network its node is on", async () => {

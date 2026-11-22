@@ -8,6 +8,7 @@ import { createServer, InMemoryOfferStore, JsonOfferStore } from "../src/server.
 import { FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
 import { deliverWebhookEvent, signWebhookPayload } from "../src/webhook-delivery.js";
 import {
+  ckbScriptHash,
   createOfferRevocation,
   createSignedOffer,
   encodeOffer,
@@ -101,19 +102,34 @@ test("creates fixed pricing from one amount and rejects non-exact invoice reques
   });
 });
 
-test("refuses a token invoice when the token's type script is not configured", async () => {
+test("mints token invoices with the token's type script and refuses unconfigured tokens", async () => {
   const nodeId = "02" + "f".repeat(64);
-  const typeScriptHash = "0x" + "1".repeat(64);
+  // One token configured by the operator, one listed by the node itself.
+  const usdiScript = { code_hash: "0x" + "aa".repeat(32), hash_type: "type", args: "0x" + "01".repeat(32) };
+  const rusdScript = { code_hash: "0x" + "bb".repeat(32), hash_type: "data1", args: "0x" + "02".repeat(20) };
+  const usdi = { asset_type: "udt", symbol: "USDI", type_script_hash: ckbScriptHash(usdiScript) };
+  const rusd = { asset_type: "udt", symbol: "RUSD", type_script_hash: ckbScriptHash(rusdScript) };
+  const unknown = { asset_type: "udt", symbol: "NOPE", type_script_hash: "0x" + "1".repeat(64) };
   const calls = [];
   const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    udtScripts: [{ name: "USDI", ...usdiScript }],
     client: {
       async call(method, params) {
         calls.push({ method, params });
-        if (method === "node_info") return { pubkey: nodeId };
+        if (method === "node_info") {
+          return {
+            pubkey: nodeId,
+            udt_cfg_infos: [
+              { name: "RUSD", script: rusdScript },
+              // A whitelist pattern covers many tokens and cannot be hashed.
+              { name: "ANY", script: { ...rusdScript, args: "0x.*" } }
+            ]
+          };
+        }
         if (method === "new_invoice") {
           return {
-            invoice_address: "fibt1udtinvoice",
-            invoice: { data: { payment_hash: "0x" + "2".repeat(64) } }
+            invoice_address: `fibt1invoice${calls.length}`,
+            invoice: { data: { payment_hash: "0x" + String(calls.length).padStart(64, "0") } }
           };
         }
         throw new Error(`unexpected Fiber method: ${method}`);
@@ -125,32 +141,48 @@ test("refuses a token invoice when the token's type script is not configured", a
     async (baseUrl) => {
       const created = await postJson(`${baseUrl}/demo/offers`, {
         amount: "1000",
-        assets: [
-          { asset_type: "ckb", symbol: "CKB" },
-          { asset_type: "udt", symbol: "USDI", type_script_hash: typeScriptHash }
-        ]
+        assets: [{ asset_type: "ckb", symbol: "CKB" }, usdi, rusd]
       });
-      const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
-        amount: "1000",
-        asset: { asset_type: "udt", symbol: "USDI", type_script_hash: typeScriptHash }
-      });
+      const invoiceUrl = `${baseUrl}/offers/${created.body.offer_id}/invoice`;
+      const usdiInvoice = await postJson(invoiceUrl, { amount: "1000", asset: usdi });
+      const rusdInvoice = await postJson(invoiceUrl, { amount: "1000", asset: rusd });
+      const ckbInvoice = await postJson(invoiceUrl, { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } });
+      const minted = calls.filter((call) => call.method === "new_invoice").map((call) => call.params[0]);
 
-      const ckbInvoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
-        amount: "1000",
-        asset: { asset_type: "ckb", symbol: "CKB" }
-      });
-
-      // Sending the token's script hash as the invoice currency was never a
-      // valid Fiber request. The resolver now refuses before calling the node,
-      // and says retrying will not help.
       assert.equal(created.status, 201);
-      assert.equal(invoice.status, 422);
-      assert.equal(invoice.body.error.code, "ASSET_SCRIPT_NOT_CONFIGURED");
-      assert.equal(invoice.body.error.details.retryable, false);
-      assert.equal(ckbInvoice.status, 201);
-      const minted = calls.filter((call) => call.method === "new_invoice");
-      assert.equal(minted.length, 1);
-      assert.equal(minted[0].params[0].currency, "Fibt");
+      assert.deepEqual([usdiInvoice.status, rusdInvoice.status, ckbInvoice.status], [201, 201, 201]);
+      // Every asset uses the network currency; a token is named by its script.
+      assert.deepEqual(minted.map((params) => params.currency), ["Fibt", "Fibt", "Fibt"]);
+      assert.deepEqual(minted[0].udt_type_script, usdiScript);
+      assert.deepEqual(minted[1].udt_type_script, rusdScript);
+      assert.equal("udt_type_script" in minted[2], false);
+
+      // An offer listing a token the resolver cannot mint is refused up front.
+      const refused = await postJson(`${baseUrl}/demo/offers`, {
+        amount: "1000",
+        assets: [{ asset_type: "ckb", symbol: "CKB" }, unknown]
+      });
+      assert.equal(refused.status, 422);
+      assert.equal(refused.body.error.code, "ASSET_SCRIPT_NOT_CONFIGURED");
+      assert.deepEqual(refused.body.error.details.assets, [unknown]);
+
+      // If the operator later removes a token, payers are told before and at
+      // invoice time, and told that retrying will not help.
+      invoiceAdapter.udtScripts.clear();
+      const readiness = await postJson(`${baseUrl}/offers/${created.body.offer_id}/check`, {
+        amount: "1000",
+        asset: usdi
+      });
+      const removed = await postJson(invoiceUrl, { amount: "1000", asset: usdi });
+      assert.equal(readiness.body.ready, false);
+      assert.equal(
+        readiness.body.checks.find((check) => check.id === "asset_source").code,
+        "ASSET_SCRIPT_NOT_CONFIGURED"
+      );
+      assert.equal(removed.status, 422);
+      assert.equal(removed.body.error.code, "ASSET_SCRIPT_NOT_CONFIGURED");
+      assert.equal(removed.body.error.details.retryable, false);
+      assert.equal(calls.filter((call) => call.method === "new_invoice").length, 3);
     },
     { invoiceAdapter }
   );

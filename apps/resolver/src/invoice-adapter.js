@@ -1,6 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { base64UrlEncode } from "../../../packages/protocol/src/index.js";
 import { fiberCurrencyForNetwork, fiberNodeNetwork } from "../../../packages/sdk/src/fiber-network.js";
+import {
+  loadUdtScriptsFromEnv,
+  parseConfiguredUdtScripts,
+  publicRegistryEntries,
+  udtScriptsFromNodeInfo
+} from "./asset-registry.js";
 import { FiberRpcClient, toHexQuantity } from "./fiber-rpc.js";
 import { invoiceRequestError } from "./invoice-errors.js";
 
@@ -65,25 +71,24 @@ export class FiberRpcInvoiceAdapter {
     // Optional explicit network of the merchant node. When unset it is read
     // from the node's chain hash.
     this.network = normalizeConfiguredNetwork(options.network);
+    // Token type scripts supplied by the operator, keyed by type_script_hash.
+    this.udtScripts =
+      options.udtScripts instanceof Map ? options.udtScripts : parseConfiguredUdtScripts(options.udtScripts);
   }
 
   async createInvoice({ offer, amount, asset }) {
-    if (asset.asset_type !== "ckb") {
-      // A token invoice needs the token's full type script, which an offer
-      // does not carry. Minting a plain CKB invoice instead would bill the
-      // payer in the wrong asset, so this fails closed.
-      throw invoiceRequestError(
-        "ASSET_SCRIPT_NOT_CONFIGURED",
-        "this resolver has no type script configured for the requested asset",
-        { asset }
-      );
-    }
-
     const params = {
       amount: toHexQuantity(amount),
       currency: invoiceCurrency(offer),
       description: offer.description ?? offer.offer_id
     };
+    if (asset.asset_type !== "ckb") {
+      // A token invoice uses the same currency code and names the token by its
+      // full type script. An offer carries only the script's hash, so the
+      // script comes from the registry. With no entry this fails closed:
+      // minting a plain CKB invoice would bill the payer in the wrong asset.
+      params.udt_type_script = (await this.udtScriptFor(asset)).script;
+    }
 
     const result = await this.client.call(this.method, [params]);
     const invoice = extractInvoice(result);
@@ -99,6 +104,35 @@ export class FiberRpcInvoiceAdapter {
       raw_result: result,
       mocked: false
     };
+  }
+
+  // The registry entry for a token asset: operator configuration first, then
+  // the exact scripts the node itself lists.
+  async udtScriptFor(asset) {
+    const hash = asset.type_script_hash;
+    const entry = this.udtScripts.get(hash) ?? (await this.#nodeUdtScripts()).get(hash);
+    if (!entry) {
+      throw invoiceRequestError(
+        "ASSET_SCRIPT_NOT_CONFIGURED",
+        "this resolver has no type script configured for the requested asset",
+        { asset }
+      );
+    }
+    return entry;
+  }
+
+  // The token assets in `assets` this resolver could not mint an invoice for.
+  async unsupportedAssets(assets) {
+    const missing = (assets ?? []).filter(
+      (asset) => asset.asset_type !== "ckb" && !this.udtScripts.has(asset.type_script_hash)
+    );
+    if (missing.length === 0) return [];
+    const fromNode = await this.#nodeUdtScripts();
+    return missing.filter((asset) => !fromNode.has(asset.type_script_hash));
+  }
+
+  async #nodeUdtScripts() {
+    return udtScriptsFromNodeInfo(await this.client.call(this.probeMethod, []));
   }
 
   async getNodeIdentity() {
@@ -139,6 +173,10 @@ export class FiberRpcInvoiceAdapter {
         method: this.probeMethod,
         result_summary: summarizeRpcResult(result),
         node: summarizeNodeInfo(result),
+        // Token assets this resolver can mint invoices for.
+        assets: {
+          udt: publicRegistryEntries(new Map([...udtScriptsFromNodeInfo(result), ...this.udtScripts]))
+        },
         peers,
         channels,
         warnings
@@ -203,6 +241,7 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
       getInvoiceMethod: env.FIBER_RPC_GET_INVOICE_METHOD ?? "get_invoice",
       probeMethod: env.FIBER_RPC_PROBE_METHOD ?? "node_info",
       network: env.FIBER_NETWORK,
+      udtScripts: loadUdtScriptsFromEnv(env),
       timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl: options.fetchImpl
     });

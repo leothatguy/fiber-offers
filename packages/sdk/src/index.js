@@ -1,10 +1,13 @@
 import {
+  ckbScriptHash,
   createSignedOffer,
   createOfferRevocation,
   decodeOffer,
   encodeOffer,
   generateOfferKeyPair,
+  normalizeCkbScript,
   offerToPaymentLink,
+  parseCkbScript,
   verifyOffer,
   verifyOfferRevocation
 } from "@fiber-offers/protocol";
@@ -35,6 +38,9 @@ import {
 } from "./recurrence.js";
 
 export {
+  ckbScriptHash,
+  normalizeCkbScript,
+  parseCkbScript,
   createSignedOffer,
   createOfferRevocation,
   decodeOffer,

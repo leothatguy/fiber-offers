@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { decodeOffer, verifyOfferRevocation } from "../../../packages/protocol/src/index.js";
+import { ckbScriptHash, decodeOffer, verifyOfferRevocation } from "../../../packages/protocol/src/index.js";
 import { main } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -155,6 +155,65 @@ test("CLI signs offers for the network its Fiber node is on", async () => {
         fetchImpl
       }),
     (error) => error.code === "OFFER_NETWORK_MISMATCH"
+  );
+});
+
+test("CLI creates token and recurring offers from flags", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "fiber-offers-cli-token-"));
+  const fiberRpcUrl = "http://fiber.example:8227";
+  const fetchImpl = async (_url, options = {}) =>
+    response({ jsonrpc: "2.0", id: JSON.parse(options.body).id, result: { pubkey: `02${"c".repeat(64)}` } });
+  const script = { code_hash: `0x${"aa".repeat(32)}`, hash_type: "type", args: `0x${"01".repeat(32)}` };
+  const hash = ckbScriptHash(script);
+  const create = async (...flags) => {
+    const output = captureOutput();
+    await main(
+      ["create", "--resolver-url", "https://resolver.example", "--fiber-rpc-url", fiberRpcUrl, "--local-only", ...flags],
+      { cwd, stdout: output, fetchImpl }
+    );
+    return JSON.parse(await readFile(JSON.parse(output.value).key_file, "utf8")).offer;
+  };
+  const token = ["--description", "Token offer", "--amount", "1000", "--asset-type", "udt", "--symbol", "usdi"];
+
+  const fromScript = await create(...token, "--type-script", JSON.stringify(script));
+  const fromHash = await create(...token, "--type-script-hash", hash.toUpperCase().replace("0X", "0x"));
+  const fromBoth = await create(...token, "--type-script", JSON.stringify(script), "--type-script-hash", hash);
+  const recurring = await create(
+    "--description", "Monthly plan", "--amount", "500", "--recurrence-interval", "monthly", "--cap-cycles", "12"
+  );
+  const custom = await create(
+    "--description", "Metered", "--amount-min", "100", "--recurrence-interval", "custom_seconds",
+    "--custom-seconds", "3600", "--recurrence-amount", "250", "--spending-cap-total", "10000"
+  );
+
+  const expectedAsset = { asset_type: "udt", symbol: "USDI", type_script_hash: hash };
+  assert.deepEqual(fromScript.assets, [expectedAsset]);
+  assert.deepEqual(fromHash.assets, [expectedAsset]);
+  assert.deepEqual(fromBoth.assets, [expectedAsset]);
+  assert.deepEqual(recurring.recurrence, { interval: "monthly", amount: "500", cap_cycles: 12 });
+  assert.deepEqual(custom.recurrence, {
+    interval: "custom_seconds",
+    amount: "250",
+    spending_cap_total: "10000",
+    custom_seconds: 3600
+  });
+
+  const rejects = (flags, code) => assert.rejects(() => create(...flags), (error) => error.code === code);
+  await rejects(token, "MISSING_TYPE_SCRIPT_HASH");
+  await rejects([...token, "--type-script", JSON.stringify(script), "--type-script-hash", `0x${"9".repeat(64)}`], "TYPE_SCRIPT_HASH_MISMATCH");
+  await rejects([...token, "--type-script", "{not json"], "INVALID_TYPE_SCRIPT");
+  await rejects([...token, "--type-script", JSON.stringify({ ...script, hash_type: "nope" })], "INVALID_TYPE_SCRIPT");
+  await rejects([...token, "--type-script-hash", "0x1234"], "INVALID_TYPE_SCRIPT_HASH");
+  await rejects(
+    ["--description", "No symbol", "--amount", "1000", "--asset-type", "udt", "--type-script-hash", hash],
+    "MISSING_SYMBOL"
+  );
+  await rejects(["--description", "CKB", "--amount", "1000", "--type-script-hash", hash], "UNEXPECTED_TYPE_SCRIPT");
+  await rejects(["--description", "Stray cap", "--amount", "1000", "--cap-cycles", "3"], "MISSING_RECURRENCE_INTERVAL");
+  await rejects(["--description", "No cap", "--amount", "1000", "--recurrence-interval", "daily"], "RECURRENCE_CAP_REQUIRED");
+  await rejects(
+    ["--description", "No amount", "--amount-min", "100", "--recurrence-interval", "daily", "--cap-cycles", "3"],
+    "MISSING_RECURRENCE_AMOUNT"
   );
 });
 

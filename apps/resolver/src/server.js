@@ -269,6 +269,7 @@ async function handleRequest(request, response, context) {
     }
 
     const ownership = await verifyOfferNodeOwnership(offer, context);
+    await assertOfferAssetsSupported(offer, context);
 
     const entry = await context.store.upsertOffer(offer, encodedOffer, {
       username: body.username,
@@ -598,6 +599,7 @@ async function createDemoOffer(body, origin, context) {
   );
   const encodedOffer = encodeOffer(offer);
   const ownership = await verifyOfferNodeOwnership(offer, context);
+  await assertOfferAssetsSupported(offer, context);
   const entry = await context.store.upsertOffer(offer, encodedOffer, { username, ownership });
 
   return {
@@ -966,6 +968,8 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
     try {
       request = validateResolutionRequest(entry.offer, body);
       checks.push(passCheck("request", "Amount and asset are accepted by this offer"));
+      const assetIssue = await assetSupportIssue(request.asset, context);
+      if (assetIssue) checks.push(failCheck("asset_source", assetIssue.message, assetIssue.code));
     } catch (error) {
       checks.push(failCheck("request", error.message, error.code ?? "INVALID_REQUEST"));
     }
@@ -2042,6 +2046,49 @@ async function verifyOfferNodeOwnership(offer, context) {
     ...(identity.network ? { network: identity.network, network_source: identity.network_source } : {}),
     verified_at: new Date().toISOString()
   };
+}
+
+// An offer that lists a token the resolver cannot mint invoices for would
+// advertise a payment option that always fails, so it is refused at
+// registration rather than at the payer's first attempt.
+async function assertOfferAssetsSupported(offer, context) {
+  const unsupported = await unsupportedOfferAssets(offer.assets, context);
+  if (unsupported.length > 0) {
+    throw httpError(
+      422,
+      "ASSET_SCRIPT_NOT_CONFIGURED",
+      "this resolver has no type script configured for one or more of the offer's assets",
+      { assets: unsupported, retryable: false }
+    );
+  }
+}
+
+async function assetSupportIssue(asset, context) {
+  try {
+    const unsupported = await unsupportedOfferAssets([asset], context);
+    if (unsupported.length === 0) return undefined;
+    return {
+      code: "ASSET_SCRIPT_NOT_CONFIGURED",
+      message: "This resolver has no type script configured for the requested asset"
+    };
+  } catch (error) {
+    return { code: error.code ?? "RECIPIENT_UNAVAILABLE", message: error.message };
+  }
+}
+
+async function unsupportedOfferAssets(assets, context) {
+  if (typeof context.invoiceAdapter.unsupportedAssets !== "function") return [];
+  try {
+    return await context.invoiceAdapter.unsupportedAssets(assets);
+  } catch (error) {
+    // The registry may need the node to answer; report its failure the same way
+    // an invoice request would.
+    const failure = classifyInvoiceFailure(error);
+    throw httpError(failure.status, failure.code, failure.message, {
+      retryable: failure.retryable,
+      ...(failure.cause_code !== undefined ? { cause_code: failure.cause_code } : {})
+    });
+  }
 }
 
 function assertOfferActive(entry) {

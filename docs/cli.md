@@ -170,18 +170,47 @@ Useful creation options:
 | `--amount N` | Fixed amount; sets equal min/max |
 | `--amount-min N` | Minimum for a flexible offer |
 | `--amount-max N` | Optional maximum for a flexible offer |
-| `--asset-type TYPE` | Protocol asset type; default `ckb` |
-| `--symbol SYMBOL` | Display symbol; default `CKB` |
+| `--asset-type TYPE` | `ckb` (default), `udt`, or `rgbpp` |
+| `--symbol SYMBOL` | Display symbol. Defaults to `CKB` for CKB; required for tokens |
+| `--type-script JSON` | The token's CKB type script, `{"code_hash":"0x…","hash_type":"type","args":"0x…"}`. The CLI computes the hash the offer carries |
+| `--type-script-hash HASH` | The token's type-script hash, if you already have it. Given with `--type-script`, the two must agree |
+| `--recurrence-interval INTERVAL` | Makes the offer recurring: `daily`, `weekly`, `monthly`, or `custom_seconds` |
+| `--recurrence-amount N` | Amount per cycle. Defaults to `--amount` on a fixed-price offer |
+| `--cap-cycles N` | Maximum number of cycles |
+| `--spending-cap-total N` | Maximum total across all cycles. A recurring offer needs this or `--cap-cycles` |
+| `--custom-seconds N` | Cycle length for `custom_seconds` |
 | `--network NETWORK` | `mainnet`, `testnet`, or `dev`. Defaults to the Fiber node's own network when it follows a public CKB chain, otherwise `testnet`. A value that contradicts the node is refused with `OFFER_NETWORK_MISMATCH`. |
 | `--expiry UNIX_SECONDS` | Optional offer expiry |
 | `--single-use` | Permit only one invoice resolution |
 | `--username NAME` | Bind a Fiber Address username during registration |
 | `--local-only` | Create and save without registering |
 
-Version `0.1.0` CLI creation is complete for CKB. Although the parser exposes
-`--asset-type` and `--symbol`, UDT and RGB++ offers require a type-script hash
-that the current CLI does not accept. Create those offers through the SDK until
-that CLI input is added.
+A token offer names its token by type script. Pass the script and let the CLI
+hash it:
+
+```bash
+fiber-offers create \
+  --description "USDI checkout" \
+  --amount 1000000 \
+  --asset-type udt \
+  --symbol USDI \
+  --type-script '{"code_hash":"0x…","hash_type":"type","args":"0x…"}'
+```
+
+The resolver must know the same script to mint the invoice. It takes scripts
+from `FIBER_UDT_SCRIPTS` (a JSON array of scripts), `FIBER_UDT_SCRIPTS_FILE`, and
+the exact scripts in the node's own UDT whitelist. Registration is refused with
+`ASSET_SCRIPT_NOT_CONFIGURED` when it knows none for the token.
+
+A recurring offer signs its cycle terms, and always carries a cap:
+
+```bash
+fiber-offers create \
+  --description "Monthly plan" \
+  --amount 500000000 \
+  --recurrence-interval monthly \
+  --cap-cycles 12
+```
 
 The command:
 

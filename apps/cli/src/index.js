@@ -7,7 +7,7 @@ import { dirname, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { createOfferRevocation, FiberOffersClient } from "@fiber-offers/sdk";
+import { ckbScriptHash, createOfferRevocation, FiberOffersClient } from "@fiber-offers/sdk";
 
 const optionDefinitions = {
   "api-key": { type: "string" },
@@ -15,6 +15,8 @@ const optionDefinitions = {
   amount: { type: "string" },
   "amount-max": { type: "string" },
   "amount-min": { type: "string" },
+  "cap-cycles": { type: "string" },
+  "custom-seconds": { type: "string" },
   description: { type: "string" },
   "env-file": { type: "string", default: ".env" },
   expiry: { type: "string" },
@@ -26,9 +28,14 @@ const optionDefinitions = {
   // No default: the SDK reads the network from the Fiber node when it can.
   network: { type: "string" },
   reason: { type: "string" },
+  "recurrence-amount": { type: "string" },
+  "recurrence-interval": { type: "string" },
   "resolver-url": { type: "string" },
   "single-use": { type: "boolean", default: false },
-  symbol: { type: "string", default: "CKB" },
+  "spending-cap-total": { type: "string" },
+  symbol: { type: "string" },
+  "type-script": { type: "string" },
+  "type-script-hash": { type: "string" },
   username: { type: "string" }
 };
 
@@ -135,14 +142,17 @@ async function doctorCommand(config, context) {
 async function createCommand(options, config, context) {
   if (!options.description) throw cliError("--description is required", "MISSING_DESCRIPTION");
   const pricing = pricingOptions(options);
+  const asset = assetOption(options);
+  const recurrence = recurrenceOption(options, pricing);
   const client = resolverClient(config, context.fetchImpl);
   const created = await client.createOffer(
     {
       resolver_url: config.resolverUrl,
       description: options.description,
       ...(options.network ? { network: options.network } : {}),
-      assets: [{ asset_type: options["asset-type"], symbol: options.symbol }],
+      assets: [asset],
       ...pricing,
+      ...(recurrence ? { recurrence } : {}),
       ...(options.expiry ? { expiry: positiveInteger(options.expiry, "expiry") } : {}),
       single_use: options["single-use"]
     },
@@ -227,6 +237,97 @@ function pricingOptions(options) {
   return {
     amount_min: positiveAmount(options["amount-min"]),
     ...(options["amount-max"] ? { amount_max: positiveAmount(options["amount-max"]) } : {})
+  };
+}
+
+// A token is named in an offer by the hash of its CKB type script. The hash can
+// be given directly, or computed here from the script so it is never copied by
+// hand. Given both, they must agree.
+function assetOption(options) {
+  const assetType = String(options["asset-type"]).toLowerCase();
+  const hashFlag = options["type-script-hash"];
+  const scriptFlag = options["type-script"];
+
+  if (assetType === "ckb") {
+    if (hashFlag || scriptFlag) {
+      throw cliError("--type-script-hash and --type-script apply to udt and rgbpp assets only", "UNEXPECTED_TYPE_SCRIPT");
+    }
+    return { asset_type: "ckb", symbol: options.symbol ?? "CKB" };
+  }
+  if (!["udt", "rgbpp"].includes(assetType)) {
+    throw cliError("--asset-type must be ckb, udt, or rgbpp", "INVALID_ASSET_TYPE");
+  }
+  if (!options.symbol) throw cliError("--symbol is required for udt and rgbpp assets", "MISSING_SYMBOL");
+  if (!hashFlag && !scriptFlag) {
+    throw cliError(
+      "udt and rgbpp assets need --type-script-hash HASH or --type-script JSON",
+      "MISSING_TYPE_SCRIPT_HASH"
+    );
+  }
+
+  let computed;
+  if (scriptFlag) {
+    let script;
+    try {
+      script = JSON.parse(scriptFlag);
+    } catch {
+      throw cliError('--type-script must be JSON like {"code_hash":"0x…","hash_type":"type","args":"0x…"}', "INVALID_TYPE_SCRIPT");
+    }
+    try {
+      computed = ckbScriptHash(script);
+    } catch (error) {
+      throw cliError(`--type-script is not a valid CKB script: ${error.message}`, "INVALID_TYPE_SCRIPT");
+    }
+  }
+  if (hashFlag && !/^0x[0-9a-fA-F]{64}$/.test(hashFlag)) {
+    throw cliError("--type-script-hash must be a 0x-prefixed 32-byte hex value", "INVALID_TYPE_SCRIPT_HASH");
+  }
+  if (hashFlag && computed && hashFlag.toLowerCase() !== computed) {
+    throw cliError(
+      `--type-script-hash does not match --type-script, which hashes to ${computed}`,
+      "TYPE_SCRIPT_HASH_MISMATCH"
+    );
+  }
+  return { asset_type: assetType, symbol: options.symbol, type_script_hash: (computed ?? hashFlag).toLowerCase() };
+}
+
+// Recurrence terms are signed into the offer. --recurrence-interval turns them
+// on; the cycle amount defaults to the offer's fixed amount.
+function recurrenceOption(options, pricing) {
+  const interval = options["recurrence-interval"];
+  const related = ["recurrence-amount", "cap-cycles", "spending-cap-total", "custom-seconds"].filter(
+    (name) => options[name] !== undefined
+  );
+  if (!interval) {
+    if (related.length > 0) {
+      throw cliError(`--${related[0]} requires --recurrence-interval`, "MISSING_RECURRENCE_INTERVAL");
+    }
+    return undefined;
+  }
+  if (!["daily", "weekly", "monthly", "custom_seconds"].includes(interval)) {
+    throw cliError("--recurrence-interval must be daily, weekly, monthly, or custom_seconds", "INVALID_RECURRENCE_INTERVAL");
+  }
+  const fixedAmount = pricing.amount_min === pricing.amount_max ? pricing.amount_min : undefined;
+  const amount = options["recurrence-amount"] ?? fixedAmount;
+  if (!amount) {
+    throw cliError("--recurrence-amount is required unless the offer has a fixed --amount", "MISSING_RECURRENCE_AMOUNT");
+  }
+  if (options["cap-cycles"] === undefined && options["spending-cap-total"] === undefined) {
+    throw cliError("recurring offers need --cap-cycles or --spending-cap-total", "RECURRENCE_CAP_REQUIRED");
+  }
+  if (interval === "custom_seconds" && options["custom-seconds"] === undefined) {
+    throw cliError("--custom-seconds is required with --recurrence-interval custom_seconds", "MISSING_CUSTOM_SECONDS");
+  }
+  return {
+    interval,
+    amount: positiveAmount(amount),
+    ...(options["cap-cycles"] !== undefined ? { cap_cycles: positiveInteger(options["cap-cycles"], "cap-cycles") } : {}),
+    ...(options["spending-cap-total"] !== undefined
+      ? { spending_cap_total: positiveAmount(options["spending-cap-total"]) }
+      : {}),
+    ...(options["custom-seconds"] !== undefined
+      ? { custom_seconds: positiveInteger(options["custom-seconds"], "custom-seconds") }
+      : {})
   };
 }
 
@@ -339,6 +440,8 @@ Usage:
   fiber-offers init [--resolver-url URL] [--fiber-rpc-url URL]
   fiber-offers doctor
   fiber-offers create --description TEXT (--amount N | --amount-min N [--amount-max N]) [--username NAME]
+      [--asset-type udt|rgbpp --symbol SYMBOL (--type-script-hash HASH | --type-script JSON)]
+      [--recurrence-interval daily|weekly|monthly|custom_seconds (--cap-cycles N | --spending-cap-total N)]
   fiber-offers register OFFER_ID
   fiber-offers list
   fiber-offers revoke OFFER_ID [--reason TEXT]

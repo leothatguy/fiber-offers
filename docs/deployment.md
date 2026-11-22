@@ -165,6 +165,26 @@ npm run dev
 
 The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node.
 
+### Token (UDT and RGB++) offers
+
+An offer names a token by `type_script_hash`. To mint a token invoice the
+resolver needs the token's full CKB type script, which it sends to the node as
+`udt_type_script`. It finds scripts in three places:
+
+- `FIBER_UDT_SCRIPTS`, a JSON array of `{ "name", "code_hash", "hash_type", "args" }`;
+- `FIBER_UDT_SCRIPTS_FILE`, a path to a file with the same array;
+- the node's own UDT whitelist (`node_info.udt_cfg_infos`), for entries that
+  give one exact script rather than an `args` pattern.
+
+Every script is hashed when it is loaded, so a mistyped entry cannot serve a
+different token than the one an offer signed. A configuration error stops the
+resolver at startup. The node must also whitelist the token (`udt_whitelist` in
+its own configuration) and hold a channel in it.
+
+Registering an offer for a token the resolver has no script for fails with
+`422 ASSET_SCRIPT_NOT_CONFIGURED`. `GET /diagnostics` lists the tokens it can
+serve under `invoice_source.assets.udt`.
+
 With Docker, point `FIBER_RPC_URL` at the host or service address reachable from the container. The payer node is not resolver configuration: each payer wallet uses its own node to dry-run and send the invoice. Set `PAYER_FIBER_RPC_URL` only in controlled topology or E2E test environments.
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.

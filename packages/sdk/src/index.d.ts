@@ -1,15 +1,20 @@
 export {
+  ckbScriptHash,
   createSignedOffer,
   createOfferRevocation,
   decodeOffer,
   encodeOffer,
   generateOfferKeyPair,
+  normalizeCkbScript,
   offerToPaymentLink,
+  parseCkbScript,
   verifyOffer,
   verifyOfferRevocation
 } from "@fiber-offers/protocol";
 
 export type {
+  CkbScript,
+  CkbScriptHashType,
   FiberAsset,
   FiberAssetType,
   FiberOfferInput,

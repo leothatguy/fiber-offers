@@ -62,6 +62,8 @@ The signed `network` decides the currency code of every invoice minted for the o
 | `testnet` | `Fibt` |
 | `dev` | `Fibd` |
 
+A token invoice uses the same currency code and names the token in the node's `udt_type_script` parameter. An offer carries only the token's `type_script_hash` (the CKB script hash: BLAKE2b-256 with the `ckb-default-hash` personalization over the molecule-encoded script), so the resolver maps that hash to a full script it has verified by recomputing the hash. A token it has no script for is refused with `422 ASSET_SCRIPT_NOT_CONFIGURED`, at registration and at invoice time.
+
 The resolver also checks `network` against its node at registration and before each invoice. It learns the node's network from `node_info.chain_hash` (the CKB mainnet or testnet genesis hash) or from an explicit `FIBER_NETWORK` setting. An offer signed for a different network is refused with `422 OFFER_NETWORK_MISMATCH`. A node on any other chain reports no known network; set `FIBER_NETWORK=dev` there to enforce the check.
 
 ## Revocation
