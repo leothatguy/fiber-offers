@@ -331,8 +331,10 @@ test("sends invoice idempotency keys through the resolver client", async () => {
 
 test("passes an idempotency key through the payment-flow client", async () => {
   const invoiceOptions = [];
+  const checkOptions = [];
   const resolver = {
-    async checkPayment(_id, request) {
+    async checkPayment(_id, request, options) {
+      checkOptions.push(options);
       return request.invoice
         ? { ready: true, payable: true, route_check: { ok: true, payable: true } }
         : { ready: true, payable: true };
@@ -352,6 +354,11 @@ test("passes an idempotency key through the payment-flow client", async () => {
 
   assert.equal(result.status, "ready_to_send");
   assert.deepEqual(invoiceOptions, [{ idempotencyKey: "wallet-attempt-42" }]);
+  // Both readiness checks carry the key so the resolver can recognise a retry.
+  assert.deepEqual(checkOptions, [
+    { idempotencyKey: "wallet-attempt-42" },
+    { idempotencyKey: "wallet-attempt-42" }
+  ]);
 });
 
 test("fetches resolver diagnostics", async () => {

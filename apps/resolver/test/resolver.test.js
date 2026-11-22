@@ -205,6 +205,83 @@ test("serializes concurrent single-use invoice requests", async () => {
   });
 });
 
+test("post-invoice readiness check does not count the checked invoice against a single-use offer", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { single_use: true, amount: "1000" });
+    const offerId = created.body.offer_id;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+
+    const before = await postJson(`${baseUrl}/offers/${offerId}/check`, request);
+    const invoice = await postJson(`${baseUrl}/offers/${offerId}/invoice`, request);
+    const sameInvoice = await postJson(`${baseUrl}/offers/${offerId}/check`, {
+      ...request,
+      invoice: invoice.body.invoice
+    });
+    const newRequest = await postJson(`${baseUrl}/offers/${offerId}/check`, request);
+    const foreignInvoice = await postJson(`${baseUrl}/offers/${offerId}/check`, {
+      ...request,
+      invoice: "fibt1issuedelsewhere"
+    });
+    const checkOf = (result, id) => result.body.checks.find((check) => check.id === id);
+
+    assert.equal(before.body.ready, true);
+    assert.equal(invoice.status, 201);
+    assert.equal(sameInvoice.body.ready, true);
+    assert.equal(checkOf(sameInvoice, "single_use").status, "pass");
+    assert.equal(checkOf(sameInvoice, "invoice_match").status, "pass");
+    assert.equal(newRequest.body.ready, false);
+    assert.equal(checkOf(newRequest, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(foreignInvoice.body.ready, false);
+    assert.equal(checkOf(foreignInvoice, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(checkOf(foreignInvoice, "invoice_match").code, "INVOICE_NOT_ISSUED_FOR_OFFER");
+  });
+});
+
+test("readiness treats an idempotent retry as a replay instead of a new use", async () => {
+  await withServer(async (baseUrl) => {
+    const asset = { asset_type: "ckb", symbol: "CKB" };
+    const checkOf = (result, id) => result.body.checks.find((check) => check.id === id);
+
+    const single = await postJson(`${baseUrl}/demo/offers`, {
+      single_use: true,
+      amount_min: "1000",
+      amount_max: "3000"
+    });
+    const singleUrl = `${baseUrl}/offers/${single.body.offer_id}`;
+    const orderKey = { "idempotency-key": "order-1" };
+    await postJson(`${singleUrl}/invoice`, { amount: "1500", asset }, orderKey);
+    const singleRetry = await postJson(`${singleUrl}/check`, { amount: "1500", asset }, orderKey);
+    const singleNoKey = await postJson(`${singleUrl}/check`, { amount: "1500", asset });
+    const singleOtherRequest = await postJson(`${singleUrl}/check`, { amount: "1600", asset }, orderKey);
+
+    assert.equal(singleRetry.body.ready, true);
+    assert.equal(checkOf(singleRetry, "idempotency").status, "pass");
+    assert.equal(singleNoKey.body.ready, false);
+    assert.equal(checkOf(singleNoKey, "single_use").code, "OFFER_ALREADY_USED");
+    assert.equal(singleOtherRequest.body.ready, false);
+    assert.equal(checkOf(singleOtherRequest, "idempotency").code, "IDEMPOTENCY_KEY_REUSED");
+    assert.equal(checkOf(singleOtherRequest, "single_use").code, "OFFER_ALREADY_USED");
+
+    const recurring = await postJson(`${baseUrl}/demo/offers`, {
+      amount: "1000",
+      recurrence: { interval: "daily", amount: "1000", cap_cycles: 3 }
+    });
+    const recurringUrl = `${baseUrl}/offers/${recurring.body.offer_id}`;
+    const cycleKey = { "idempotency-key": "approval-1:1" };
+    const cycleOne = { amount: "1000", asset, recurrence_cycle: 1, approval_id: "approval-1" };
+    await postJson(`${recurringUrl}/invoice`, cycleOne, cycleKey);
+    const cycleRetry = await postJson(`${recurringUrl}/check`, cycleOne, cycleKey);
+    const cycleNoKey = await postJson(`${recurringUrl}/check`, cycleOne);
+    const nextCycle = await postJson(`${recurringUrl}/check`, { ...cycleOne, recurrence_cycle: 2 });
+
+    assert.equal(cycleRetry.body.ready, true);
+    assert.equal(checkOf(cycleRetry, "recurrence").status, "pass");
+    assert.equal(cycleNoKey.body.ready, false);
+    assert.equal(checkOf(cycleNoKey, "recurrence").code, "INVALID_RECURRENCE_CYCLE");
+    assert.equal(nextCycle.body.ready, true);
+  });
+});
+
 test("resolves a Fiber Address to its encoded offer", async () => {
   await withServer(async (baseUrl) => {
     const created = await postJson(`${baseUrl}/demo/offers`, {

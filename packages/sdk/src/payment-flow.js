@@ -15,7 +15,7 @@ export class FiberPaymentFlowClient {
     const offerReference = normalizeOfferReference(offerOrId);
     const initialReadiness = options.skipInitialReadiness
       ? undefined
-      : await this.resolver.checkPayment(offerReference, request);
+      : await this.resolver.checkPayment(offerReference, request, invoiceRequestOptions(options));
 
     if (initialReadiness && !initialReadiness.ready && options.requireInitialReadiness !== false) {
       return paymentFlowResult({
@@ -43,11 +43,15 @@ export class FiberPaymentFlowClient {
       });
     }
 
-    const invoiceReadiness = await this.resolver.checkPayment(offerReference, {
-      ...request,
-      ...resolverRouteOptions(options),
-      invoice: invoiceValue
-    });
+    const invoiceReadiness = await this.resolver.checkPayment(
+      offerReference,
+      {
+        ...request,
+        ...resolverRouteOptions(options),
+        invoice: invoiceValue
+      },
+      invoiceRequestOptions(options)
+    );
     const routeCheck = await routeCheckForInvoice(invoiceReadiness, invoiceValue, this.paymentClient, options);
     const readiness = mergeRouteCheck(invoiceReadiness, routeCheck);
 

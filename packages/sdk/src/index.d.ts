@@ -192,7 +192,11 @@ export class FiberOffersClient {
   listOffers(): Promise<OfferListResponse>;
   diagnostics(): Promise<ResolverDiagnostics>;
   offerQrUrl(offerId: OfferId, payload?: "link" | "offer"): string;
-  checkPayment(offerOrId: OfferOrId, request: PaymentRequest): Promise<PaymentReadiness>;
+  checkPayment(
+    offerOrId: OfferOrId,
+    request: PaymentRequest,
+    options?: InvoiceRequestOptions
+  ): Promise<PaymentReadiness>;
   getResolutions(offerOrId: OfferOrId): Promise<ResolutionRecord[]>;
   getRecurrenceStatus(offerOrId: OfferOrId): Promise<RecurrenceStatus>;
   revokeOffer(offerOrId: OfferOrId, revocation: JsonObject): Promise<JsonObject>;

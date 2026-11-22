@@ -19,6 +19,7 @@ import { createInvoiceAdapter } from "./invoice-adapter.js";
 import { PostgresOfferStore } from "./postgres-store.js";
 import { renderOfferQrSvg } from "./qr.js";
 import { RedisRateLimiter } from "./redis-rate-limiter.js";
+import { consumingResolutions, resolutionUnderCheck } from "./resolution-rules.js";
 import { InMemoryOfferStore, JsonOfferStore, normalizeUsername } from "./store.js";
 import { deliverWebhookEvent } from "./webhook-delivery.js";
 
@@ -548,7 +549,8 @@ async function handleRequest(request, response, context) {
     if (request.method === "POST" && action === "check") {
       await enforceRateLimit(request, context, "offer-check");
       const body = await readJsonBody(request);
-      const result = await checkOfferReadiness(entry, body, context, requestOrigin(request));
+      const idempotencyKey = invoiceRequestIdempotencyKey(request, body);
+      const result = await checkOfferReadiness(entry, body, context, requestOrigin(request), { idempotencyKey });
       sendJson(response, 200, result);
       return;
     }
@@ -934,7 +936,7 @@ async function syncOfferResolutions(context, offerId, origin, options = {}) {
   };
 }
 
-async function checkOfferReadiness(entry, body, context, origin) {
+async function checkOfferReadiness(entry, body, context, origin, options = {}) {
   const checks = [];
   const verification = safeVerifyOffer(entry.offer);
 
@@ -963,15 +965,66 @@ async function checkOfferReadiness(entry, body, context, origin) {
   }
 
   const priorResolutions = await context.store.getResolutions(entry.offer.offer_id);
-  if (entry.offer.single_use && priorResolutions.length > 0) {
+  const suppliedInvoice = invoiceFromReadinessBody(body);
+  // The check may be about an invoice this offer already issued (the post-invoice
+  // check) or an idempotent retry of an earlier request. Neither is a new use of
+  // the offer, so that resolution must not be counted against itself.
+  const underCheck = resolutionUnderCheck(priorResolutions, {
+    invoice: suppliedInvoice,
+    idempotencyKey: options.idempotencyKey
+  });
+  const current = underCheck?.resolution;
+
+  if (suppliedInvoice) {
+    checks.push(
+      underCheck?.matched_by === "invoice"
+        ? passCheck("invoice_match", "Invoice was issued by this resolver for this offer")
+        : warnCheck(
+            "invoice_match",
+            "Invoice was not issued by this resolver for this offer",
+            "INVOICE_NOT_ISSUED_FOR_OFFER"
+          )
+    );
+  }
+
+  let replayAllowed = Boolean(current);
+  if (underCheck?.matched_by === "idempotency_key" && request) {
+    const fingerprint = invoiceRequestFingerprint({
+      ...request,
+      recurrence_cycle: body?.recurrence_cycle,
+      scheduled_for: body?.scheduled_for,
+      approval_id: body?.approval_id
+    });
+    if (current.idempotency_fingerprint !== fingerprint) {
+      replayAllowed = false;
+      checks.push(
+        failCheck(
+          "idempotency",
+          "Idempotency key was already used for a different invoice request",
+          "IDEMPOTENCY_KEY_REUSED"
+        )
+      );
+    } else {
+      checks.push(passCheck("idempotency", "Request replays an invoice this offer already issued"));
+    }
+  }
+
+  const otherUses = consumingResolutions(priorResolutions, { excludeId: replayAllowed ? current.id : undefined });
+  if (entry.offer.single_use && otherUses.length > 0) {
     checks.push(failCheck("single_use", "Single-use offer has already produced an invoice", "OFFER_ALREADY_USED"));
+  } else if (entry.offer.single_use && replayAllowed) {
+    checks.push(passCheck("single_use", "This is the invoice issued for this single-use offer"));
   } else {
     checks.push(passCheck("single_use", "Offer can produce another invoice"));
   }
 
   if (entry.offer.recurrence) {
     try {
-      if (!invoiceFromReadinessBody(body)) validateRecurrenceCycle(entry.offer, body, priorResolutions);
+      if (replayAllowed && current.recurrence) {
+        assertReplayedRecurrenceCycle(current, body);
+      } else if (!suppliedInvoice) {
+        validateRecurrenceCycle(entry.offer, body, priorResolutions);
+      }
       checks.push(passCheck("recurrence", "Recurring cycle is within the approved caps"));
     } catch (error) {
       checks.push(failCheck("recurrence", error.message, error.code ?? "RECURRENCE_BLOCKED"));
@@ -2014,6 +2067,18 @@ function validateRecurrenceCycle(offer, body, priorResolutions) {
     scheduled_for: body?.scheduled_for,
     approval_id: body?.approval_id
   };
+}
+
+// A replayed recurring request must name the cycle its resolution was issued for.
+function assertReplayedRecurrenceCycle(resolution, body) {
+  if (body?.recurrence_cycle === undefined) return;
+  if (Number(body.recurrence_cycle) !== resolution.recurrence.cycle) {
+    throw httpError(
+      409,
+      "INVALID_RECURRENCE_CYCLE",
+      `this invoice was issued for recurrence cycle ${resolution.recurrence.cycle}`
+    );
+  }
 }
 
 async function recurrenceStatus(entry, store) {

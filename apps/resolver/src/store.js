@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { consumingResolutions } from "./resolution-rules.js";
 
 export class InMemoryOfferStore {
   constructor(initialState = undefined) {
@@ -146,7 +147,7 @@ export class InMemoryOfferStore {
       }
     }
 
-    const prior = records.filter((resolution) => resolution.status !== "invoice_failed");
+    const prior = consumingResolutions(records);
     if (entry.offer.single_use && prior.length > 0) {
       throw storeError("single-use offer already produced an invoice", "OFFER_ALREADY_USED", 409);
     }

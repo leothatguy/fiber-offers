@@ -167,13 +167,16 @@ export class FiberOffersClient {
     return offerQrUrl(offerId, this.resolverUrl, payload);
   }
 
-  async checkPayment(offerOrId, request) {
+  async checkPayment(offerOrId, request, options = {}) {
     const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId.offer_id;
     if (!offerId) throw new Error("offer_id is required to check payment readiness");
 
+    // Passing the invoice request's idempotency key lets the resolver recognise
+    // a retry of an earlier request instead of counting it as a new use.
     return this.#request(`/offers/${offerId}/check`, {
       method: "POST",
-      body: request
+      body: request,
+      headers: options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : undefined
     });
   }
 

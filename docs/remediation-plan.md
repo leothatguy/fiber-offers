@@ -71,7 +71,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 
 > **Goal:** Make real CKB, UDT, single-use, and expiry payment flows work end-to-end and close payer-side invoice/offer substitution attacks.
 
-- [ ] **A1. Fix single-use payment flow regression in SDK + resolver**
+- [x] **A1. Fix single-use payment flow regression in SDK + resolver** — *done 2026-11-22*
   - **Problem:** `FiberPaymentFlowClient.preparePayment()` mints the single allowed invoice, then calls `/offers/:offer_id/check` a second time with that invoice. `checkOfferReadiness()` counts the newly minted invoice and returns `OFFER_ALREADY_USED`, causing `payOffer()` to abort with `blocked_after_invoice`.
   - **Files:** `apps/resolver/src/server.js`, `packages/sdk/src/payment-flow.js`, `apps/resolver/test/resolver.test.js`, `packages/sdk/test/sdk.test.js`
   - **Acceptance criteria:**
@@ -79,6 +79,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - `FiberPaymentFlowClient.payOffer(..., { execute: true })` completes on a `single_use: true` offer.
     - Regression tests added for both resolver `/check` and SDK `payOffer`.
     - *(audit #2, `F-010`)* The **pre-invoice** check must not block an idempotent retry. Today a retry with the same idempotency key returns `blocked_before_invoice` with `OFFER_ALREADY_USED` (single-use) or `INVALID_RECURRENCE_CYCLE` (recurring), so a transient failure after invoice issuance can never be retried. `/check` accepts the idempotency key and treats an existing resolution for that key as a replay; `preparePayment()` passes it. Regression tests: retry after a simulated `send_payment` transport failure succeeds for a single-use offer and for recurring cycle N.
+  - **Outcome:** `/check` now identifies the resolution a check is about — by the supplied invoice, or by the idempotency key — and excludes it from the single-use and recurrence counts (`apps/resolver/src/resolution-rules.js`). A key reused for a different request fails with `IDEMPOTENCY_KEY_REUSED`. A supplied invoice that this offer did not issue gets an `invoice_match` warning. The SDK sends the key on both readiness checks. Covered by two resolver tests and three SDK-against-resolver tests in the new `apps/resolver/test/payment-flow.test.js`.
 
 - [ ] **A2. Implement full payer-side offer & invoice verification**
   - **Problem:** `resolveOffer()` only checks outer `offer_id`; `getOffer()` and `resolveFiberAddress()` do not verify signatures; `payOffer()` never parses the returned Fiber invoice or checks `resolver_url`, allowing a compromised/hostile resolver to substitute an arbitrary payee, amount, asset, or network.
@@ -171,7 +172,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - Regression tests reproduce and verify the fix for the 4-request exhaustion attack.
     - *(audit #2, `F-016`, depends on `D-5`)* The cycle counter is global per offer and is enforced by the unique index `fiber_resolutions_recurrence_cycle_idx (offer_id, cycle)`: a second payer requesting cycle 1 gets `409 INVALID_RECURRENCE_CYCLE`, so a recurring offer can serve exactly one subscriber. Implement the `D-5` scope (recommended: per-subscription counters and caps keyed by `approval_id`), with a new migration replacing the index, and a test with two independent payers each completing cycles 1..N.
 
-- [ ] **B3. Fix readiness vs. invoice endpoint inconsistency after `invoice_failed`**
+- [~] **B3. Fix readiness vs. invoice endpoint inconsistency after `invoice_failed`** — *single-use half landed with A1 (readiness and the JSON store share `consumingResolutions()`); the recurrence half, the PostgreSQL query and the agreement tests are still open*
   - **Problem:** `checkOfferReadiness()` (`server.js:965`) checks `priorResolutions.length > 0`, whereas `reserveInvoiceAttempt()` (`store.js:149`, `postgres-store.js`) filters out `invoice_failed` resolutions — so `/check` reports `OFFER_ALREADY_USED` while `/invoice` succeeds.
   - **Files:** `apps/resolver/src/server.js`, `apps/resolver/src/store.js`, `apps/resolver/src/postgres-store.js`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
@@ -500,10 +501,10 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-004** | 2026-11-22 | Protocol | `canonicalize()` silently drops `"__proto__"` from signed bytes and reorders integer-like object keys numerically instead of lexicographically. | High | `C1` | Open |
 | **F-005** | 2026-11-22 | Protocol | `verifyOffer()` accepts RSA-2048, P-256, and Ed448 keys under `signature.scheme: "ed25519"`. | High | `C2` | Open |
 | **F-006** | 2026-11-22 | Resolver | Anonymous callers can permanently exhaust single-use offers (even when unpaid invoices expire) and drain all cycles/caps on recurring offers. | High | `B1`, `B2` | Open |
-| **F-007** | 2026-11-22 | SDK / Resolver | Single-use `payOffer()` fails with `blocked_after_invoice` because the second `/check` call counts the invoice that was just minted. | High | `A1` | Open |
+| **F-007** | 2026-11-22 | SDK / Resolver | Single-use `payOffer()` fails with `blocked_after_invoice` because the second `/check` call counts the invoice that was just minted. | High | `A1` | Fixed |
 | **F-008** | 2026-11-22 | SDK / Browser | `@fiber-offers/sdk/browser` re-exports `@fiber-offers/protocol`, which statically imports `node:crypto` and uses `Buffer`. | Medium | `E2` | Open |
 | **F-009** | 2026-11-22 | Resolver / Docker | `Dockerfile` sets `NODE_ENV=production`, yet running without `DATABASE_URL` silently falls back to non-atomic `JsonOfferStore`. | Medium | `E3` | Open |
-| **F-010** | 2026-11-22 | SDK / Resolver | Idempotent retry is blocked by the pre-invoice `/check` (`OFFER_ALREADY_USED` for single-use, `INVALID_RECURRENCE_CYCLE` for recurring), so a transient failure after invoice issuance strands the payment; the scheduler burns its 8 retries and marks the approval failed. *Reproduced.* | High | `A1` | Open |
+| **F-010** | 2026-11-22 | SDK / Resolver | Idempotent retry is blocked by the pre-invoice `/check` (`OFFER_ALREADY_USED` for single-use, `INVALID_RECURRENCE_CYCLE` for recurring), so a transient failure after invoice issuance strands the payment; the scheduler burns its 8 retries and marks the approval failed. *Reproduced.* | High | `A1` | Fixed |
 | **F-011** | 2026-11-22 | SDK | `resolveFiberAddress("alice@other.example")` queries the configured `resolverUrl` and ignores the address domain. *Reproduced.* | Medium | `A2` | Open |
 | **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Open |
 | **F-013** | 2026-11-22 | Resolver / SDK | No timeout on any Fiber RPC or resolver HTTP call; a hung FNN holds the per-offer invoice lock indefinitely. | Medium | `A6` | Open |
@@ -545,3 +546,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | Decisions D-6, D-7, D-8 | — | All three decided as recommended (option b). Unblocks `G1`, `H1` and `G2`. D-1..D-5 and D-9 remain open. |
 | 2026-11-22 | Decision D-5 | — | Decided (b): per-subscription recurrence. Unblocks the `B2` amendment and the recurrence section of `D1`. Logged `F-039` (single signed `resolver_url`) while reviewing D-9 against the decentralization goal. D-1..D-4 and D-9 remain open. |
 | 2026-11-22 | Decisions D-1, D-2, D-3, D-9, D-10 | — | D-9 decided (a) by the owner. D-10 (new, for `F-039`) decided (b) and added as `E6`; `E5` updated to the single-merchant principle. D-1..D-3 adopted as recommended under the owner's standing instruction to take the best approach. Only D-4 (v1 vs. breaking v2) remains open, deliberately deferred until Phases A–D are done. |
+| 2026-11-22 | `A1` done, `B3` partly | `fix(resolver): stop readiness checks counting the invoice under check` | Fixes `F-007` and `F-010`. Suite: 117 tests, 113 pass, 4 infra tests skipped (no local Redis; PostgreSQL has no role for this user yet). |
