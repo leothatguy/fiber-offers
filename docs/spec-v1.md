@@ -307,7 +307,19 @@ Response:
 }
 ```
 
-Terminal statuses cannot be changed to a different terminal status. Read views also report an unpaid invoice as `invoice_expired` after its expiry time.
+Statuses only move forward:
+
+```text
+invoice_created ─► invoice_received ─► invoice_paid
+        │                  │
+        └────────┬─────────┘
+                 ▼
+invoice_expired | invoice_failed | invoice_cancelled
+```
+
+`invoice_paid`, `invoice_expired`, `invoice_failed` and `invoice_cancelled` are final. A request to move backwards, or out of a final status, is refused with `409 INVALID_STATUS_TRANSITION`. Setting the status a resolution already has changes nothing and emits no event. Each real change is applied once, even when a manual update, a node sync and a background pass race, and emits exactly one webhook event.
+
+An invoice whose lifetime has run out is recorded as `invoice_expired` and announced with one `invoice.expired` event. For a live invoice the resolver asks the node, which decides whether it expired or was paid at the last moment. Read views also show an unpaid invoice as `invoice_expired` from the moment its expiry passes, before that is recorded.
 
 Every invoice has an expiry. The resolver asks the node for an invoice that lasts `FIBER_INVOICE_TTL_SECONDS` (default 900), shortened so it never outlives the offer's own `expiry`, and returns the moment it lapses as `expires_at`. The node enforces the expiry: it stops accepting payment and reports the invoice as `Expired`, which sync records as `invoice_expired`.
 

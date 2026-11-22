@@ -252,6 +252,17 @@ export class PostgresOfferStore {
   }
 
   async updateResolutionStatus(offerId, resolutionId, update) {
+    return (await this.#writeStatus(offerId, resolutionId, update, undefined)).record;
+  }
+
+  // Moves a resolution to `update.status` only if it is still in `update.from`.
+  // The row is locked for the check and the write, so of two replicas or
+  // workers racing on one resolution exactly one gets applied: true.
+  async transitionResolution(offerId, resolutionId, update) {
+    return this.#writeStatus(offerId, resolutionId, update, update.from);
+  }
+
+  async #writeStatus(offerId, resolutionId, update, expectedStatus) {
     return this.#transaction(async (client) => {
       const currentResult = await client.query(
         "SELECT * FROM fiber_resolutions WHERE offer_id = $1 AND resolution_id = $2 FOR UPDATE",
@@ -259,6 +270,9 @@ export class PostgresOfferStore {
       );
       if (!currentResult.rows[0]) throw storeError("resolution_id does not exist", "RESOLUTION_NOT_FOUND", 404);
       const current = resolutionRow(currentResult.rows[0]);
+      if (expectedStatus !== undefined && current.status !== expectedStatus) {
+        return { applied: false, record: current };
+      }
       const now = new Date().toISOString();
       const history = [
         ...(current.status_history ?? []),
@@ -284,7 +298,7 @@ export class PostgresOfferStore {
           timestamps.failed_at, timestamps.cancelled_at
         ]
       );
-      return resolutionRow(result.rows[0]);
+      return { applied: true, record: resolutionRow(result.rows[0]) };
     });
   }
 

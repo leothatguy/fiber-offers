@@ -1309,6 +1309,102 @@ test("rejects invalid terminal status transitions", async () => {
   });
 });
 
+test("a resolution's status only moves forward, and repeating it announces nothing", async () => {
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`);
+    const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+      amount: "1000",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    });
+    const statusUrl = `${baseUrl}/offers/${created.body.offer_id}/resolutions/${invoice.body.resolution_id}/status`;
+    const set = (status) => postJson(statusUrl, { status });
+    const eventTypes = async () =>
+      (await getJson(`${baseUrl}/offers/${created.body.offer_id}/webhook-events`)).body.events.map((event) => event.type);
+
+    const received = await set("invoice_received");
+    const backwards = await set("invoice_created");
+    const repeated = await set("invoice_received");
+    const paid = await set("invoice_paid");
+    const afterPaid = await set("invoice_expired");
+
+    assert.equal(received.status, 200);
+    assert.equal(backwards.status, 409);
+    assert.equal(backwards.body.error.code, "INVALID_STATUS_TRANSITION");
+    assert.deepEqual(backwards.body.error.details, { current_status: "invoice_received", next_status: "invoice_created" });
+    assert.equal(repeated.status, 200);
+    assert.equal(paid.body.status, "invoice_paid");
+    assert.equal(afterPaid.status, 409);
+    // One event per real change: created, received, paid.
+    assert.deepEqual(await eventTypes(), ["invoice.created", "invoice.received", "invoice.paid"]);
+    assert.deepEqual(
+      paid.body.status_history.map((entry) => entry.status),
+      ["invoice_pending", "invoice_created", "invoice_received", "invoice_paid"]
+    );
+  });
+});
+
+test("racing status syncs record one transition and emit one event", async () => {
+  const nodeId = "02" + "7".repeat(64);
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    client: {
+      async call(method) {
+        if (method === "node_info") return { pubkey: nodeId };
+        if (method === "new_invoice") {
+          return { invoice_address: "fibt1race", invoice: { data: { payment_hash: "0x" + "5".repeat(64) } } };
+        }
+        // Let both syncs read the same starting status before either writes.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { invoice_address: "fibt1race", invoice: { amount: "0x3e8", currency: "Fibt" }, status: "Paid" };
+      }
+    }
+  });
+
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+      amount: "1000",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    });
+    const syncUrl = `${baseUrl}/offers/${created.body.offer_id}/resolutions/${invoice.body.resolution_id}/sync`;
+
+    const results = await Promise.all([postJson(syncUrl, {}), postJson(syncUrl, {}), postJson(syncUrl, {})]);
+    const events = await getJson(`${baseUrl}/offers/${created.body.offer_id}/webhook-events`);
+
+    assert.deepEqual(results.map((result) => result.status), [200, 200, 200]);
+    assert.equal(results.filter((result) => result.body.changed).length, 1);
+    assert.equal(results.every((result) => result.body.resolution.status === "invoice_paid"), true);
+    assert.equal(events.body.events.filter((event) => event.type === "invoice.paid").length, 1);
+  }, { invoiceAdapter });
+});
+
+test("a lapsed invoice is recorded as expired once and announced once", async () => {
+  // Issue the invoice as if an hour ago, so its lifetime has already run out.
+  const invoiceAdapter = new MockInvoiceAdapter({ invoiceTtlSeconds: 60, now: () => Date.now() - 3600_000 });
+  await withServer(async (baseUrl, server) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoice = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+      amount: "1000",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    });
+    const stored = async () => (await server.store.getResolution(created.body.offer_id, invoice.body.resolution_id)).status;
+    const expiredEvents = async () =>
+      (await getJson(`${baseUrl}/offers/${created.body.offer_id}/webhook-events`)).body.events.filter(
+        (event) => event.type === "invoice.expired"
+      );
+
+    assert.equal(await stored(), "invoice_created");
+    const firstPass = await server.backgroundWorkers.runSettlementSyncPass();
+    const secondPass = await server.backgroundWorkers.runSettlementSyncPass();
+
+    assert.equal(firstPass.expired, 1);
+    assert.equal(secondPass.expired, 0);
+    assert.equal(await stored(), "invoice_expired");
+    const events = await expiredEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].payload.resolution.expired_at, invoice.body.expires_at);
+  }, { invoiceAdapter });
+});
+
 test("rejects invoice requests outside offer bounds", async () => {
   await withServer(async (baseUrl) => {
     const created = await postJson(`${baseUrl}/demo/offers`, {

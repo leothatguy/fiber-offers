@@ -56,6 +56,38 @@ test("PostgreSQL store serializes single-use reservations across pools", { skip:
   assert.equal(finalized.reservation_expires_at, undefined);
 });
 
+test("PostgreSQL applies a racing status change exactly once", { skip: !enabled }, async () => {
+  const offer = signedOffer();
+  await primary.upsertOffer(offer, encodeOffer(offer));
+  const reservation = await primary.reserveInvoiceAttempt(offer.offer_id, {
+    request: { amount: "1000", asset: offer.assets[0] }
+  });
+  const created = await primary.finalizeInvoiceReservation(offer.offer_id, reservation.record.id, {
+    invoice: "fibt1race",
+    payment_hash: "0x02",
+    mode: "mock"
+  });
+  const markPaid = (store) =>
+    store.transitionResolution(offer.offer_id, created.id, {
+      from: "invoice_created",
+      status: "invoice_paid",
+      source: "test"
+    });
+
+  // Two replicas see invoice_created and both try to record the payment.
+  const outcomes = await Promise.all([markPaid(primary), markPaid(replica), markPaid(primary), markPaid(replica)]);
+  const stored = await replica.getResolution(offer.offer_id, created.id);
+
+  assert.equal(outcomes.filter((outcome) => outcome.applied).length, 1);
+  assert.equal(outcomes.every((outcome) => outcome.record.status === "invoice_paid"), true);
+  assert.equal(stored.status_history.filter((entry) => entry.status === "invoice_paid").length, 1);
+  // A status outside the state machine cannot be stored at all.
+  await assert.rejects(
+    () => primary.updateResolutionStatus(offer.offer_id, created.id, { status: "invoice_refunded" }),
+    (error) => error.code === "23514"
+  );
+});
+
 test("PostgreSQL store provides durable idempotent replays", { skip: !enabled }, async () => {
   const offer = signedOffer();
   await primary.upsertOffer(offer, encodeOffer(offer));

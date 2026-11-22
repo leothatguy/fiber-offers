@@ -242,6 +242,17 @@ export class InMemoryOfferStore {
   }
 
   async updateResolutionStatus(offerId, resolutionId, update) {
+    return (await this.#writeStatus(offerId, resolutionId, update, undefined)).record;
+  }
+
+  // Moves a resolution to `update.status` only if it is still in `update.from`.
+  // Returns { applied, record }: applied is false when something else changed
+  // the status first, so a caller never acts twice on one transition.
+  async transitionResolution(offerId, resolutionId, update) {
+    return this.#writeStatus(offerId, resolutionId, update, update.from);
+  }
+
+  async #writeStatus(offerId, resolutionId, update, expectedStatus) {
     await this.load();
     const resolutions = this.state.resolutions[offerId];
     if (!resolutions) {
@@ -251,6 +262,9 @@ export class InMemoryOfferStore {
     const record = resolutions.find((resolution) => resolution.id === resolutionId);
     if (!record) {
       throw storeError("resolution_id does not exist", "RESOLUTION_NOT_FOUND", 404);
+    }
+    if (expectedStatus !== undefined && (record.status ?? "invoice_created") !== expectedStatus) {
+      return { applied: false, record: clone(record) };
     }
 
     const now = new Date().toISOString();
@@ -293,7 +307,7 @@ export class InMemoryOfferStore {
     };
 
     await this.save();
-    return clone(record);
+    return { applied: true, record: clone(record) };
   }
 
   async addWebhook(offerId, webhook) {

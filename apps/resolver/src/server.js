@@ -21,7 +21,13 @@ import { PostgresOfferStore } from "./postgres-store.js";
 import { assertProductionConfiguration } from "./production-guard.js";
 import { renderOfferQrSvg } from "./qr.js";
 import { RedisRateLimiter } from "./redis-rate-limiter.js";
-import { consumingResolutions, resolutionUnderCheck } from "./resolution-rules.js";
+import {
+  canTransition,
+  consumingResolutions,
+  PUBLIC_RESOLUTION_STATUSES,
+  resolutionUnderCheck,
+  TERMINAL_RESOLUTION_STATUSES
+} from "./resolution-rules.js";
 import { InMemoryOfferStore, JsonOfferStore, normalizeUsername } from "./store.js";
 import { deliverWebhookEvent } from "./webhook-delivery.js";
 
@@ -29,20 +35,8 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const defaultStaticRoot = resolve(currentDir, "../../demo/public");
 const defaultDataPath = resolve(currentDir, "../data/offers.json");
 const maxJsonBytes = 1024 * 1024;
-const resolutionStatuses = new Set([
-  "invoice_created",
-  "invoice_received",
-  "invoice_paid",
-  "invoice_expired",
-  "invoice_failed",
-  "invoice_cancelled"
-]);
-const terminalResolutionStatuses = new Set([
-  "invoice_paid",
-  "invoice_expired",
-  "invoice_failed",
-  "invoice_cancelled"
-]);
+const resolutionStatuses = new Set(PUBLIC_RESOLUTION_STATUSES);
+const terminalResolutionStatuses = new Set(TERMINAL_RESOLUTION_STATUSES);
 const webhookSubscriptionEventTypes = new Set([
   "invoice.created",
   "invoice.received",
@@ -523,11 +517,7 @@ async function handleRequest(request, response, context) {
     if (request.method === "POST" && isStatusRoute) {
       requireApiKey(request, context);
       const body = await readJsonBody(request);
-      const resolution = await updateResolutionStatus(context.store, offerId, resolutionId, body);
-      await appendWebhookEvent(context.store, offerId, webhookEventTypeForStatus(resolution.status), {
-        offer_id: offerId,
-        resolution: publicResolution(resolution, requestOrigin(request), offerId)
-      });
+      const resolution = await updateResolutionStatus(context, offerId, resolutionId, body, requestOrigin(request));
       sendJson(response, 200, publicResolution(resolution, requestOrigin(request), offerId));
       return;
     }
@@ -828,20 +818,62 @@ async function withOfferInvoiceLock(context, offerId, operation) {
   }
 }
 
-async function updateResolutionStatus(store, offerId, resolutionId, body) {
-  const current = await store.getResolution(offerId, resolutionId);
+// An operator (or an external settlement source) sets a resolution's status.
+async function updateResolutionStatus(context, offerId, resolutionId, body, origin) {
+  const current = await context.store.getResolution(offerId, resolutionId);
   if (!current) throw httpError(404, "RESOLUTION_NOT_FOUND", "resolution_id was not found");
 
   const nextStatus = normalizeResolutionStatus(body.status);
-  assertStatusTransition(current.status, nextStatus);
+  const from = current.status ?? "invoice_created";
+  // Repeating the current status changes nothing and announces nothing.
+  if (from === nextStatus) return current;
+  if (!canTransition(from, nextStatus)) {
+    throw httpError(
+      409,
+      "INVALID_STATUS_TRANSITION",
+      terminalResolutionStatuses.has(from)
+        ? "terminal resolution status cannot be changed"
+        : "resolution status can only move forward",
+      { current_status: from, next_status: nextStatus }
+    );
+  }
 
-  return store.updateResolutionStatus(offerId, resolutionId, {
-    status: nextStatus,
+  const result = await applyResolutionTransition(context, offerId, current, nextStatus, origin, {
     source: body.source ?? "manual",
     note: body.note,
     settlement: normalizeSettlement(body),
     details: body.details
   });
+  if (!result.applied) {
+    throw httpError(409, "RESOLUTION_STATUS_CHANGED", "resolution status changed while this update was being applied", {
+      current_status: result.record.status
+    });
+  }
+  return result.record;
+}
+
+// The one place a resolution changes status. The transition must be allowed by
+// the state machine and is applied only if the resolution is still in the
+// status the caller saw, so when a manual update, a node sync and a background
+// pass race, exactly one of them wins and exactly one webhook event is emitted.
+async function applyResolutionTransition(context, offerId, current, nextStatus, origin, update = {}, eventPayload = {}) {
+  const from = current.status ?? "invoice_created";
+  if (from === nextStatus) return { applied: false, reason: "unchanged", record: current };
+  if (!canTransition(from, nextStatus)) return { applied: false, reason: "not_allowed", record: current };
+
+  const { applied, record } = await context.store.transitionResolution(offerId, current.id, {
+    ...update,
+    from,
+    status: nextStatus
+  });
+  if (!applied) return { applied: false, reason: "lost_race", record };
+
+  const webhookEvent = await appendWebhookEvent(context.store, offerId, webhookEventTypeForStatus(nextStatus), {
+    offer_id: offerId,
+    resolution: publicResolution(record, origin, offerId),
+    ...eventPayload
+  });
+  return { applied: true, record, webhookEvent, previous_status: from };
 }
 
 async function syncResolutionFromInvoiceSource(context, offerId, resolutionId, origin) {
@@ -859,50 +891,90 @@ async function syncResolutionFromInvoiceSource(context, offerId, resolutionId, o
 
   const invoiceSource = await context.invoiceAdapter.syncInvoice(paymentHash);
   const nextStatus = normalizeResolutionStatus(invoiceSource.status);
-  const currentStatus = current.status ?? "invoice_created";
+  const result = await applyResolutionTransition(
+    context,
+    offerId,
+    current,
+    nextStatus,
+    origin,
+    {
+      source: "fiber-rpc",
+      note: `Fiber invoice status: ${invoiceSource.fiber_status}`,
+      settlement: settlementFromInvoiceSync(invoiceSource, nextStatus),
+      details: {
+        fiber_status: invoiceSource.fiber_status,
+        get_invoice_method: invoiceSource.get_invoice_method,
+        amount: invoiceSource.amount,
+        currency: invoiceSource.currency
+      }
+    },
+    { invoice_source: publicInvoiceSyncSource(invoiceSource) }
+  );
 
-  if (currentStatus === nextStatus) {
+  // Nothing to record: the node agrees with the resolver, someone else already
+  // recorded the change, or the node reports a status the resolution has
+  // already moved past (it never goes backwards).
+  if (!result.applied) {
     return {
       offer_id: offerId,
       resolution_id: resolutionId,
       changed: false,
+      ...(result.reason === "not_allowed" ? { ignored_status: nextStatus } : {}),
       invoice_source: publicInvoiceSyncSource(invoiceSource),
-      resolution: publicResolution(current, origin, offerId)
+      resolution: publicResolution(result.record, origin, offerId)
     };
   }
-
-  assertStatusTransition(currentStatus, nextStatus);
-
-  const resolution = await context.store.updateResolutionStatus(offerId, resolutionId, {
-    status: nextStatus,
-    source: "fiber-rpc",
-    note: `Fiber invoice status: ${invoiceSource.fiber_status}`,
-    settlement: settlementFromInvoiceSync(invoiceSource, nextStatus),
-    details: {
-      fiber_status: invoiceSource.fiber_status,
-      get_invoice_method: invoiceSource.get_invoice_method,
-      amount: invoiceSource.amount,
-      currency: invoiceSource.currency
-    }
-  });
-  const publicSyncedResolution = publicResolution(resolution, origin, offerId);
-  const webhookEvent = await appendWebhookEvent(context.store, offerId, webhookEventTypeForStatus(resolution.status), {
-    offer_id: offerId,
-    resolution: publicSyncedResolution,
-    invoice_source: publicInvoiceSyncSource(invoiceSource)
-  });
 
   return {
     offer_id: offerId,
     resolution_id: resolutionId,
     changed: true,
-    previous_status: currentStatus,
+    previous_status: result.previous_status,
     next_status: nextStatus,
     invoice_source: publicInvoiceSyncSource(invoiceSource),
-    webhook_event_id: webhookEvent.id,
-    webhook_delivery_count: webhookEvent.deliveries.length,
-    resolution: publicSyncedResolution
+    webhook_event_id: result.webhookEvent.id,
+    webhook_delivery_count: result.webhookEvent.deliveries.length,
+    resolution: publicResolution(result.record, origin, offerId)
   };
+}
+
+// Records the outcome of invoices whose lifetime has run out, so the stored
+// status, cap accounting and webhooks all agree with what a reader is shown.
+// A live invoice is settled by asking the node, which is the authority on
+// whether it expired or was paid at the last moment. A mock invoice has no
+// node, so the clock decides.
+async function settleOverdueResolutions(context, offerId, origin, resolutions = undefined) {
+  const records = resolutions ?? (await context.store.getResolutions(offerId));
+  const now = Date.now();
+  let expired = 0;
+  for (const record of records) {
+    if (!["invoice_created", "invoice_received"].includes(record.status)) continue;
+    const expiresAt = Date.parse(record.invoice?.expires_at ?? "");
+    if (!Number.isFinite(expiresAt) || expiresAt > now) continue;
+
+    if (canSyncFromInvoiceSource(context, record)) {
+      const synced = await syncResolutionFromInvoiceSource(context, offerId, record.id, origin);
+      if (synced.changed && synced.next_status === "invoice_expired") expired += 1;
+      continue;
+    }
+    const result = await applyResolutionTransition(context, offerId, record, "invoice_expired", origin, {
+      source: "resolver",
+      note: "invoice lifetime elapsed",
+      expired_at: record.invoice.expires_at
+    });
+    if (result.applied) expired += 1;
+  }
+  return expired;
+}
+
+function canSyncFromInvoiceSource(context, record) {
+  return (
+    typeof context.invoiceAdapter.syncInvoice === "function" &&
+    context.invoiceAdapter.mode !== "mock" &&
+    record.invoice?.mocked !== true &&
+    Boolean(record.invoice?.payment_hash) &&
+    (!record.invoice?.mode || record.invoice.mode === context.invoiceAdapter.mode)
+  );
 }
 
 async function syncOfferResolutions(context, offerId, origin, options = {}) {
@@ -1514,18 +1586,6 @@ function normalizeResolutionStatus(status) {
   return status;
 }
 
-function assertStatusTransition(currentStatus, nextStatus) {
-  const current = currentStatus ?? "invoice_created";
-  if (current === nextStatus) return;
-
-  if (terminalResolutionStatuses.has(current)) {
-    throw httpError(409, "INVALID_STATUS_TRANSITION", "terminal resolution status cannot be changed", {
-      current_status: current,
-      next_status: nextStatus
-    });
-  }
-}
-
 function normalizeSettlement(body) {
   const settlement = {};
 
@@ -1696,10 +1756,17 @@ function createBackgroundWorkers(context, options = {}) {
 
 async function syncOpenResolutionsForAllOffers(context) {
   if (context.invoiceAdapter.mode === "mock" || typeof context.invoiceAdapter.syncInvoice !== "function") {
+    // There is no node to ask, but invoices still run out: record that.
+    let expired = 0;
+    for (const entry of await context.store.listOffers()) {
+      const origin = context.publicOrigin ?? entry.offer.resolver_url;
+      expired += await settleOverdueResolutions(context, entry.offer.offer_id, origin);
+    }
     return {
       skipped: true,
       reason: "invoice_sync_unsupported",
-      invoice_mode: context.invoiceAdapter.mode
+      invoice_mode: context.invoiceAdapter.mode,
+      expired
     };
   }
 
