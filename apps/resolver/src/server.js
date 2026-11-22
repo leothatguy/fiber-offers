@@ -16,6 +16,7 @@ import {
   verifyOfferRevocation
 } from "../../../packages/protocol/src/index.js";
 import { createInvoiceAdapter } from "./invoice-adapter.js";
+import { classifyInvoiceFailure } from "./invoice-errors.js";
 import { PostgresOfferStore } from "./postgres-store.js";
 import { renderOfferQrSvg } from "./qr.js";
 import { RedisRateLimiter } from "./redis-rate-limiter.js";
@@ -676,16 +677,24 @@ async function resolveInvoice(entry, body, context, origin, options = {}) {
       });
     } catch (error) {
       await context.store.abandonInvoiceReservation(entry.offer.offer_id, reservation.record.id).catch(() => {});
+      const failure = classifyInvoiceFailure(error);
       logResolution(context.logger, {
         outcome: "failed",
         offer_id: entry.offer.offer_id,
         amount: request.amount,
         asset: request.asset,
-        code: error.code ?? "FIBER_RPC_UNAVAILABLE",
+        code: failure.cause_code ?? failure.code,
+        error_code: failure.code,
+        error_kind: error.kind,
+        error_message: error.message,
+        retryable: failure.retryable,
         duration_ms: Date.now() - startedAt
       });
-      throw httpError(503, "RECIPIENT_UNAVAILABLE", "recipient temporarily unavailable, try again", {
-        cause_code: error.code ?? "FIBER_RPC_UNAVAILABLE"
+      if (failure.unclassified) context.logger.error?.(error);
+      throw httpError(failure.status, failure.code, failure.message, {
+        ...(failure.details ?? {}),
+        retryable: failure.retryable,
+        ...(failure.cause_code !== undefined ? { cause_code: failure.cause_code } : {})
       });
     }
 
@@ -1839,12 +1848,14 @@ function createTopologyClientFromEnv(env, fetchImpl) {
       url: merchantUrl,
       username: env.MERCHANT_FIBER_RPC_USERNAME ?? env.FIBER_RPC_USERNAME,
       password: env.MERCHANT_FIBER_RPC_PASSWORD ?? env.FIBER_RPC_PASSWORD,
+      timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl
     },
     payer: {
       url: payerUrl,
       username: env.PAYER_FIBER_RPC_USERNAME ?? env.FIBER_RPC_USERNAME,
       password: env.PAYER_FIBER_RPC_PASSWORD ?? env.FIBER_RPC_PASSWORD,
+      timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl
     }
   });
@@ -2250,11 +2261,14 @@ function sendError(response, error, logger) {
 
   if (status >= 500) logger.error(error);
 
+  // Details of an unexpected server error stay out of the response. Errors the
+  // resolver raised on purpose (expose) keep theirs, so a payer can read
+  // `retryable` on a 502/503.
   sendJson(response, status, {
     error: {
       code,
       message,
-      details: status >= 500 ? undefined : error.details
+      details: status >= 500 && !error.expose ? undefined : error.details
     }
   });
 }

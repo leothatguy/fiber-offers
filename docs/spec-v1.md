@@ -72,6 +72,21 @@ offline, but invoice creation does not. The resolver returns
 invoice. V1 does not queue an invoice request that lacks a current FNN-generated
 invoice.
 
+An invoice request that fails at the merchant node tells the payer whether a
+retry can help. `error.details.retryable` is always present on these responses:
+
+| Status | Code | `retryable` | Meaning |
+| --- | --- | --- | --- |
+| `503` | `RECIPIENT_UNAVAILABLE` | `true` | The node could not be reached, timed out, or its endpoint returned a server error. |
+| `502` | `FIBER_INVOICE_REJECTED` | `false` | The node answered and refused this invoice request. |
+| `502` | `FIBER_RPC_UNAUTHORIZED` | `false` | The resolver's credentials for its node were refused. |
+| `502` | `FIBER_RPC_REJECTED` | `false` | The node endpoint refused the request with a client error. |
+| `502` | `FIBER_RPC_INVALID_RESPONSE` | `false` | The node's reply did not contain a usable invoice. |
+
+`error.details.cause_code` carries the underlying cause, such as the node's
+JSON-RPC error code. The node's error message is written to the resolver log and
+is not returned to the payer. A failed request leaves no resolution behind.
+
 ## Resolution Flow
 
 1. Merchant creates and signs an offer.

@@ -679,6 +679,92 @@ test("FiberRpcClient sends JSON-RPC requests with auth", async () => {
   assert.equal(JSON.parse(calls[0].init.body).method, "node_info");
 });
 
+test("FiberRpcClient classifies failures so callers know whether to retry", async () => {
+  const failureOf = async (fetchImpl, extra = {}) => {
+    const rpc = new FiberRpcClient({ url: "http://fiber.test", fetchImpl, ...extra });
+    try {
+      await rpc.call("new_invoice", [{}]);
+    } catch (error) {
+      return error;
+    }
+    assert.fail("expected the RPC call to throw");
+  };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
+
+  const unreachable = await failureOf(async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+  });
+  const rejected = await failureOf(async () =>
+    json({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Invalid params" } })
+  );
+  const unauthorized = await failureOf(async () => new Response("Unauthorized", { status: 401 }));
+  const badGateway = await failureOf(async () => new Response("<html>502</html>", { status: 502 }));
+  const loginPage = await failureOf(async () => new Response("<html>Sign in</html>", { status: 200 }));
+  const noResult = await failureOf(async () => json({ jsonrpc: "2.0", id: 1 }));
+  // A fetch that never settles and ignores the abort signal must still time out.
+  const hung = await failureOf(() => new Promise(() => {}), { timeoutMs: 20 });
+
+  assert.deepEqual(
+    [unreachable.kind, unreachable.code, unreachable.retryable, unreachable.details.cause_code],
+    ["transport", "FIBER_RPC_UNREACHABLE", true, "ECONNREFUSED"]
+  );
+  assert.deepEqual([rejected.kind, rejected.code, rejected.retryable], ["rpc", -32602, false]);
+  assert.equal(rejected.details.error.message, "Invalid params");
+  assert.equal(rejected.details.method, "new_invoice");
+  assert.deepEqual(
+    [unauthorized.kind, unauthorized.http_status, unauthorized.retryable],
+    ["http", 401, false]
+  );
+  assert.deepEqual([badGateway.kind, badGateway.http_status, badGateway.retryable], ["http", 502, true]);
+  assert.deepEqual([loginPage.kind, loginPage.retryable], ["invalid_response", false]);
+  assert.equal(noResult.kind, "invalid_response");
+  assert.deepEqual([hung.kind, hung.code, hung.retryable], ["timeout", "FIBER_RPC_TIMEOUT", true]);
+  assert.match(hung.message, /timed out after 20ms/);
+});
+
+test("FiberRpcClient accepts a null JSON-RPC result", async () => {
+  const rpc = new FiberRpcClient({
+    url: "http://fiber.test",
+    fetchImpl: async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: null }), { status: 200 })
+  });
+
+  assert.equal(await rpc.call("connect_peer", [{}]), null);
+});
+
+test("FiberOffersClient reports an unresponsive or broken resolver as retryable", async () => {
+  const offerId = "0x" + "1".repeat(64);
+  const failureOf = async (options) => {
+    try {
+      await new FiberOffersClient({ resolverUrl: "http://resolver.test", ...options }).getOffer(offerId);
+    } catch (error) {
+      return error;
+    }
+    assert.fail("expected the resolver request to throw");
+  };
+
+  const hung = await failureOf({ timeoutMs: 20, fetchImpl: () => new Promise(() => {}) });
+  const unreachable = await failureOf({
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    }
+  });
+  const proxyPage = await failureOf({ fetchImpl: async () => new Response("<html>502</html>", { status: 502 }) });
+  const rejected = await failureOf({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: "FIBER_INVOICE_REJECTED", message: "rejected", details: { retryable: false } }
+        }),
+        { status: 502 }
+      )
+  });
+
+  assert.deepEqual([hung.code, hung.retryable], ["RESOLVER_TIMEOUT", true]);
+  assert.deepEqual([unreachable.code, unreachable.retryable], ["RESOLVER_UNREACHABLE", true]);
+  assert.deepEqual([proxyPage.code, proxyPage.status, proxyPage.retryable], ["RESOLVER_INVALID_RESPONSE", 502, true]);
+  assert.deepEqual([rejected.code, rejected.status, rejected.retryable], ["FIBER_INVOICE_REJECTED", 502, false]);
+});
+
 test("FiberPaymentClient checks payable route with dry-run send_payment", async () => {
   const calls = [];
   const client = new FiberPaymentClient({

@@ -124,13 +124,14 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - `FiberRpcInvoiceAdapter.createInvoice()` derives and returns `expires_at` from the invoice response timestamp + expiry (or computed fallback) so read-time expiry and Fiber `get_invoice` `Expired` status both work.
     - Tests verify `expiry` param encoding, offer-expiry clamping, and `expires_at` population.
 
-- [ ] **A6. Classify adapter & RPC errors accurately instead of blanket `503 RECIPIENT_UNAVAILABLE`**
+- [x] **A6. Classify adapter & RPC errors accurately instead of blanket `503 RECIPIENT_UNAVAILABLE`** — *done 2026-11-22*
   - **Problem:** `resolveInvoice()` catches every adapter error and returns `503 RECIPIENT_UNAVAILABLE` ("try again"), masking permanent failures like currency mismatch, unknown UDT script, invalid params, or RPC method errors.
   - **Files:** `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
     - Distinguish transient transport/availability failures (`503 RECIPIENT_UNAVAILABLE`) from permanent configuration/validation errors (`400`/`422`/`502` with specific error codes).
     - Tests cover both transient disconnect and permanent RPC rejection.
     - *(audit #2, `F-013`)* Every Fiber RPC and resolver HTTP `fetch` (resolver `fiber-rpc.js`, SDK `fiber-payment.js`, SDK `index.js`) carries an abort timeout. Today a hung FNN holds the per-offer invoice lock indefinitely and queues every later invoice request for that offer. Non-JSON RPC responses (proxy HTML, `401` text) map to a classified error instead of a `SyntaxError`.
+  - **Outcome:** One JSON-RPC client (`packages/sdk/src/fiber-rpc.js`) now serves the SDK and the resolver; the resolver's own copy is gone (this is the client half of `H2`). It enforces a deadline (`timeoutMs`, default 15 s, `FIBER_RPC_TIMEOUT_MS` on the resolver) and tags every failure with `kind` and `retryable`. `apps/resolver/src/invoice-errors.js` maps failures to `503 RECIPIENT_UNAVAILABLE` (retryable) or `502 FIBER_INVOICE_REJECTED` / `FIBER_RPC_UNAUTHORIZED` / `FIBER_RPC_REJECTED` / `FIBER_RPC_INVALID_RESPONSE` (not retryable), with `details.retryable` and `details.cause_code` in the response. The node's error message goes to the log only. `FiberOffersClient` gained its own deadline (30 s) and `RESOLVER_TIMEOUT` / `RESOLVER_UNREACHABLE` / `RESOLVER_INVALID_RESPONSE` errors. Documented in `docs/spec-v1.md` and `docs/sdk.md`.
 
 - [ ] **A7. Confirm payment outcome before advancing state** *(audit #2, `F-014`, `F-038`)*
   - **Problem:** `payOffer()` returns `payment_sent` as soon as `send_payment` is accepted (Fiber status `Created`/`Inflight`) and nothing calls `get_payment`. `FiberRecurringPaymentScheduler` then counts the cycle as paid and advances the schedule, so a payment that later ends `Failed` is never noticed. A crash between `send_payment` and `store.put()` re-sends the same invoice on restart and burns the retry budget. The fixed idempotency key `approval:cycle` replays an expired invoice forever.
@@ -478,7 +479,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 - [ ] **H2. Repository hygiene** *(`F-037`)*
   - **Files:** `apps/resolver/src/fiber-rpc.js`, `packages/sdk/src/fiber-payment.js`, `.github/`, `CONTRIBUTING.md`
   - **Acceptance criteria:**
-    - One `FiberRpcClient` implementation (the resolver and SDK each carry their own today).
+    - One `FiberRpcClient` implementation (the resolver and SDK each carry their own today). *Done with `A6`.*
     - Dependency update automation and a contribution guide that points at the spec, vectors and this plan.
 
 - [ ] **H3. Observability and recovery**
@@ -507,7 +508,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-010** | 2026-11-22 | SDK / Resolver | Idempotent retry is blocked by the pre-invoice `/check` (`OFFER_ALREADY_USED` for single-use, `INVALID_RECURRENCE_CYCLE` for recurring), so a transient failure after invoice issuance strands the payment; the scheduler burns its 8 retries and marks the approval failed. *Reproduced.* | High | `A1` | Fixed |
 | **F-011** | 2026-11-22 | SDK | `resolveFiberAddress("alice@other.example")` queries the configured `resolverUrl` and ignores the address domain. *Reproduced.* | Medium | `A2` | Open |
 | **F-012** | 2026-11-22 | CLI | `create` has no recurrence flags; recurring offers cannot be created from the CLI. | Low | `A4` | Open |
-| **F-013** | 2026-11-22 | Resolver / SDK | No timeout on any Fiber RPC or resolver HTTP call; a hung FNN holds the per-offer invoice lock indefinitely. | Medium | `A6` | Open |
+| **F-013** | 2026-11-22 | Resolver / SDK | No timeout on any Fiber RPC or resolver HTTP call; a hung FNN holds the per-offer invoice lock indefinitely. | Medium | `A6` | Fixed |
 | **F-014** | 2026-11-22 | SDK | `payOffer()` reports `payment_sent` on `send_payment` acceptance (`Created`/`Inflight`) and never calls `get_payment`; the scheduler counts the cycle as paid immediately and re-sends after a crash. | High | `A7` | Open |
 | **F-015** | 2026-11-22 | Protocol / Resolver | Invoices are not bound to an offer or resolution (description is the offer description or ID); receipts are unsigned resolver assertions. | Medium | `A8` | Open |
 | **F-016** | 2026-11-22 | Resolver / Protocol | Recurrence cycle counter is global per offer and enforced by a unique index; a second payer's cycle 1 gets `409 INVALID_RECURRENCE_CYCLE`. One subscriber per recurring offer. *Reproduced.* | High | `B2`, `D-5` | Open |
@@ -547,3 +548,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | Decision D-5 | — | Decided (b): per-subscription recurrence. Unblocks the `B2` amendment and the recurrence section of `D1`. Logged `F-039` (single signed `resolver_url`) while reviewing D-9 against the decentralization goal. D-1..D-4 and D-9 remain open. |
 | 2026-11-22 | Decisions D-1, D-2, D-3, D-9, D-10 | — | D-9 decided (a) by the owner. D-10 (new, for `F-039`) decided (b) and added as `E6`; `E5` updated to the single-merchant principle. D-1..D-3 adopted as recommended under the owner's standing instruction to take the best approach. Only D-4 (v1 vs. breaking v2) remains open, deliberately deferred until Phases A–D are done. |
 | 2026-11-22 | `A1` done, `B3` partly | `fix(resolver): stop readiness checks counting the invoice under check` | Fixes `F-007` and `F-010`. Suite: 117 tests, 113 pass, 4 infra tests skipped (no local Redis; PostgreSQL has no role for this user yet). |
+| 2026-11-22 | `A6` done, `H2` partly | `fix(resolver): report whether a failed invoice request is retryable` | Fixes `F-013`. One shared RPC client with deadlines. Suite: 122 tests, 118 pass, 4 skipped. |

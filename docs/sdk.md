@@ -357,6 +357,29 @@ The normalized object preserves the raw node error under `fiber_error` while
 adding stable categories for route, liquidity, expiry, timeout, and generic RPC
 failures.
 
+## Timeouts and retryable errors
+
+Every network call has a deadline, so a stalled node or resolver cannot hang a
+wallet. `FiberRpcClient` (and the clients built on it) aborts after `timeoutMs`,
+15 seconds by default. `FiberOffersClient` aborts after its own `timeoutMs`, 30
+seconds by default. Pass `0` to disable either.
+
+Errors carry a `retryable` flag that says whether repeating the same call can
+succeed:
+
+| Thrown by | `code` | `retryable` |
+| --- | --- | --- |
+| `FiberRpcClient` | `FIBER_RPC_UNREACHABLE`, `FIBER_RPC_TIMEOUT` | `true` |
+| `FiberRpcClient` | the node's JSON-RPC error code (`kind: "rpc"`) | `false` |
+| `FiberRpcClient` | `FIBER_RPC_HTTP_ERROR` | `true` for `5xx` and `429`, otherwise `false` |
+| `FiberRpcClient` | `FIBER_RPC_INVALID_RESPONSE` | `false` |
+| `FiberOffersClient` | `RESOLVER_UNREACHABLE`, `RESOLVER_TIMEOUT` | `true` |
+| `FiberOffersClient` | `RESOLVER_INVALID_RESPONSE` | `true` for `5xx`, otherwise `false` |
+| `FiberOffersClient` | a resolver error code such as `RECIPIENT_UNAVAILABLE` | as reported by the resolver |
+
+`FiberRpcClient` errors also expose `kind` (`transport`, `timeout`, `http`,
+`rpc`, `invalid_response`) and `details.method`.
+
 ## Resolver-client method groups
 
 | Group | Methods |

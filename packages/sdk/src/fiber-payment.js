@@ -1,52 +1,7 @@
 import { normalizeFiberPaymentFailure } from "./failures.js";
+import { FiberRpcClient } from "./fiber-rpc.js";
 
-export class FiberRpcClient {
-  constructor(options = {}) {
-    if (!options.url) throw new Error("FiberRpcClient requires a url");
-
-    this.url = trimTrailingSlash(options.url);
-    this.username = options.username;
-    this.password = options.password;
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
-
-    if (typeof this.fetchImpl !== "function") {
-      throw new Error("FiberRpcClient requires a fetch implementation");
-    }
-  }
-
-  async call(method, params = []) {
-    const response = await this.fetchImpl(this.url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        ...authHeaders(this.username, this.password)
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: requestId(),
-        method,
-        params
-      })
-    });
-    const text = await response.text();
-    const body = text ? JSON.parse(text) : undefined;
-
-    if (!response.ok || body?.error) {
-      const error = new Error(body?.error?.message ?? `Fiber RPC ${method} failed with HTTP ${response.status}`);
-      error.code = body?.error?.code ?? "FIBER_RPC_ERROR";
-      error.status = 502;
-      error.details = {
-        method,
-        url: this.url,
-        error: body?.error ?? body
-      };
-      throw error;
-    }
-
-    return body?.result;
-  }
-}
+export { FiberRpcClient };
 
 export class FiberPaymentClient {
   constructor(options = {}) {
@@ -151,25 +106,4 @@ function arrayOption(options, snakeKey, camelKey) {
 
 function cleanUndefined(value) {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
-}
-
-function authHeaders(username, password) {
-  if (!username && !password) return {};
-  return {
-    authorization: `Basic ${base64Encode(`${username ?? ""}:${password ?? ""}`)}`
-  };
-}
-
-function trimTrailingSlash(value) {
-  return String(value).replace(/\/+$/, "");
-}
-
-function requestId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function base64Encode(value) {
-  if (typeof globalThis.btoa === "function") return globalThis.btoa(value);
-  if (typeof globalThis.Buffer?.from === "function") return globalThis.Buffer.from(value).toString("base64");
-  throw new Error("base64 encoding is not available in this runtime");
 }

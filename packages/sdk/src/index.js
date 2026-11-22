@@ -9,6 +9,7 @@ import {
   verifyOfferRevocation
 } from "@fiber-offers/protocol";
 import { FiberNodeDiagnosticsClient, summarizeFiberChannels } from "./fiber-diagnostics.js";
+import { fetchText, normalizeTimeoutMs } from "./http.js";
 import {
   FiberPaymentClient,
   FiberRpcClient,
@@ -54,11 +55,14 @@ export {
   verifyOfferRevocation
 };
 
+const DEFAULT_RESOLVER_TIMEOUT_MS = 30000;
+
 export async function createOffer(input, options = {}) {
   const rpc = options.rpcClient ?? new FiberRpcClient({
     url: options.fiberRpcUrl,
     username: options.username,
     password: options.password,
+    timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl
   });
   const nodeInfo = await rpc.call(options.nodeInfoMethod ?? "node_info", []);
@@ -90,6 +94,7 @@ export class FiberOffersClient {
     this.resolverUrl = trimTrailingSlash(options.resolverUrl ?? "");
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.apiKey = options.apiKey;
+    this.timeoutMs = normalizeTimeoutMs(options.timeoutMs, DEFAULT_RESOLVER_TIMEOUT_MS);
 
     if (typeof this.fetchImpl !== "function") {
       throw new Error("FiberOffersClient requires a fetch implementation");
@@ -398,7 +403,7 @@ export class FiberOffersClient {
     const baseUrl = trimTrailingSlash(options.baseUrl ?? this.resolverUrl);
     if (!baseUrl) throw new Error("resolverUrl is required");
 
-    const response = await this.fetchImpl(`${baseUrl}${path}`, {
+    const { response, text } = await this.#send(`${baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers: {
         accept: "application/json",
@@ -409,13 +414,24 @@ export class FiberOffersClient {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
 
-    const text = await response.text();
-    const body = text ? JSON.parse(text) : undefined;
+    let body;
+    try {
+      body = text ? JSON.parse(text) : undefined;
+    } catch {
+      // A proxy error page or a captive portal, not the resolver.
+      const error = new Error(`Fiber Offers resolver returned a non-JSON response (HTTP ${response.status})`);
+      error.status = response.status;
+      error.code = "RESOLVER_INVALID_RESPONSE";
+      error.retryable = response.status >= 500;
+      throw error;
+    }
     if (!response.ok) {
       const error = new Error(body?.error?.message ?? `Fiber Offers request failed with ${response.status}`);
       error.status = response.status;
       error.code = body?.error?.code;
       error.details = body?.error?.details;
+      // The resolver says whether repeating the request can help (502/503).
+      if (typeof body?.error?.details?.retryable === "boolean") error.retryable = body.error.details.retryable;
       throw error;
     }
 
@@ -426,7 +442,7 @@ export class FiberOffersClient {
     const baseUrl = trimTrailingSlash(options.baseUrl ?? this.resolverUrl);
     if (!baseUrl) throw new Error("resolverUrl is required");
 
-    const response = await this.fetchImpl(`${baseUrl}${path}`, {
+    const { response, text } = await this.#send(`${baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers: {
         accept: "text/csv, text/plain",
@@ -434,7 +450,6 @@ export class FiberOffersClient {
       }
     });
 
-    const text = await response.text();
     if (!response.ok) {
       const error = new Error(text || `Fiber Offers request failed with ${response.status}`);
       error.status = response.status;
@@ -442,6 +457,24 @@ export class FiberOffersClient {
     }
 
     return text;
+  }
+
+  async #send(url, init) {
+    try {
+      return await fetchText(this.fetchImpl, url, init, this.timeoutMs);
+    } catch (error) {
+      const timedOut = error?.kind === "timeout";
+      const failure = new Error(
+        timedOut
+          ? `Fiber Offers resolver did not respond within ${this.timeoutMs}ms`
+          : `Fiber Offers resolver could not be reached: ${error?.message ?? "request failed"}`
+      );
+      failure.code = timedOut ? "RESOLVER_TIMEOUT" : "RESOLVER_UNREACHABLE";
+      failure.kind = timedOut ? "timeout" : "transport";
+      failure.retryable = true;
+      failure.cause = error;
+      throw failure;
+    }
   }
 }
 

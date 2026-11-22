@@ -42,6 +42,8 @@ export interface FiberOffersClientOptions {
   resolverUrl?: string;
   fetchImpl?: FetchLike;
   apiKey?: string;
+  /** Abort a resolver request that has not completed in this many milliseconds. Default 30000; 0 disables. */
+  timeoutMs?: number;
 }
 
 export interface CreateOfferOptions extends Partial<FiberRpcClientOptions> {
@@ -239,6 +241,28 @@ export interface FiberRpcClientOptions {
   username?: string;
   password?: string;
   fetchImpl?: FetchLike;
+  /** Abort a call that has not completed in this many milliseconds. Default 15000; 0 disables. */
+  timeoutMs?: number;
+}
+
+/**
+ * Shape of every error thrown by `FiberRpcClient.call`.
+ * `retryable` says whether repeating the same call could succeed.
+ */
+export interface FiberRpcError extends Error {
+  kind: "transport" | "timeout" | "http" | "rpc" | "invalid_response";
+  /** The node's JSON-RPC error code for kind "rpc", otherwise a `FIBER_RPC_*` string. */
+  code: string | number;
+  retryable: boolean;
+  status: 502;
+  http_status?: number;
+  details: {
+    method: string;
+    url: string;
+    error?: unknown;
+    http_status?: number;
+    cause_code?: string;
+  };
 }
 
 export class FiberRpcClient {
@@ -246,6 +270,7 @@ export class FiberRpcClient {
   username?: string;
   password?: string;
   fetchImpl: FetchLike;
+  timeoutMs: number;
   constructor(options: FiberRpcClientOptions);
   call<T = unknown>(method: string, params?: unknown[]): Promise<T>;
 }

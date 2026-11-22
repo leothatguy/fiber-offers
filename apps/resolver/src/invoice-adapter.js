@@ -172,6 +172,7 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
       method: env.FIBER_RPC_INVOICE_METHOD ?? "new_invoice",
       getInvoiceMethod: env.FIBER_RPC_GET_INVOICE_METHOD ?? "get_invoice",
       probeMethod: env.FIBER_RPC_PROBE_METHOD ?? "node_info",
+      timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl: options.fetchImpl
     });
   }
@@ -467,10 +468,14 @@ function rpcShapeError(result) {
 }
 
 function publicRpcError(error) {
+  // The RPC client records the endpoint URL for operators; it is an internal
+  // address and does not belong in diagnostics output.
+  const { url: _url, ...details } = error.details ?? {};
   return {
     code: error.code ?? "FIBER_RPC_ERROR",
     message: error.message,
-    details: error.details
+    kind: error.kind,
+    details: Object.keys(details).length > 0 ? details : undefined
   };
 }
 

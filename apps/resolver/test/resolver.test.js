@@ -1268,6 +1268,101 @@ test("returns a stable unavailable-recipient error when invoice RPC fails", asyn
   }, { invoiceAdapter });
 });
 
+test("tells payers whether an invoice failure is worth retrying", async () => {
+  const nodeId = "02" + "a".repeat(64);
+  let newInvoice;
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    url: "http://fiber.test",
+    timeoutMs: 1000,
+    fetchImpl: async (_url, init) => {
+      const { method } = JSON.parse(init.body);
+      return method === "node_info" ? rpcResult({ pubkey: nodeId }) : newInvoice();
+    }
+  });
+
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoiceUrl = `${baseUrl}/offers/${created.body.offer_id}/invoice`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+
+    newInvoice = async () => {
+      throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    };
+    const unreachable = await postJson(invoiceUrl, request);
+
+    newInvoice = async () => rpcFailure(-32602, "Invalid params: unknown currency");
+    const rejected = await postJson(invoiceUrl, request);
+
+    newInvoice = async () => new Response("Unauthorized", { status: 401 });
+    const unauthorized = await postJson(invoiceUrl, request);
+
+    newInvoice = async () => new Response("<html>Bad Gateway</html>", { status: 502 });
+    const proxyDown = await postJson(invoiceUrl, request);
+
+    newInvoice = async () => rpcResult({ unexpected: "shape" });
+    const unusable = await postJson(invoiceUrl, request);
+
+    const resolutions = await getJson(`${baseUrl}/offers/${created.body.offer_id}/resolutions`);
+
+    assert.equal(unreachable.status, 503);
+    assert.equal(unreachable.body.error.code, "RECIPIENT_UNAVAILABLE");
+    assert.equal(unreachable.body.error.details.retryable, true);
+    assert.equal(unreachable.body.error.details.cause_code, "FIBER_RPC_UNREACHABLE");
+
+    assert.equal(rejected.status, 502);
+    assert.equal(rejected.body.error.code, "FIBER_INVOICE_REJECTED");
+    assert.equal(rejected.body.error.details.retryable, false);
+    assert.equal(rejected.body.error.details.cause_code, -32602);
+    // The node's own message stays in the server log, not the public response.
+    assert.doesNotMatch(JSON.stringify(rejected.body), /unknown currency/);
+
+    assert.equal(unauthorized.status, 502);
+    assert.equal(unauthorized.body.error.code, "FIBER_RPC_UNAUTHORIZED");
+    assert.equal(unauthorized.body.error.details.retryable, false);
+
+    assert.equal(proxyDown.status, 503);
+    assert.equal(proxyDown.body.error.code, "RECIPIENT_UNAVAILABLE");
+    assert.equal(proxyDown.body.error.details.retryable, true);
+
+    assert.equal(unusable.status, 502);
+    assert.equal(unusable.body.error.code, "FIBER_RPC_INVALID_RESPONSE");
+    assert.equal(unusable.body.error.details.retryable, false);
+
+    assert.equal(resolutions.body.resolutions.length, 0);
+  }, { invoiceAdapter });
+});
+
+test("a hung Fiber node times out instead of holding the offer's invoice lock", async () => {
+  const nodeId = "02" + "b".repeat(64);
+  let hang = true;
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    url: "http://fiber.test",
+    timeoutMs: 40,
+    fetchImpl: async (_url, init) => {
+      const { method } = JSON.parse(init.body);
+      if (method === "node_info") return rpcResult({ pubkey: nodeId });
+      if (hang) return new Promise(() => {});
+      return rpcResult({ invoice_address: "fibt1afterhang", invoice: { data: { payment_hash: "0x" + "3".repeat(64) } } });
+    }
+  });
+
+  await withServer(async (baseUrl) => {
+    const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+    const invoiceUrl = `${baseUrl}/offers/${created.body.offer_id}/invoice`;
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+
+    const timedOut = await postJson(invoiceUrl, request);
+    hang = false;
+    const recovered = await postJson(invoiceUrl, request);
+
+    assert.equal(timedOut.status, 503);
+    assert.equal(timedOut.body.error.code, "RECIPIENT_UNAVAILABLE");
+    assert.equal(timedOut.body.error.details.cause_code, "FIBER_RPC_TIMEOUT");
+    assert.equal(recovered.status, 201);
+    assert.equal(recovered.body.invoice, "fibt1afterhang");
+  }, { invoiceAdapter });
+});
+
 test("encrypts webhook signing secrets in JSON persistence", async () => {
   const directory = await mkdtemp(join(tmpdir(), "fiber-offers-store-"));
   try {
@@ -1364,6 +1459,14 @@ function readyDirectTopology() {
     warnings: [],
     next_actions: ["Run a Fiber send_payment dry-run against a fresh invoice before sending funds."]
   };
+}
+
+function rpcResult(result) {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id: "test", result }), { status: 200 });
+}
+
+function rpcFailure(code, message) {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id: "test", error: { code, message } }), { status: 200 });
 }
 
 async function withServer(callback, options = {}) {
