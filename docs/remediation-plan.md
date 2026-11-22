@@ -384,7 +384,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - Single command brings up two Fiber nodes + Postgres + Redis + resolver and tears them down cleanly.
     - *(audit #2, `F-028`)* `docker-compose.production.yml` pins the same Fiber image by digest (it currently uses the floating `nervos/fiber:0.9.0-rc1` tag, a release candidate). Keep a compatibility matrix in `docs/live-fiber-testing.md` and run the fixture on a schedule against the newest Fiber release so upstream RPC changes are caught.
 
-- [~] **F2. Upgrade live E2E test to run through the public SDK & cover full matrix** — *cases 1, 3 and 4 were run by hand through the SDK on live nodes (2026-11-22, see `docs/live-fiber-testing.md`); the committed, repeatable script and the remaining cases are still to do*
+- [~] **F2. Upgrade live E2E test to run through the public SDK & cover full matrix** — *done 2026-11-22 except one thing: a token payment has been minted and verified but not settled, because the payer has no token channel*
   - **Problem:** `scripts/live-fiber-e2e-check.js` uses `/demo/offers` and raw `fetch`, bypassing `FiberOffersClient` and `FiberPaymentFlowClient`, and only tests happy-path CKB.
   - **Files:** `scripts/live-fiber-e2e-check.js` (and/or `test/e2e/live-fiber.test.js`)
   - **Acceptance criteria:**
@@ -401,8 +401,10 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
       9. *(audit #2)* Idempotent retry after a forced transport failure, and confirmation of a payment that ends `Failed` (`A1`, `A7`)
       10. *(audit #2)* Concurrent single-use requests against two resolver replicas (exactly one invoice)
       11. *(audit #2)* Fiber Address resolution, signed webhook delivery end to end, and rejection of an offer whose `network` does not match the node chain
+  - **Outcome:** `scripts/live-fiber-e2e-check.js` was rewritten. It starts the real resolver in its own process against the merchant node and drives it only through `FiberOffersClient`, `FiberPaymentFlowClient`, `FiberPaymentClient` and `FiberRecurringPaymentScheduler` with the payer node. Twelve cases, all passing on Fiber `v0.10.1` testnet with PostgreSQL: `reusable-ckb`, `token-invoice`, `single-use`, `recurring-two-subscribers`, `invoice-expiry`, `revocation`, `tamper-rejection`, `idempotent-retry`, `two-replicas-single-use`, `fiber-address`, `webhook-delivery`, `network-mismatch`. A case that cannot run is reported as skipped with its reason.
+  - **Still open:** settling a token payment (needs RUSD and a token channel), and confirming a payment that ends `Failed` on the node, which this setup has no way to force.
 
-- [ ] **F3. Commit verifiable live validation evidence**
+- [x] **F3. Commit verifiable live validation evidence** — *done 2026-11-22: `docs/evidence/live-fiber-run.json`, written by `npm run fiber:e2e-check -- --evidence <path>`*
   - **Files:** `docs/evidence/` (e.g. `docs/evidence/live-fiber-run.json` + summary in release notes / `docs/live-fiber-testing.md`)
   - **Acceptance criteria:**
     - Retained JSON transcript including: git SHA, Fiber node version/image digest, network/chain, offer IDs, distinct invoice strings/hashes, payer `get_payment` results, merchant `get_invoice` results, and resolver status transitions.
@@ -587,3 +589,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `B1`, `B3` done | `fix(resolver): use up a single-use offer on payment, not on request` | Implements decision D-2. One request no longer burns a single-use offer. Suite: 173 of 173. |
 | 2026-11-22 | `B2` done — Phase B complete | `feat(resolver): count recurring cycles per signed subscription` | Implements decisions D-5 and D-3. Fixes `F-006`, `F-016` and the rest of `F-038`. Suite: 178 of 178. |
 | 2026-11-22 | Phase B confirmed live | `fix(resolver): refresh a subscription from the node before reporting it` | Run on Fiber `v0.10.1` testnet nodes with PostgreSQL: an abandoned single-use invoice held the offer, released it when it lapsed on the node, and a later payment used it up; two subscribers each paid two cycles of one recurring offer; a forged cycle request was refused. The run showed `recurrence-status` lagging the node by one payment, now fixed. Suite: 179 of 179. |
+| 2026-11-22 | `F2` (all but a settled token payment), `F3` done | `feat(scripts): prove the full payment matrix on live Fiber nodes`, then `docs(evidence): record the live run of all twelve cases` | 12 of 12 live cases pass on Fiber `v0.10.1` testnet with PostgreSQL, through the public SDK only. The transcript in `docs/evidence/live-fiber-run.json` was produced from commit `d45be25` with a clean tree. |

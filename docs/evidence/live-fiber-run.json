@@ -1,0 +1,253 @@
+{
+  "generated_at": "2026-11-22T21:28:07.411Z",
+  "command": "npm run fiber:e2e-check",
+  "git": {
+    "sha": "d45be25f8891d79bca48dd5b99c7f1eb021ad841",
+    "uncommitted_changes": false
+  },
+  "mode": "real payments",
+  "store": "postgresql",
+  "invoice_ttl_seconds": 10,
+  "amount_per_payment": "100000000",
+  "nodes": {
+    "merchant": {
+      "version": "0.10.1",
+      "commit_hash": "d9b6bbd 2026-11-14",
+      "pubkey": "02bd8800dca042f068f733848eecf248f66d72b1c4aceb58100852d9be228c9ccf",
+      "chain_hash": "0x10639e0895502b5688a6be8cf69460d76541bfa4821629d86d62ba0aae3f9606"
+    },
+    "payer": {
+      "version": "0.10.1",
+      "commit_hash": "d9b6bbd 2026-11-14",
+      "pubkey": "0256a7fa82035659009f6d8e1118747d98799cbd60fd7d16972e42a0c107483e9a",
+      "chain_hash": "0x10639e0895502b5688a6be8cf69460d76541bfa4821629d86d62ba0aae3f9606"
+    },
+    "network": "testnet",
+    "payer_channels": [
+      {
+        "state": "ChannelReady",
+        "peer": "02bd8800dca042f068f733848eecf248f66d72b1c4aceb58100852d9be228c9ccf",
+        "token": false
+      }
+    ]
+  },
+  "summary": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "cases": [
+    {
+      "id": "reusable-ckb",
+      "title": "A reusable offer is paid twice with distinct invoices",
+      "status": "passed",
+      "duration_ms": 2226,
+      "offer_id": "0xa89113abc20a9569ab429662eeb464fb2da25e275d7ed60a25a898dc96e0aa59",
+      "payments": [
+        {
+          "resolution_id": "res_ba54a0d1-b091-4a2c-8e48-b5434ea45db1",
+          "invoice": "fibt1000000001pxlynfn6vcrczxzat8lhvwmnzvjt30p2ja2dnde9e6vrf78u7t6rll5kth3n8ngxy5qxwfr503qqsq2kkp5z44kqq337lvh6tya34txsd03u70r64p8jdj6e6ltdnrh26qw5g66s5ml39hx3pqdrewwr4cg7g80a9z5q7yx9eau5c3dhfguj5dcsfxy32cyxg7su9kg69zk4ydg3m9duavlfuq4mmr3cnxxtd9zkewz7jq7djjyyuepm8gd69z5rdp9tl4tdcq7fug8xk5p3yqg8jtms9trw93jzl799af29p4ppux0d5gtgdma6nq6kc7d66j9wgt8ek5jqn0lzhsy6wm76mg52mhqjesazqt2u3x9mhyp3yl0gpu232amgshnsz3nycdjr8y3ej9xtv2fagts5unuxe7lheek90hjql0vxkjh547qrd8n3d48tl3gfymh92rel3cp5kjrp4qwuwzqjv9pgs0netm3pjrstwq6edfjj8pmnlmdcnszsmcpm0uxdq",
+          "payment_hash": "0xf252514f6bd46b343659d60db36e534db85b2a49b5239db7bed65e9cf38f7709",
+          "verified_before_sending": true,
+          "payer_get_payment": {
+            "status": "Success",
+            "fee": "0x0",
+            "created_at": "0x1a205282455",
+            "last_updated_at": "0x1a20528248f"
+          },
+          "merchant_get_invoice": {
+            "status": "Paid"
+          }
+        },
+        {
+          "resolution_id": "res_62db7cec-55f3-437c-98ee-f92586ebe62e",
+          "invoice": "fibt1500000001pxlynfn6vcrczxzat8lhv0d9shefdy6nxw9m6ug26srv60a7md5fmnfh69k4ufwjqs5pg28l2sw5vcnwxjjq9jesdty6f2xqzhnz60u8p2azrgs5zgtj76cpkagq80gx5gk2rw290ugdt530jfgld35sffusrdur4j6kcvx0zx3v0gmcp5s4lm7mvdx8muwgz7pz0vn9x3lg3nue8lw9sxhu9pd58q2g0n4u5pakcs88g90xc6m3mppepgetcpp3t57gm6r7f4mdz493vxk96zrx3fgl0cugd640zpaf3fmfeq38c6x5x7kd59y5pvk85ux6ymuuqggtcxml56gwm7ugzh98j49mq5kczxzd7fszm0w547tsqegmvw9wkpd5fjxjgnfstzqhand5qnwmlrwyc709lgsgch642gtu06jvppqgr0qla6z32xaty67y2r6j3twuj3cqr5kmshn9984jm5k37s4m9l2xydujnj6z9tltn883c8e2wcljje5cqea0ppt",
+          "payment_hash": "0xdfcf7ee5020f92c287df0ec4fbdc453da4e742f4e6fc1e9642ed149e7234942f",
+          "verified_before_sending": true,
+          "payer_get_payment": {
+            "status": "Success",
+            "fee": "0x0",
+            "created_at": "0x1a205282884",
+            "last_updated_at": "0x1a2052828d3"
+          },
+          "merchant_get_invoice": {
+            "status": "Paid"
+          }
+        }
+      ],
+      "resolver_statuses": [
+        "invoice_paid",
+        "invoice_paid"
+      ]
+    },
+    {
+      "id": "token-invoice",
+      "title": "A token invoice is minted with the token's script and verified",
+      "status": "passed",
+      "duration_ms": 47,
+      "offer_id": "0x1c061fe2457659ab72245a530f7355629d8683eecdd0e96e81062c92292f47e2",
+      "token": {
+        "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52",
+        "name": "RUSD",
+        "source": "node_info"
+      },
+      "invoice": "fibt1000000001pn9nevmdwtmczxzat8al6lmttnmqd5yttvuk3xy9853670nh332pw9trqjakl3p7wkz7y49c9mvzy6jwqdxgrp3753pw8r3g5htmaq7cj305cwq0h6zfsd53u6mhga8l06yzqqxvmrl5eulmtmnzq9xu548uj662rz3w29u6wu0fjc0xt6gwzxdx9qak4eazrrrv6u85r0vphj87scey509pfa674luu7qnw2xc9nes2nawaglq30lnspjz8prwm5p6q8upa8wfeynkny5mk4jds6za0crrq5dndxt45ey3gme6wj9l36r57w79v9evmza00nqhz38wm5lwrmu8rlqldnxtd92e9xmam0uvzyp36jrqk6whv9naxhy4zkstefkk0lhg4w89rrp462ysh93huxmtu7v3djj3vz8ugnfp6nx9ha5c4h4cea35lp9jqtr29tlc4mapawakuz28zrgyyzqsl7x9lyf2xg3vd9f2kflf39a6z08v2f7jc2zrar6d5x2a7r48rt58gwdlty757qvdw69a5uvuvuq4lwetrrkwe3hj4d9t6y266vu785edq7a8v0e6u8kw0nakclruk2zhcwth3q4fvkrljyhdzgph7v2kpe5q30vxmarlz4hcu3hsq3nluqq3n0jhd",
+      "verification": [
+        "payee:pass",
+        "amount:pass",
+        "currency:pass",
+        "asset:pass",
+        "expiry:pass",
+        "binding:pass"
+      ],
+      "payment": "skipped: the payer has no token channel"
+    },
+    {
+      "id": "single-use",
+      "title": "A single-use offer is released by a lapsed invoice and used up by payment",
+      "status": "passed",
+      "duration_ms": 13124,
+      "offer_id": "0x4d7ff471fd9a66a38f4e9f0c5fa803b8a8f35558240648123eb952c7cb1b8fe8",
+      "abandoned_resolution": "res_375c2be8-4455-4ee5-a0ec-fb065049290a",
+      "while_unpaid": "OFFER_INVOICE_OUTSTANDING",
+      "payment": {
+        "status": "payment_succeeded",
+        "resolution_id": "res_8c590d3f-71b1-4abf-a085-409baadd75fd",
+        "payment_hash": "0x0ea856f133d63ab9e8fee8a9268f1ea1d58075affa9274fc9b551fece97fb8c8",
+        "verified_before_sending": true
+      },
+      "after_payment": "OFFER_ALREADY_USED",
+      "stored_statuses": [
+        "invoice_expired",
+        "invoice_paid"
+      ]
+    },
+    {
+      "id": "recurring-two-subscribers",
+      "title": "Two subscribers each pay their own cycles of one recurring offer",
+      "status": "passed",
+      "duration_ms": 11206,
+      "offer_id": "0x8626be36abb1318a009a893da62d6a352a07ecd8c9890890aa9593cf13491c07",
+      "subscriptions": [
+        {
+          "subscription_id": "sub_d92a6459b329c36522bd1cd213e1df1b943e6bdd",
+          "cycles_paid": 2,
+          "payment_hashes": [
+            "0x98a32ab3a85db105e5e54d9fa8c93d52a577ca6b1816037b93314c3b294f3b43",
+            "0x9bb1daff3ff57b01f2da9610a7e65aba4555a48f8509aa6c48f675aa8b348b0e"
+          ]
+        },
+        {
+          "subscription_id": "sub_30dfd83c6c99c639ec5d7ec3e5c45fb0b505ead6",
+          "cycles_paid": 2,
+          "payment_hashes": [
+            "0x6993ee3a4faaa61dbdb96c08e85272e2c21dae865f12218eff08a8778e52a7a4",
+            "0x13c631081c0ce6f505db5a44a8aef31a7204f13dc6f125f3619944733549c776"
+          ]
+        }
+      ],
+      "events": [
+        "cycle.paid",
+        "cycle.paid",
+        "cycle.paid",
+        "cycle.paid",
+        "approval.cap_reached",
+        "approval.cap_reached"
+      ],
+      "forged_request": "SUBSCRIPTION_KEY_MISMATCH"
+    },
+    {
+      "id": "invoice-expiry",
+      "title": "An unpaid invoice expires on the node and is recorded as expired",
+      "status": "passed",
+      "duration_ms": 12093,
+      "offer_id": "0x880e78e0e617ce1f1d7455188ec9813b7ddeea7d8f4eb249c5c88e78ee34e185",
+      "payment_hash": "0x8d19a6631c9734dd07adfab7cc056b22fe685d2e90210c42398bd86a39d568ea",
+      "expires_at": "2026-11-22T21:28:03.068Z",
+      "node_status": "Expired",
+      "resolver_status": "invoice_expired",
+      "replay": "INVOICE_EXPIRED"
+    },
+    {
+      "id": "revocation",
+      "title": "A signed revocation stops an offer",
+      "status": "passed",
+      "duration_ms": 20,
+      "offer_id": "0x34ad9f8bf31704c111a378adfdf2cad7d14183a5c9fd3855d6d88d6c5ace798c",
+      "revoked_at": "2026-11-22T21:28:05.000Z",
+      "after_revocation": "410 OFFER_REVOKED"
+    },
+    {
+      "id": "tamper-rejection",
+      "title": "The SDK refuses offers and invoices a resolver substituted",
+      "status": "passed",
+      "duration_ms": 38,
+      "victim_offer": "0xaeec767bf014324bc30ff6b6d62713e99a92b3001021ebea6d31782c4caaf485",
+      "invoice_swap": "INVOICE_OFFER_MISMATCH",
+      "offer_swap": "RESOLVED_OFFER_MISMATCH"
+    },
+    {
+      "id": "idempotent-retry",
+      "title": "A payment that fails in transit is retried on the same invoice",
+      "status": "passed",
+      "duration_ms": 1050,
+      "offer_id": "0xa5b5ecacbf867f63dff567140de3a89754646176c9182f72618b336ceb87c916",
+      "payment": {
+        "resolution_id": "res_4f041497-cee6-4a92-8826-240b1f9e4ba5",
+        "invoice": "fibt1000000001pxnxrr5jfc0czxzat8lhtuyzgsdpnww0v8r9jdnj5dpp8dugzk3eusk594nragy2x2zp9q2nswf734mwfkfv0xrx7ncavvnl6xnlle9veawf2m303ks6dw0mtf52y9pd4ygfkq2wrrkuvc7eaf673vg2a2pgnckltqr9adrxc0kspumxklztmd6d3sv6cl2nc36u0d706fht399erejhr97uv3adgy595pgg9jpdtarutjlhnuzydz3ruce5mwunk78z6awfq63ekytagfw8fhf3k87ex8trs7ng5mcyj25ppemq97pwsrneu0qdqptvf8mafdjfr0ayp79m6zlem6yflp06z3gftj4yg3qmgu90vnj7tpec6x9zf7mc8s6ancrcgmpn29snkj6dulj2zauqc53z5leraya50ha6wrqe5y474d7tr0qn9zm2kw0ayfm3j7fz6qlhjd0tzqycahr3dqdwx5egh2vadtsupr6sz5zwgs54020vj4rv78gqpxuk7p",
+        "payment_hash": "0x5e99b673b614e2bf41758aeb596ef7a57f2b934b58474083c8ffb0f0178540eb",
+        "verified_before_sending": true,
+        "payer_get_payment": {
+          "status": "Success",
+          "fee": "0x0",
+          "created_at": "0x1a20528bb74",
+          "last_updated_at": "0x1a20528bbad"
+        },
+        "merchant_get_invoice": {
+          "status": "Paid"
+        }
+      }
+    },
+    {
+      "id": "two-replicas-single-use",
+      "title": "Two resolver replicas issue one invoice for a single-use offer",
+      "status": "passed",
+      "duration_ms": 62,
+      "offer_id": "0xb928a88b19fb806fd48aff188c3e9da5e8cb3158887cd5b568b071e977a6b30c",
+      "outcomes": [
+        "issued",
+        "409 OFFER_INVOICE_OUTSTANDING",
+        "409 OFFER_INVOICE_OUTSTANDING",
+        "409 OFFER_INVOICE_OUTSTANDING"
+      ]
+    },
+    {
+      "id": "fiber-address",
+      "title": "A Fiber Address resolves to a verified offer",
+      "status": "passed",
+      "duration_ms": 10,
+      "address": "e2e-mwscm55x@127.0.0.1:42385",
+      "offer_id": "0x35fac5d2f2136574b7563e99b25d0fe20bb15fd830e1e68c345705d4beaddd49"
+    },
+    {
+      "id": "webhook-delivery",
+      "title": "A payment is announced to a merchant webhook, signed",
+      "status": "passed",
+      "duration_ms": 1086,
+      "offer_id": "0xe0ee787b18a7533ade06fc49994b787bca32a7ef7c8860b5ac5486d511751893",
+      "delivered": [
+        "invoice.created",
+        "invoice.paid"
+      ]
+    },
+    {
+      "id": "network-mismatch",
+      "title": "An offer signed for another network is refused",
+      "status": "passed",
+      "duration_ms": 6,
+      "node_network": "testnet",
+      "offer_network": "mainnet",
+      "outcome": "422 OFFER_NETWORK_MISMATCH"
+    }
+  ]
+}
