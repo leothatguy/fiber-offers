@@ -2,6 +2,64 @@
 
 The resolver runs in live Fiber RPC mode by default. A normal local run targets only the merchant node on `8227` and starts automatic settlement workers. The payer node on `8229` is an optional controlled fixture for the route and E2E sections below.
 
+## 0. Run Local Fiber Nodes
+
+`scripts/local-fiber.js` runs real Fiber nodes on this machine without Docker. It
+downloads an official `fnn` release, checks it against the SHA-256 GitHub
+publishes, and manages a merchant node and a payer node on the CKB testnet.
+
+```bash
+npm run fiber:local -- init      # download, verify, create both nodes
+npm run fiber:local -- start
+npm run fiber:local -- status    # identity, peers, channels, funding address
+npm run fiber:local -- stop
+```
+
+| Node | RPC | P2P |
+| --- | --- | --- |
+| `merchant` | `http://127.0.0.1:8227` | `127.0.0.1:8228` |
+| `payer` | `http://127.0.0.1:8229` | `127.0.0.1:8230` |
+
+These are the ports the rest of this guide and `npm run dev:fiber:pair` expect.
+Both nodes listen on loopback only and do not announce an address. Their data,
+keys and logs live in `.fiber-offers/local-fiber`, which git ignores. The keys
+and their passwords are generated on this machine and stored unencrypted beside
+the nodes, so treat them as test nodes and never fund them with mainnet assets.
+
+Without funds the nodes already answer everything the resolver needs to mint
+and read invoices (`node_info`, `new_invoice`, `parse_invoice`, `get_invoice`).
+To send a real payment, the payer needs a channel to the merchant: send testnet
+CKB from the [Nervos faucet](https://faucet.nervos.org) to each node's
+`funding_address` from `status`, then open the channel (section 7).
+
+To check another Fiber version side by side, add a node on its own ports:
+
+```bash
+npm run fiber:local -- add merchant-09 --version v0.9.1 --rpc-port 8327 --p2p-port 8328
+```
+
+Pinned releases: `v0.10.1` (default) and `v0.9.1`, x86_64 Linux. On another
+platform, install `fnn` yourself and point `FIBER_RPC_URL` at it.
+
+### Verified against a live node
+
+Observed on Fiber `v0.10.1`, testnet, on 2026-11-22:
+
+| Behaviour the code relies on | Observed |
+| --- | --- |
+| `node_info.chain_hash` is the CKB genesis hash | Yes: the testnet genesis hash |
+| `node_info.udt_cfg_infos` lists exact token scripts | Yes: an array of `{ name, script, ... }`; `RUSD` is whitelisted by default |
+| `new_invoice` takes hex `amount`, `currency`, `description`, hex `expiry` (seconds), `udt_type_script` | Yes; a decimal amount is refused with `-32602` |
+| An invoice states its payee | Yes: `{ "payee_public_key": "02…" }` in `data.attrs`, no `0x` prefix |
+| Expiry and token script in `data.attrs` | `{ "expiry_time": "0x384" }` (seconds) and `{ "udt_script": "0x…" }` (molecule bytes) |
+| `data.timestamp` | Hex milliseconds; the resolver's `expires_at` equals the invoice's own expiry |
+| The node enforces expiry | Yes: `Open` becomes `Expired` once the lifetime has passed |
+| Wrong network currency | Refused: `-32000 Currency must be Fibt with the chain network` |
+| Description length | At most 639 bytes; longer is refused |
+| A token not on the node's whitelist | **Accepted** by `new_invoice`. The resolver's own registry check is the only guard |
+| `get_payment` for an unknown hash | `-32000 … Payment session not found` |
+| Dry-run with no channel | `-32000 … max outbound liquidity 0 is insufficient` |
+
 ## 1. Probe The Fiber Node
 
 ```bash

@@ -7,3 +7,4 @@ apps/resolver/data
 coverage
 dist
 build
+.fiber-offers

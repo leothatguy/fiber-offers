@@ -19,6 +19,7 @@
     "stack:up": "NODE_ENV=development docker compose up --build",
     "stack:down": "docker compose down",
     "cli": "node apps/cli/src/index.js",
+    "fiber:local": "node scripts/local-fiber.js",
     "fiber:check": "node scripts/live-fiber-check.js",
     "fiber:invoice-check": "node scripts/live-fiber-invoice-check.js",
     "fiber:route-check": "node scripts/fiber-route-check.js",

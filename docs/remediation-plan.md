@@ -3,7 +3,7 @@
 > **Living Document:** Update item checkboxes, status tags, commit/PR references, decisions, and the **New Findings Log** as fixes are implemented or additional issues are discovered.
 
 - **Baseline commit:** `730f113` (`main`)
-- **Pinned Fiber node image:** `nervos/fiber:0.9.0-rc1`
+- **Pinned Fiber node image:** `nervos/fiber:0.9.0-rc1` (upstream is at `v0.10.1`; see `F-040`). Local validation runs on `v0.10.1`.
 - **Last updated:** 2026-11-22
 - **Audit passes:** #1 2026-11-22 (critique validation → Phases A–F, `F-001`..`F-009`) · #2 2026-11-22 (full repo re-audit → amendments marked *(audit #2)*, new Phases G–H, `D-5`..`D-9`, `F-010`..`F-038`)
 - **Status legend:** `[ ]` Not started · `[~]` In progress · `[x]` Done · `[!]` Blocked / Needs decision
@@ -97,7 +97,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - *(audit #2)* Fiber's `parse_invoice` returns the payee key, expiry and UDT script as entries in `invoice.data.attrs` (`payee_public_key`, `expiry_time`, `udt_script`), not as top-level fields. Verification reads them from `attrs` and fails closed when the payee key attribute is absent.
     - *(audit #2, `F-011`)* `resolveFiberAddress("user@domain")` resolves against `https://domain`. Today it silently queries the client's configured `resolverUrl` and ignores the address domain. The returned offer is verified and later calls go to its signed `resolver_url`.
   - **Outcome:** `getOffer()`, `resolveOffer()` and `resolveFiberAddress()` verify the returned offer (signature, ID equals content hash, ID equals the one requested, attached `encoded_offer` is the same offer). `resolveFiberAddress()` looks the address up at its own domain and no longer sends the API key to another host. `FiberPaymentClient.parseInvoice()` wraps `parse_invoice`. `FiberPaymentFlowClient` verifies the offer however it is passed (ID, encoded, object), refuses a resolver other than the signed `resolver_url` (`resolver_mismatch`), validates the request offline, and runs `verifyInvoiceForOffer()` on the payer node's reading of the invoice (`invoice_rejected` on any mismatch). `payOffer({ execute: true })` will not send for an unverified invoice (`invoice_unverified`). Overrides for tests: `allowResolverMismatch`, `skipInvoiceVerification`. Seven substitution attacks are covered end to end in `apps/resolver/test/payment-flow.test.js`.
-  - **Open point:** the checks assume a Fiber invoice states its payee as a `payee_public_key` attribute, as the RPC reference lists. If a node omits it, verification fails closed (`INVOICE_PAYEE_MISSING`) and payments through the SDK stop until payee recovery from the invoice signature is added. Attribute names are matched loosely (snake or camel case; expiry as seconds or `{secs}`), but the exact JSON has not been seen from a live node.
+  - **Confirmed live (2026-11-22, Fiber `v0.10.1` testnet):** invoices carry `{ "payee_public_key": "02…" }`, `{ "expiry_time": "0x384" }` and, for tokens, `{ "udt_script": "0x…" }` (molecule bytes) in `data.attrs`. A CKB invoice and a RUSD invoice minted by the merchant node and read by the payer node passed all six checks.
 
 - [x] **A3. Fix Fiber network-to-currency mapping and node chain validation** — *done 2026-11-22; chain-hash assumption to be confirmed on a live node in `F2`*
   - **Problem:** `assetToFiberCurrency()` hardcodes `"Fibt"` regardless of `offer.network`; mainnet (`Fibb`) and devnet (`Fibd`) CKB invoices are rejected by real Fiber nodes, and the offer's `network` is never checked against the merchant node's chain.
@@ -107,9 +107,9 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - Validate offer `network` against the configured merchant Fiber node's chain/network (from `node_info` or explicit config) on offer registration and invoice creation.
     - Unit tests cover `mainnet`, `testnet`, and `dev` mappings and mismatch rejection.
   - **Outcome:** `packages/sdk/src/fiber-network.js` holds the mapping (`Fibb`/`Fibt`/`Fibd`) and the two public genesis hashes, both checked against the public CKB RPC. The adapter takes the currency from the offer's signed network. The resolver learns its node's network from `node_info.chain_hash` or `FIBER_NETWORK` and refuses a mismatched offer with `422 OFFER_NETWORK_MISMATCH` at registration and before each invoice. `createOffer()` and the CLI take the network from the node and refuse a contradicting `--network`. Token requests now fail closed with `422 ASSET_SCRIPT_NOT_CONFIGURED` until `A4` adds the registry; before, the script hash was sent as the currency.
-  - **Open point:** that Fiber's `chain_hash` is the CKB genesis block hash is taken from the RPC reference's wording and has not been seen on a live node (none is installed here). The check only rejects on a proven mismatch, and an unrecognised hash is treated as unknown, so a wrong assumption would disable the check rather than block valid offers.
+  - **Confirmed live (2026-11-22, Fiber `v0.10.1` testnet):** `node_info.chain_hash` is the testnet genesis hash; the resolver derived `testnet` from it and refused a `mainnet` offer with `422 OFFER_NETWORK_MISMATCH`. The node itself refuses the wrong currency (`-32000`).
 
-- [x] **A4. Fix UDT / RGB++ invoice creation (Asset Registry + CLI support)** — *done 2026-11-22; a real token payment still needs a live node with a UDT channel (`F2`)*
+- [x] **A4. Fix UDT / RGB++ invoice creation (Asset Registry + CLI support)** — *done 2026-11-22; confirmed live that a RUSD invoice is minted from the node's own whitelist and verifies; an actual token payment still needs a funded UDT channel (`F2`)*
   - **Problem:** `FiberRpcInvoiceAdapter` sends `asset.type_script_hash` in `currency` and omits `udt_type_script`. `resolver.test.js` asserts this broken shape. Also `apps/cli/src/index.js` exposes `--asset-type` without any `--type-script-hash` flag, making non-CKB offer creation impossible via CLI.
   - **Files:** `apps/resolver/src/fiber-rpc.js`, `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/cli/src/index.js`, `apps/resolver/test/invoice-adapter.test.js`, `apps/resolver/test/resolver.test.js`, `apps/cli/test/cli.test.js`
   - **Acceptance criteria:**
@@ -121,7 +121,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - *(audit #2, `F-012`)* CLI `create` also gains recurrence flags (`--recurrence-interval`, `--recurrence-amount`, `--cap-cycles`, `--spending-cap-total`, `--custom-seconds`); recurring offers cannot be created from the CLI today.
   - **Outcome:** `@fiber-offers/protocol` computes CKB script hashes (`ckbScriptHash()`, `parseCkbScript()`), checked against three mainnet system scripts. The resolver keeps a registry (`apps/resolver/src/asset-registry.js`) fed by `FIBER_UDT_SCRIPTS`, `FIBER_UDT_SCRIPTS_FILE` and the exact scripts in `node_info.udt_cfg_infos`; every entry is verified by hash at load, and a bad entry stops startup. `new_invoice` now sends the network currency plus `udt_type_script`. A token with no script is refused with `422 ASSET_SCRIPT_NOT_CONFIGURED` at registration, in `/check` (`asset_source`) and at invoice time. The CLI accepts `--type-script-hash` or `--type-script` (which it hashes) and the recurrence flags.
 
-- [x] **A5. Pass `expiry` to Fiber RPC and populate `expires_at` on live invoices** — *done 2026-11-22; the node's `Expired` report still needs a live node to observe (`F2`)*
+- [x] **A5. Pass `expiry` to Fiber RPC and populate `expires_at` on live invoices** — *done 2026-11-22; confirmed live: a 3-second invoice went `Open` → `Expired` on the node, and `expires_at` matched the invoice's own expiry*
   - **Problem:** `FiberRpcInvoiceAdapter.createInvoice()` never passes `expiry` to `new_invoice` and never sets `expires_at`. Live invoices never expire on Fiber `v0.9.0-rc1` and resolver expiry-on-read only works in mock mode.
   - **Files:** `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/resolver/test/invoice-adapter.test.js`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
@@ -158,7 +158,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - The invoice description carries a specified commitment (for example `fiberoffer:<offer_id>:<resolution_id>`), and the payer check in `A2` verifies it.
     - The spec states what constitutes proof of payment (node-signed invoice + preimage) and what a resolver receipt does and does not prove.
   - **Outcome:** The resolver sets every invoice description to `<description> (fiberoffer:<offer_id>:<resolution_id>)` (`packages/sdk/src/invoice-binding.js`); the human part is capped at 200 characters and only a commitment at the very end counts. `verifyInvoiceForOffer()` rejects an invoice for another offer (`INVOICE_OFFER_MISMATCH`), another resolution (`INVOICE_RESOLUTION_MISMATCH`), or with no commitment (`INVOICE_BINDING_MISSING`; opt out with `allowUnboundInvoices` for pre-0.2 resolvers). `docs/spec-v1.md` gains "Proof of payment".
-  - **Open point:** whether Fiber limits the description length is unknown; the commitment adds about 115 characters. To confirm on a live node in `F2`.
+  - **Confirmed live (2026-11-22, Fiber `v0.10.1` testnet):** the node refuses a description over 639 bytes. `formatInvoiceDescription()` now cuts the human part by UTF-8 bytes (at most 300) so the total always fits; a 600-character multi-byte description produced a 421-byte invoice description that verified.
 
 ---
 
@@ -371,7 +371,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 
 > **Goal:** Prove every feature against real, pinned Fiber nodes automatically in CI and publish reproducible evidence.
 
-- [ ] **F1. Build reproducible two-node Fiber devnet/regtest fixture**
+- [~] **F1. Build reproducible two-node Fiber devnet/regtest fixture** — *in progress: `scripts/local-fiber.js` runs a checksum-verified merchant and payer node on testnet without Docker; funded channels and a UDT channel are still to do*
   - **Files:** `docker-compose.fiber-test.yml` (or `infra/fiber-devnet/`), `scripts/`
   - **Acceptance criteria:**
     - Pinned Fiber node image by digest (`nervos/fiber:0.9.0-rc1@sha256:...`) + CKB devnet/test fixture (or scripted two-node local harness) with funded CKB and UDT channels between payer and merchant nodes.
@@ -548,6 +548,8 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | **F-037** | 2026-11-22 | Maintainability | Duplicated logic already diverging: two `FiberRpcClient`s; three recurrence validators (server counts failed cycles, stores do not). | Low | `B3`, `H2` | Open |
 | **F-038** | 2026-11-22 | SDK | Scheduler: `monthly` drifts (`Jan 31 → Mar 3`, *reproduced*); `attempts` grows without bound; fixed idempotency key replays an expired invoice forever. | Low | `A7` | Fixed in the SDK; resolver half in `B2` |
 | **F-039** | 2026-11-22 | Spec / Protocol | An offer signs exactly one `resolver_url`. If that host or domain goes away, every offer pointing at it is unpayable; there is no fallback resolver and no way to pay `node_id` without a resolver. | Medium | `E6`, `D1`, `D-10` | Open |
+| **F-040** | 2026-11-22 | Live validation | The pinned `nervos/fiber:0.9.0-rc1` is a release candidate with no downloadable binary release, and upstream has since shipped `v0.9.0`, `v0.9.1`, `v0.10.0` and `v0.10.1` (2026-11-13). Everything in Phase A was checked against `v0.10.1`; nothing has been checked against the pinned image. | Medium | `F1`, `F6` | Open |
+| **F-041** | 2026-11-22 | Fiber `v0.10.1` | `new_invoice` mints an invoice for a UDT type script that is not on the node's whitelist. The resolver's hash-verified registry (`A4`) is therefore the only thing stopping an invoice for an unsupported token. Informational; no change needed. | Low | `A4` | Noted |
 
 ---
 
@@ -571,3 +573,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `A7` done — Phase A complete | `fix(sdk): count a payment as made only after confirmation` | Fixes `F-014`, `F-038` (SDK half). Suite: 152 tests, 148 pass, 4 skipped. Phase A items A1–A8 are all done; their live-node confirmations are collected under `F2`. |
 | 2026-11-22 | `B4` done | `fix(resolver): identify clients and origins from trusted configuration only` | Branch `fix/trusted-proxy-headers-and-production-startup-guards`. Fixes `F-017`, `F-018`. Suite: 157 tests, 153 pass, 4 skipped. |
 | 2026-11-22 | `G4` partly, `E3` partly | `feat(resolver): refuse to start in production with unsafe settings` | Fixes the startup half of `F-033` and the guard half of `F-009`. Suite: 162 tests, 158 pass, 4 skipped. |
+| 2026-11-22 | `F1` partly; live confirmation of `A2`–`A5`, `A8` | `feat(scripts): run verified local Fiber nodes without needing Docker` | Branch `feat/local-fiber-nodes-for-live-validation-without-docker`. Fiber `v0.10.1` merchant and payer nodes run on this machine (testnet). The resolver and SDK were run against them end to end up to the route check; every Phase A open point was confirmed, and one fix followed (`fix(sdk): keep invoice descriptions within the 639 bytes Fiber accepts`). Logged `F-040`, `F-041`. A real payment still needs a funded channel. |
