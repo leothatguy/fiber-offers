@@ -12,7 +12,7 @@ topology, synchronize settlement, and run payer-owned recurring approvals.
 npm install @fiber-offers/sdk
 ```
 
-Node.js 20 or newer is required for the core cryptographic offer operations.
+Node.js 20.19 or newer is required for the core cryptographic offer operations.
 
 ## Resolver client
 

@@ -29,7 +29,7 @@ network operations.
 npm install @fiber-offers/protocol
 ```
 
-The package is ESM and requires Node.js 20 or newer.
+The package is ESM and requires Node.js 20.19 or newer.
 
 ## Create and encode an offer
 
@@ -143,6 +143,24 @@ UDT and RGB++ assets also require a canonical type-script hash:
   type_script_hash: "0x..."
 }
 ```
+
+`type_script_hash` is the CKB script hash of the token's type script: BLAKE2b-256,
+personalized with `ckb-default-hash`, over the molecule encoding of the script.
+It is the same value CKB tooling reports as a script's hash. Compute it from the
+full script instead of copying it by hand:
+
+```js
+import { ckbScriptHash } from "@fiber-offers/protocol";
+
+const type_script_hash = ckbScriptHash({
+  code_hash: "0x...",
+  hash_type: "type",
+  args: "0x..."
+});
+```
+
+`parseCkbScript()` reads the molecule-encoded script a Fiber invoice carries, so
+a wallet can hash it and compare the result with the offer.
 
 The resolver and Fiber channels must actually support the selected asset. A
 valid asset descriptor alone does not prove route liquidity.

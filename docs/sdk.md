@@ -9,7 +9,7 @@ backends, payer services, wallets, and operational tooling.
 npm install @fiber-offers/sdk
 ```
 
-The core SDK is ESM and requires Node.js 20 or newer. TypeScript declarations
+The core SDK is ESM and requires Node.js 20.19 or newer. TypeScript declarations
 ship with the package; no separate `@types` package is needed.
 
 ## What the SDK connects

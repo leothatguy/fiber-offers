@@ -10,7 +10,7 @@ npm install --global @fiber-offers/cli
 fiber-offers --help
 ```
 
-The CLI requires Node.js 20.12 or newer. It produces JSON on standard output so
+The CLI requires Node.js 20.19 or newer. It produces JSON on standard output so
 commands can be inspected by humans or piped into scripts.
 
 You can also run a pinned version without a global install:

@@ -12,7 +12,7 @@ and asset validation, recurrence policy, and signed revocations.
 npm install @fiber-offers/protocol
 ```
 
-Node.js 20 or newer is required.
+Node.js 20.19 or newer is required.
 
 ## Example
 

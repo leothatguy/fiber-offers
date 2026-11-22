@@ -12,7 +12,7 @@ cryptographically revokes offers.
 npm install --global @fiber-offers/cli
 ```
 
-Node.js 20.12 or newer is required.
+Node.js 20.19 or newer is required.
 
 ## Initialize
 

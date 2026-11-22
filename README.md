@@ -57,7 +57,7 @@ Package documentation is available directly on GitHub:
 
 ## Quick Start
 
-Requires Node.js 20 or newer. Start the interface in explicit mock mode when
+Requires Node.js 20.19 or newer. Start the interface in explicit mock mode when
 evaluating the repository without a Fiber node:
 
 ```bash

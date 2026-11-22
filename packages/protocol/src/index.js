@@ -6,6 +6,10 @@ import {
   sign as cryptoSign,
   verify as cryptoVerify
 } from "node:crypto";
+import { FiberOfferError } from "./errors.js";
+
+export { FiberOfferError };
+export { ckbHash, ckbScriptHash, normalizeCkbScript, parseCkbScript, serializeCkbScript } from "./ckb-script.js";
 
 export const OFFER_PREFIX = "fbroffer1";
 export const OFFER_SCHEME = "fiberoffer-v1";
@@ -15,15 +19,6 @@ export const SUPPORTED_ASSET_TYPES = new Set(["ckb", "udt", "rgbpp"]);
 export const SUPPORTED_NETWORKS = new Set(["mainnet", "testnet", "dev"]);
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const bech32mConstant = 0x2bc830a3;
-
-export class FiberOfferError extends Error {
-  constructor(message, code = "FIBER_OFFER_ERROR", details = undefined) {
-    super(message);
-    this.name = "FiberOfferError";
-    this.code = code;
-    this.details = details;
-  }
-}
 
 export function generateOfferKeyPair() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");

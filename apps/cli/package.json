@@ -14,7 +14,7 @@
     "@fiber-offers/sdk": "0.1.0"
   },
   "engines": {
-    "node": ">=20.12"
+    "node": ">=20.19.0"
   },
   "repository": {
     "type": "git",

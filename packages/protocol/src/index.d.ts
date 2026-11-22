@@ -22,8 +22,29 @@ export class FiberOfferError extends Error {
 export interface FiberAsset {
   asset_type: FiberAssetType;
   symbol: string;
+  /** `ckbScriptHash()` of the token's CKB type script. Required for `udt` and `rgbpp`. */
   type_script_hash?: string;
 }
+
+export type CkbScriptHashType = "data" | "type" | "data1" | "data2";
+
+/** A CKB script. Hex fields are 0x-prefixed. */
+export interface CkbScript {
+  code_hash: string;
+  hash_type: CkbScriptHashType;
+  args: string;
+}
+
+/** blake2b-256 with CKB's `ckb-default-hash` personalization. */
+export function ckbHash(bytes: Uint8Array): Uint8Array;
+/** Canonical form (lowercase hex). Throws `FiberOfferError` with code `INVALID_CKB_SCRIPT`. */
+export function normalizeCkbScript(script: CkbScript): CkbScript;
+/** Molecule encoding of the script. */
+export function serializeCkbScript(script: CkbScript): Uint8Array;
+/** Reads a molecule-encoded script from bytes or 0x-prefixed hex. */
+export function parseCkbScript(encoded: Uint8Array | string): CkbScript;
+/** The `type_script_hash` an offer carries for this script. */
+export function ckbScriptHash(script: CkbScript): string;
 
 export interface FiberOfferRecurrence {
   interval: "daily" | "weekly" | "monthly" | "custom_seconds";
