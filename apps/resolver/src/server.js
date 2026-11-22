@@ -2384,6 +2384,10 @@ function statusForError(error) {
     if (["AMOUNT_TOO_LOW", "AMOUNT_TOO_HIGH", "AMOUNT_MUST_MATCH_FIXED_AMOUNT", "UNSUPPORTED_ASSET", "OFFER_EXPIRED"].includes(error.code)) {
       return 422;
     }
+    // The request conflicts with the offer's recurrence terms as they stand.
+    if (["RECURRENCE_CYCLE_CAP_REACHED", "RECURRENCE_SPENDING_CAP_REACHED", "INVALID_RECURRENCE_CYCLE"].includes(error.code)) {
+      return 409;
+    }
     return 400;
   }
 

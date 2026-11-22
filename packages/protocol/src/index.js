@@ -15,6 +15,7 @@ export const OFFER_PREFIX = "fbroffer1";
 export const OFFER_SCHEME = "fiberoffer-v1";
 export const OFFER_HRP = "fbroffer";
 export const REVOCATION_SCHEME = "fiberoffer-revocation-v1";
+export const RECURRENCE_REQUEST_SCHEME = "fiberoffer-recurrence-v1";
 export const SUPPORTED_ASSET_TYPES = new Set(["ckb", "udt", "rgbpp"]);
 export const SUPPORTED_NETWORKS = new Set(["mainnet", "testnet", "dev"]);
 const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -310,10 +311,165 @@ export function validateResolutionRequest(offer, request) {
     throw new FiberOfferError("offer has expired", "OFFER_EXPIRED");
   }
 
+  assertRecurrenceTerms(offer, { ...request, amount });
+
   return {
     amount,
     asset: normalizeAsset(asset)
   };
+}
+
+// The recurrence checks that need no history: they hold or fail on the signed
+// terms alone, so a wallet can run them before contacting anyone. How many
+// cycles a subscription has already paid is the resolver's to track.
+function assertRecurrenceTerms(offer, request) {
+  const terms = offer.recurrence;
+  const cycle = request?.recurrence_cycle;
+  if (!terms) {
+    if (cycle !== undefined && cycle !== null) {
+      throw new FiberOfferError("offer does not define recurring payment terms", "RECURRENCE_NOT_CONFIGURED");
+    }
+    return;
+  }
+
+  if (BigInt(request.amount) !== BigInt(terms.amount)) {
+    throw new FiberOfferError(`recurring cycle amount must equal ${terms.amount}`, "RECURRENCE_AMOUNT_MISMATCH");
+  }
+  if (cycle === undefined || cycle === null) return;
+  if (!Number.isSafeInteger(cycle) || cycle < 1) {
+    throw new FiberOfferError("recurrence_cycle must be a positive integer", "INVALID_RECURRENCE_CYCLE");
+  }
+  if (terms.cap_cycles !== undefined && cycle > terms.cap_cycles) {
+    throw new FiberOfferError("recurring payment cycle cap has been reached", "RECURRENCE_CYCLE_CAP_REACHED");
+  }
+  if (
+    terms.spending_cap_total !== undefined &&
+    BigInt(cycle) * BigInt(terms.amount) > BigInt(terms.spending_cap_total)
+  ) {
+    throw new FiberOfferError("recurring payment spending cap has been reached", "RECURRENCE_SPENDING_CAP_REACHED");
+  }
+}
+
+// --- Recurring subscriptions -------------------------------------------------
+//
+// A recurring offer can be subscribed to by any number of payers. Each
+// subscription is identified by a key the payer generates: its ID is derived
+// from the public key, and every cycle request is signed with the private key.
+// Cycle numbers and caps are then counted per subscription, and nobody but the
+// payer can advance or exhaust it.
+
+// The subscription's identifier: a hash of the subscriber's public key, so an
+// ID cannot be claimed by anyone who does not hold the matching private key.
+export function subscriptionId(publicKeyPem) {
+  const der = ed25519PublicKey(publicKeyPem, "subscriber_public_key").export({ type: "spki", format: "der" });
+  return `sub_${createHash("sha256").update(der).digest("hex").slice(0, 40)}`;
+}
+
+// Adds the subscription proof to a cycle request: `approval_id`,
+// `subscriber_public_key` and `subscriber_signature`. Send the result as the
+// invoice request.
+export function signRecurrenceRequest(offer, request, subscriberPrivateKeyPem) {
+  assertValidOffer(offer, { requireSignature: true });
+  const privateKey = createPrivateKey(subscriberPrivateKeyPem);
+  if (privateKey.asymmetricKeyType !== "ed25519") {
+    throw new FiberOfferError("subscriber key must be an Ed25519 key", "INVALID_KEY_TYPE");
+  }
+  const publicKeyPem = createPublicKey(privateKey).export({ type: "spki", format: "pem" });
+  const validated = validateResolutionRequest(offer, request);
+  const fields = {
+    amount: validated.amount,
+    asset: validated.asset,
+    recurrence_cycle: request.recurrence_cycle,
+    ...(request.scheduled_for !== undefined ? { scheduled_for: request.scheduled_for } : {}),
+    approval_id: subscriptionId(publicKeyPem)
+  };
+  if (!Number.isSafeInteger(fields.recurrence_cycle)) {
+    throw new FiberOfferError("recurrence_cycle is required on a recurring cycle request", "INVALID_RECURRENCE_CYCLE");
+  }
+  const signature = cryptoSign(null, recurrenceSigningPayload(offer, fields), privateKey);
+  return {
+    ...request,
+    ...fields,
+    subscriber_public_key: publicKeyPem,
+    subscriber_signature: base64UrlEncode(signature)
+  };
+}
+
+// Checks the subscription proof on a cycle request. Returns { ok: true } or
+// { ok: false, code, message }. It does not check payment history.
+export function verifyRecurrenceRequest(offer, request) {
+  assertValidOffer(offer, { requireSignature: true });
+  if (!offer.recurrence) {
+    return { ok: false, code: "RECURRENCE_NOT_CONFIGURED", message: "offer does not define recurring payment terms" };
+  }
+  const missing = ["approval_id", "subscriber_public_key", "subscriber_signature", "recurrence_cycle"].find(
+    (field) => request?.[field] === undefined || request?.[field] === null || request?.[field] === ""
+  );
+  if (missing) {
+    return {
+      ok: false,
+      code: "SUBSCRIPTION_PROOF_REQUIRED",
+      message: `a recurring cycle request must carry ${missing}`
+    };
+  }
+
+  try {
+    const validated = validateResolutionRequest(offer, request);
+    const publicKey = ed25519PublicKey(request.subscriber_public_key, "subscriber_public_key");
+    if (subscriptionId(request.subscriber_public_key) !== request.approval_id) {
+      return {
+        ok: false,
+        code: "SUBSCRIPTION_KEY_MISMATCH",
+        message: "approval_id does not belong to subscriber_public_key"
+      };
+    }
+    const payload = recurrenceSigningPayload(offer, {
+      amount: validated.amount,
+      asset: validated.asset,
+      recurrence_cycle: request.recurrence_cycle,
+      ...(request.scheduled_for !== undefined ? { scheduled_for: request.scheduled_for } : {}),
+      approval_id: request.approval_id
+    });
+    const valid =
+      typeof request.subscriber_signature === "string" &&
+      cryptoVerify(null, payload, publicKey, base64UrlDecode(request.subscriber_signature));
+    return valid
+      ? { ok: true }
+      : { ok: false, code: "INVALID_SUBSCRIPTION_SIGNATURE", message: "subscriber signature is invalid" };
+  } catch (error) {
+    if (error instanceof FiberOfferError) return { ok: false, code: error.code, message: error.message };
+    return { ok: false, code: "INVALID_SUBSCRIPTION_SIGNATURE", message: error.message };
+  }
+}
+
+// Everything the subscriber commits to for one cycle. Binding the offer ID
+// means a signature cannot be replayed against another offer.
+function recurrenceSigningPayload(offer, fields) {
+  return Buffer.from(
+    canonicalStringify({
+      scheme: RECURRENCE_REQUEST_SCHEME,
+      offer_id: offer.offer_id,
+      approval_id: fields.approval_id,
+      recurrence_cycle: fields.recurrence_cycle,
+      amount: fields.amount,
+      asset: fields.asset,
+      scheduled_for: fields.scheduled_for
+    })
+  );
+}
+
+function ed25519PublicKey(publicKeyPem, field) {
+  let key;
+  try {
+    key = createPublicKey(requiredString(publicKeyPem, field));
+  } catch (error) {
+    if (error instanceof FiberOfferError) throw error;
+    throw new FiberOfferError(`${field} is not a valid public key`, "INVALID_PUBLIC_KEY");
+  }
+  if (key.asymmetricKeyType !== "ed25519") {
+    throw new FiberOfferError(`${field} must be an Ed25519 key`, "INVALID_KEY_TYPE");
+  }
+  return key;
 }
 
 export function offerToPaymentLink(offer, baseUrl = offer.resolver_url) {

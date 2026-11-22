@@ -136,8 +136,34 @@ export interface OfferRevocation {
 export interface ResolutionRequestInput {
   amount: IntegerLike;
   asset?: FiberAsset;
+  /** On a recurring offer: which cycle of the subscription this request is for. */
+  recurrence_cycle?: number;
+  scheduled_for?: string;
   [key: string]: unknown;
 }
+
+/** A recurring cycle request carrying its subscription proof. */
+export interface SignedRecurrenceRequest extends ResolutionRequestInput {
+  amount: string;
+  asset: FiberAsset;
+  recurrence_cycle: number;
+  /** `subscriptionId(subscriber_public_key)`. */
+  approval_id: string;
+  subscriber_public_key: string;
+  subscriber_signature: string;
+}
+
+export const RECURRENCE_REQUEST_SCHEME: "fiberoffer-recurrence-v1";
+/** The subscription ID for a subscriber's Ed25519 public key (`sub_` + 40 hex). */
+export function subscriptionId(publicKeyPem: string): string;
+/** Adds `approval_id`, `subscriber_public_key` and `subscriber_signature` to a cycle request. */
+export function signRecurrenceRequest(
+  offer: SignedFiberOffer,
+  request: ResolutionRequestInput & { recurrence_cycle: number },
+  subscriberPrivateKeyPem: string
+): SignedRecurrenceRequest;
+/** Checks the subscription proof on a cycle request. Payment history is the resolver's to check. */
+export function verifyRecurrenceRequest(offer: SignedFiberOffer, request: ResolutionRequestInput): OfferVerificationResult;
 
 export interface ValidatedResolutionRequest {
   amount: string;
