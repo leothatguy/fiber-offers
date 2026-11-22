@@ -188,6 +188,51 @@ test("mints token invoices with the token's type script and refuses unconfigured
   );
 });
 
+test("live invoices carry an expiry and read as expired once it has passed", async () => {
+  const nodeId = "02" + "8".repeat(64);
+  const requests = [];
+  let clock = () => Date.now();
+  const invoiceAdapter = new FiberRpcInvoiceAdapter({
+    invoiceTtlSeconds: 60,
+    now: () => clock(),
+    client: {
+      async call(method, params) {
+        if (method === "node_info") return { pubkey: nodeId };
+        requests.push(params[0]);
+        return {
+          invoice_address: `fibt1expiring${requests.length}`,
+          invoice: { data: { payment_hash: "0x" + String(requests.length).padStart(64, "0") } }
+        };
+      }
+    }
+  });
+
+  await withServer(
+    async (baseUrl) => {
+      const created = await postJson(`${baseUrl}/demo/offers`, { amount: "1000" });
+      const invoiceUrl = `${baseUrl}/offers/${created.body.offer_id}/invoice`;
+      const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+
+      const fresh = await postJson(invoiceUrl, request);
+      // Issue a second invoice as if an hour ago, so its minute has run out.
+      clock = () => Date.now() - 3600_000;
+      const stale = await postJson(invoiceUrl, request);
+      const resolutionUrl = (invoice) => `${baseUrl}/offers/${created.body.offer_id}/resolutions/${invoice.body.resolution_id}`;
+      const freshRead = await getJson(resolutionUrl(fresh));
+      const staleRead = await getJson(resolutionUrl(stale));
+
+      assert.deepEqual(requests.map((params) => params.expiry), ["0x3c", "0x3c"]);
+      assert.ok(Date.parse(fresh.body.expires_at) > Date.now());
+      assert.ok(Date.parse(fresh.body.expires_at) <= Date.now() + 60_000);
+      assert.equal(freshRead.body.status, "invoice_created");
+      assert.ok(Date.parse(stale.body.expires_at) < Date.now());
+      assert.equal(staleRead.body.status, "invoice_expired");
+      assert.equal(staleRead.body.expired_at, stale.body.expires_at);
+    },
+    { invoiceAdapter }
+  );
+});
+
 test("mints invoices in the currency of the node's network and refuses offers for another", async () => {
   const nodeId = "02" + "9".repeat(64);
   const mainnetGenesis = "0x92b197aa1fba0f63633922c61c92375c9c074a93e85963554f5499fe1450d0e5";

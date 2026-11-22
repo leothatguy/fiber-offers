@@ -163,7 +163,7 @@ FIBER_RPC_PASSWORD=secret \
 npm run dev
 ```
 
-The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node.
+The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node. `FIBER_INVOICE_TTL_SECONDS` (default `900`) is how long each issued invoice stays payable.
 
 ### Token (UDT and RGB++) offers
 

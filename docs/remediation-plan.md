@@ -25,7 +25,7 @@ This plan addresses three review critiques raised against v0.1.0, validated dire
 - **Dropped:** *"Bech32m checksum is completely ineffective."* — Precision: beyond 1,023 symbols the BCH distance guarantees break down (2-char errors spaced exactly 1,023 apart pass 100% of the time), while random 2-char errors are still detected.
 - **Dropped:** *"Empty `udt_whitelist` alone proves tokens were never tested."* — The definitive proof is the invalid RPC payload in `assetToFiberCurrency` (`apps/resolver/src/fiber-rpc.js`) and the broken mock assertion in `apps/resolver/test/resolver.test.js`.
 - **Dropped:** *"Fixing token invoices requires breaking v1."* — A v1-compatible resolver asset registry mapping `type_script_hash` to `{ code_hash, hash_type, args }` can fix UDT/RGB++ invoices without breaking v1 offers; embedding the full script in the offer is only needed if we cut a breaking v2 format.
-- **Refined (pending decision D-1):** *"The `get_invoice` sync path can still record `Expired` when Fiber reports it."* — At `v0.9.0-rc1`, Fiber only attaches an expiry when `expiry` is passed to `new_invoice`, and `is_expired()` is false without one; because the adapter never passes `expiry`, live invoices currently never transition to `Expired`.
+- **Refined (D-1, decided: reword):** *"The `get_invoice` sync path can still record `Expired` when Fiber reports it."* — At `v0.9.0-rc1`, Fiber only attaches an expiry when `expiry` is passed to `new_invoice`, and `is_expired()` is false without one. At baseline `730f113` the adapter never passed `expiry`, so live invoices never became `Expired`. `A5` changed that on 2026-11-22: every invoice is now requested with an expiry.
 
 ### Second Audit Pass (2026-11-22) — What Phases A–F Did Not Cover
 
@@ -119,13 +119,14 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - *(audit #2, `F-012`)* CLI `create` also gains recurrence flags (`--recurrence-interval`, `--recurrence-amount`, `--cap-cycles`, `--spending-cap-total`, `--custom-seconds`); recurring offers cannot be created from the CLI today.
   - **Outcome:** `@fiber-offers/protocol` computes CKB script hashes (`ckbScriptHash()`, `parseCkbScript()`), checked against three mainnet system scripts. The resolver keeps a registry (`apps/resolver/src/asset-registry.js`) fed by `FIBER_UDT_SCRIPTS`, `FIBER_UDT_SCRIPTS_FILE` and the exact scripts in `node_info.udt_cfg_infos`; every entry is verified by hash at load, and a bad entry stops startup. `new_invoice` now sends the network currency plus `udt_type_script`. A token with no script is refused with `422 ASSET_SCRIPT_NOT_CONFIGURED` at registration, in `/check` (`asset_source`) and at invoice time. The CLI accepts `--type-script-hash` or `--type-script` (which it hashes) and the recurrence flags.
 
-- [ ] **A5. Pass `expiry` to Fiber RPC and populate `expires_at` on live invoices**
+- [x] **A5. Pass `expiry` to Fiber RPC and populate `expires_at` on live invoices** — *done 2026-11-22; the node's `Expired` report still needs a live node to observe (`F2`)*
   - **Problem:** `FiberRpcInvoiceAdapter.createInvoice()` never passes `expiry` to `new_invoice` and never sets `expires_at`. Live invoices never expire on Fiber `v0.9.0-rc1` and resolver expiry-on-read only works in mock mode.
   - **Files:** `apps/resolver/src/invoice-adapter.js`, `apps/resolver/src/server.js`, `apps/resolver/test/invoice-adapter.test.js`, `apps/resolver/test/resolver.test.js`
   - **Acceptance criteria:**
     - Configurable invoice TTL (`FIBER_INVOICE_TTL_SECONDS`, default e.g. `900`) passed as hex `expiry` in `new_invoice` params (clamped to `offer.expiry` if sooner).
     - `FiberRpcInvoiceAdapter.createInvoice()` derives and returns `expires_at` from the invoice response timestamp + expiry (or computed fallback) so read-time expiry and Fiber `get_invoice` `Expired` status both work.
     - Tests verify `expiry` param encoding, offer-expiry clamping, and `expires_at` population.
+  - **Outcome:** Both adapters take `FIBER_INVOICE_TTL_SECONDS` (default 900, validated at startup). `new_invoice` is sent `expiry` as a hex number of seconds, cut short so an invoice never outlives its offer. `expires_at` comes from the node's invoice timestamp when it agrees with the local clock within five minutes, otherwise from the local clock read before the call. Read-time expiry now works in live mode.
 
 - [x] **A6. Classify adapter & RPC errors accurately instead of blanket `503 RECIPIENT_UNAVAILABLE`** — *done 2026-11-22*
   - **Problem:** `resolveInvoice()` catches every adapter error and returns `503 RECIPIENT_UNAVAILABLE` ("try again"), masking permanent failures like currency mismatch, unknown UDT script, invalid params, or RPC method errors.
@@ -501,7 +502,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | --- | --- | --- | --- | --- | --- | --- |
 | **F-001** | 2026-11-22 | CLI | `apps/cli/src/index.js` accepts `--asset-type` (`udt`/`rgbpp`) without a `--type-script-hash` option, so non-CKB offer creation always fails validation. | Medium | `A4` | Fixed |
 | **F-002** | 2026-11-22 | SDK | `FiberOffersClient.getOffer()` and `resolveFiberAddress()` skip `verifyOffer()` on resolver responses (not just `resolveOffer()`). | High | `A2` | Open |
-| **F-003** | 2026-11-22 | Adapter / Fiber `v0.9.0-rc1` | `FiberRpcInvoiceAdapter` omits `expiry` in `new_invoice` and omits `expires_at` in its return value; Fiber `v0.9.0-rc1` never marks invoices without `expiry` as `Expired`, so expiry only works in mock mode. | High | `A5` | Open |
+| **F-003** | 2026-11-22 | Adapter / Fiber `v0.9.0-rc1` | `FiberRpcInvoiceAdapter` omits `expiry` in `new_invoice` and omits `expires_at` in its return value; Fiber `v0.9.0-rc1` never marks invoices without `expiry` as `Expired`, so expiry only works in mock mode. | High | `A5` | Fixed |
 | **F-004** | 2026-11-22 | Protocol | `canonicalize()` silently drops `"__proto__"` from signed bytes and reorders integer-like object keys numerically instead of lexicographically. | High | `C1` | Open |
 | **F-005** | 2026-11-22 | Protocol | `verifyOffer()` accepts RSA-2048, P-256, and Ed448 keys under `signature.scheme: "ed25519"`. | High | `C2` | Open |
 | **F-006** | 2026-11-22 | Resolver | Anonymous callers can permanently exhaust single-use offers (even when unpaid invoices expire) and drain all cycles/caps on recurring offers. | High | `B1`, `B2` | Open |
@@ -555,3 +556,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-22 | `A3` done | `fix(resolver): mint invoices in the currency of the offer network` | Mainnet and devnet invoices were impossible (`Fibt` was hardcoded). Network checked against the node. Suite: 129 tests, 125 pass, 4 skipped. |
 | 2026-11-22 | `A4` step 1 | `feat(protocol): compute CKB script hashes for token asset verification` | Adds `ckbScriptHash()` / `parseCkbScript()`, verified against three mainnet system script hashes. New dependency `@noble/hashes` (first step of `E2`); minimum Node is now 20.19. Suite: 132 tests, 128 pass, 4 skipped. |
 | 2026-11-22 | `A4` done | `feat(resolver): mint token invoices from a hash-verified script registry` | Fixes `F-001`, `F-012`. Token invoices were never valid Fiber requests before. Suite: 134 tests, 130 pass, 4 skipped. |
+| 2026-11-22 | `A5` done | `fix(resolver): issue invoices that expire and record when` | Fixes `F-003`. Suite: 137 tests, 133 pass, 4 skipped. |

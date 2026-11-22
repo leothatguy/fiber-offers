@@ -199,13 +199,86 @@ test("Fiber RPC adapter creates invoices using Fiber JSON-RPC shape", async () =
       {
         amount: "0x5f5e100",
         currency: "Fibt",
-        description: "test invoice"
+        description: "test invoice",
+        // The default 15-minute invoice lifetime, in seconds.
+        expiry: "0x384"
       }
     ]
   });
   assert.equal(invoice.invoice, "fibt1000000001example");
   assert.equal(invoice.payment_hash, "0xabc123");
   assert.equal(invoice.mocked, false);
+});
+
+test("Fiber RPC adapter asks for an expiring invoice and records when it expires", async () => {
+  const now = Date.parse("2026-01-01T00:00:00.000Z");
+  const requests = [];
+  let nodeTimestamp;
+  const adapter = new FiberRpcInvoiceAdapter({
+    invoiceTtlSeconds: 600,
+    now: () => now,
+    client: {
+      async call(_method, params) {
+        requests.push(params[0]);
+        return {
+          invoice_address: "fibt1example",
+          invoice: { data: { payment_hash: "0xabc", ...(nodeTimestamp ? { timestamp: nodeTimestamp } : {}) } }
+        };
+      }
+    }
+  });
+  const create = (offer = {}) =>
+    adapter.createInvoice({
+      offer: { offer_id: "0xoffer", network: "testnet", ...offer },
+      amount: "1000",
+      asset: { asset_type: "ckb", symbol: "CKB" }
+    });
+  const iso = (ms) => new Date(ms).toISOString();
+
+  const local = await create();
+  // The node stamps the invoice two seconds later; its clock is authoritative.
+  nodeTimestamp = `0x${(now + 2000).toString(16)}`;
+  const stamped = await create();
+  // A node clock an hour off is not trusted for the resolver's own bookkeeping.
+  nodeTimestamp = `0x${(now + 3600_000).toString(16)}`;
+  const skewed = await create();
+  nodeTimestamp = undefined;
+  // An invoice never outlives the offer it was issued for.
+  const clamped = await create({ expiry: now / 1000 + 120 });
+  const longLived = await create({ expiry: now / 1000 + 86400 });
+
+  assert.deepEqual(
+    requests.map((request) => request.expiry),
+    ["0x258", "0x258", "0x258", "0x78", "0x258"]
+  );
+  assert.deepEqual([local.expiry_seconds, local.expires_at], [600, iso(now + 600_000)]);
+  assert.equal(stamped.expires_at, iso(now + 2000 + 600_000));
+  assert.equal(skewed.expires_at, iso(now + 600_000));
+  assert.deepEqual([clamped.expiry_seconds, clamped.expires_at], [120, iso(now + 120_000)]);
+  assert.equal(longLived.expiry_seconds, 600);
+});
+
+test("invoice lifetime is configurable and validated at startup", async () => {
+  const now = Date.parse("2026-01-01T00:00:00.000Z");
+  const live = createInvoiceAdapter({ FIBER_RPC_URL: "http://127.0.0.1:8227", FIBER_INVOICE_TTL_SECONDS: "120" });
+  const byDefault = createInvoiceAdapter({ FIBER_RPC_URL: "http://127.0.0.1:8227" });
+  const mock = createInvoiceAdapter({ FIBER_INVOICE_MODE: "mock", FIBER_INVOICE_TTL_SECONDS: "60" });
+  const mockInvoice = await new MockInvoiceAdapter({ invoiceTtlSeconds: 600, now: () => now }).createInvoice({
+    offer: { offer_id: "0x" + "a".repeat(64), expiry: now / 1000 + 30 },
+    amount: "1000",
+    asset: { asset_type: "ckb", symbol: "CKB" }
+  });
+
+  assert.equal(live.invoiceTtlSeconds, 120);
+  assert.equal(byDefault.invoiceTtlSeconds, 900);
+  assert.equal(mock.invoiceTtlSeconds, 60);
+  assert.equal(mockInvoice.expires_at, new Date(now + 30_000).toISOString());
+  for (const invalid of ["0", "-5", "1.5", "soon"]) {
+    assert.throws(
+      () => createInvoiceAdapter({ FIBER_RPC_URL: "http://127.0.0.1:8227", FIBER_INVOICE_TTL_SECONDS: invalid }),
+      (error) => error.code === "INVALID_INVOICE_TTL" && /FIBER_INVOICE_TTL_SECONDS/.test(error.message)
+    );
+  }
 });
 
 test("Fiber RPC adapter uses the currency of the offer's network", async () => {

@@ -287,6 +287,8 @@ Response:
 
 Terminal statuses cannot be changed to a different terminal status. Read views also report an unpaid invoice as `invoice_expired` after its expiry time.
 
+Every invoice has an expiry. The resolver asks the node for an invoice that lasts `FIBER_INVOICE_TTL_SECONDS` (default 900), shortened so it never outlives the offer's own `expiry`, and returns the moment it lapses as `expires_at`. The node enforces the expiry: it stops accepting payment and reports the invoice as `Expired`, which sync records as `invoice_expired`.
+
 ## Receipts And Reconciliation
 
 Merchants can fetch receipt-style records for individual invoice attempts:

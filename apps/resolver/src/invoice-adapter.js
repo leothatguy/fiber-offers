@@ -10,25 +10,31 @@ import {
 import { FiberRpcClient, toHexQuantity } from "./fiber-rpc.js";
 import { invoiceRequestError } from "./invoice-errors.js";
 
+export const DEFAULT_INVOICE_TTL_SECONDS = 900;
+
 export class MockInvoiceAdapter {
   constructor(options = {}) {
     this.mode = "mock";
-    this.invoiceTtlSeconds = options.invoiceTtlSeconds ?? 900;
+    this.invoiceTtlSeconds = normalizeInvoiceTtl(options.invoiceTtlSeconds);
     this.nodeId = options.nodeId;
     this.network = options.network;
+    this.now = options.now ?? Date.now;
   }
 
   async createInvoice({ offer, amount, asset }) {
     const preimage = randomBytes(32);
     const paymentHash = createHash("sha256").update(preimage).digest("hex");
     const nonce = base64UrlEncode(randomBytes(18));
+    const issuedAt = this.now();
+    const expirySeconds = invoiceExpirySeconds(offer, this.invoiceTtlSeconds, issuedAt);
 
     return {
       mode: this.mode,
       invoice: `fibermock_${offer.offer_id.slice(2, 10)}_${asset.symbol.toLowerCase()}_${amount}_${nonce}`,
       payment_request: `fibermock_${offer.offer_id.slice(2, 10)}_${asset.symbol.toLowerCase()}_${amount}_${nonce}`,
       payment_hash: `0x${paymentHash}`,
-      expires_at: new Date(Date.now() + this.invoiceTtlSeconds * 1000).toISOString(),
+      expiry_seconds: expirySeconds,
+      expires_at: new Date(issuedAt + expirySeconds * 1000).toISOString(),
       mocked: true
     };
   }
@@ -74,13 +80,23 @@ export class FiberRpcInvoiceAdapter {
     // Token type scripts supplied by the operator, keyed by type_script_hash.
     this.udtScripts =
       options.udtScripts instanceof Map ? options.udtScripts : parseConfiguredUdtScripts(options.udtScripts);
+    // How long an issued invoice stays payable.
+    this.invoiceTtlSeconds = normalizeInvoiceTtl(options.invoiceTtlSeconds);
+    this.now = options.now ?? Date.now;
   }
 
   async createInvoice({ offer, amount, asset }) {
+    // Read the clock before asking the node, so the expiry recorded here is
+    // never later than the node's own.
+    const issuedAt = this.now();
+    const expirySeconds = invoiceExpirySeconds(offer, this.invoiceTtlSeconds, issuedAt);
     const params = {
       amount: toHexQuantity(amount),
       currency: invoiceCurrency(offer),
-      description: offer.description ?? offer.offer_id
+      description: offer.description ?? offer.offer_id,
+      // Without an expiry a Fiber invoice stays payable forever and is never
+      // reported as Expired.
+      expiry: toHexQuantity(expirySeconds)
     };
     if (asset.asset_type !== "ckb") {
       // A token invoice uses the same currency code and names the token by its
@@ -99,6 +115,8 @@ export class FiberRpcInvoiceAdapter {
       invoice,
       payment_request: invoice,
       payment_hash: paymentHash,
+      expiry_seconds: expirySeconds,
+      expires_at: invoiceExpiresAt(result, expirySeconds, issuedAt),
       rpc_method: this.method,
       rpc_params: params,
       raw_result: result,
@@ -224,7 +242,8 @@ export class FiberRpcInvoiceAdapter {
 
 export function createInvoiceAdapter(env = process.env, options = {}) {
   const configuredMode = String(env.FIBER_INVOICE_MODE ?? "fiber-rpc").trim().toLowerCase();
-  if (configuredMode === "mock") return new MockInvoiceAdapter();
+  const invoiceTtlSeconds = configuredInvoiceTtl(env.FIBER_INVOICE_TTL_SECONDS);
+  if (configuredMode === "mock") return new MockInvoiceAdapter({ invoiceTtlSeconds });
   if (configuredMode !== "fiber-rpc") {
     const error = new Error("FIBER_INVOICE_MODE must be fiber-rpc or mock");
     error.code = "INVALID_FIBER_INVOICE_MODE";
@@ -242,6 +261,7 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
       probeMethod: env.FIBER_RPC_PROBE_METHOD ?? "node_info",
       network: env.FIBER_NETWORK,
       udtScripts: loadUdtScriptsFromEnv(env),
+      invoiceTtlSeconds,
       timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
       fetchImpl: options.fetchImpl
     });
@@ -250,6 +270,60 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
   const error = new Error("FIBER_RPC_URL or MERCHANT_FIBER_RPC_URL is required in live Fiber RPC mode");
   error.code = "FIBER_RPC_URL_REQUIRED";
   throw error;
+}
+
+// Seconds an invoice for this offer may stay payable: the configured lifetime,
+// cut short so the invoice never outlives the offer's own expiry.
+function invoiceExpirySeconds(offer, ttlSeconds, nowMs) {
+  if (offer.expiry === undefined || offer.expiry === null) return ttlSeconds;
+  const untilOfferExpiry = Math.floor(Number(offer.expiry) - nowMs / 1000);
+  return Math.max(1, Math.min(ttlSeconds, untilOfferExpiry));
+}
+
+// When the invoice expires. The node stamps the invoice with its own clock
+// (`invoice.data.timestamp`, milliseconds); that is used when it is present and
+// agrees with this machine's clock, so the resolver and the node expire the
+// invoice at the same moment. Otherwise it is computed locally.
+function invoiceExpiresAt(result, expirySeconds, issuedAtMs) {
+  const local = issuedAtMs + expirySeconds * 1000;
+  const stamped = quantityToNumber(result?.invoice?.data?.timestamp);
+  const maxClockSkewMs = 5 * 60 * 1000;
+  const fromNode =
+    stamped !== undefined && Math.abs(stamped - issuedAtMs) <= maxClockSkewMs
+      ? stamped + expirySeconds * 1000
+      : undefined;
+  return new Date(fromNode ?? local).toISOString();
+}
+
+function quantityToNumber(value) {
+  if (typeof value === "number") return Number.isSafeInteger(value) ? value : undefined;
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  try {
+    const parsed = Number(BigInt(value));
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeInvoiceTtl(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_INVOICE_TTL_SECONDS;
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds) || seconds < 1) {
+    const error = new Error("invoice lifetime must be a whole number of seconds, at least 1");
+    error.code = "INVALID_INVOICE_TTL";
+    throw error;
+  }
+  return seconds;
+}
+
+function configuredInvoiceTtl(value) {
+  try {
+    return normalizeInvoiceTtl(typeof value === "string" ? value.trim() : value);
+  } catch (error) {
+    error.message = `FIBER_INVOICE_TTL_SECONDS is invalid: ${error.message}`;
+    throw error;
+  }
 }
 
 // The currency code is fixed by the offer's signed network, for every asset.
