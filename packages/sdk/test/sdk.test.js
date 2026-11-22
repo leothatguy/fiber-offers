@@ -308,12 +308,21 @@ test("an invoice must name the offer it was issued for", () => {
   });
   assert.equal(parseInvoiceBinding("Coffee checkout"), undefined);
   assert.equal(parseInvoiceBinding(undefined), undefined);
-  // A very long description is shortened, never the commitment.
-  assert.equal(
-    parseInvoiceBinding(formatInvoiceDescription({ offer_id: offer.offer_id, description: "x".repeat(5000) }, "res_1"))
-      .offer_id,
-    offer.offer_id
-  );
+  // A very long description is shortened, never the commitment, and the whole
+  // thing stays within the 639 bytes a Fiber node accepts, even for text whose
+  // characters take several bytes each.
+  for (const description of ["x".repeat(5000), "咖啡☕".repeat(2000)]) {
+    const long = formatInvoiceDescription(
+      { offer_id: offer.offer_id, description },
+      "res_3f03c052-8d64-467a-a45b-fbb21c745a66"
+    );
+    assert.ok(Buffer.byteLength(long) <= 639);
+    assert.equal(long.includes("�"), false);
+    assert.deepEqual(parseInvoiceBinding(long), {
+      offer_id: offer.offer_id,
+      resolution_id: "res_3f03c052-8d64-467a-a45b-fbb21c745a66"
+    });
+  }
 
   assert.equal(verify(bound, { expectedResolutionId: "res_abc-123" }).ok, true);
   assert.equal(verify(bound, { expectedResolutionId: "res_other" }).failure.code, "INVOICE_RESOLUTION_MISMATCH");
