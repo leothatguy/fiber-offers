@@ -266,6 +266,51 @@ export class PostgresOfferStore {
     return result.rows[0] ? resolutionRow(result.rows[0]) : undefined;
   }
 
+  // An offer's invoices that still await an outcome, optionally those of one
+  // subscription only.
+  async getOpenResolutions(offerId, options = {}) {
+    const result = await this.pool.query(
+      `SELECT * FROM fiber_resolutions
+       WHERE offer_id = $1
+         AND status IN ('invoice_created', 'invoice_received')
+         AND ($2::text IS NULL OR recurrence ->> 'approval_id' = $2)
+       ORDER BY created_at`,
+      [offerId, options.approvalId ?? null]
+    );
+    return result.rows.map(resolutionRow);
+  }
+
+  // Up to `limit` invoices that await an outcome, across all offers, the one
+  // asked about longest ago first. Each is marked as asked now, and rows another
+  // worker is taking at the same moment are passed over, so two workers get
+  // different batches. `staleMs` leaves out those asked about more recently
+  // than that. Reads fiber_resolutions_sync_queue_idx, never the whole table.
+  async claimOpenResolutions(limit, options = {}) {
+    const result = await this.pool.query(
+      `WITH due AS (
+         SELECT resolution_id FROM fiber_resolutions
+         WHERE status IN ('invoice_created', 'invoice_received')
+           AND (last_synced_at IS NULL OR last_synced_at <= now() - make_interval(secs => $2))
+         ORDER BY last_synced_at NULLS FIRST, created_at
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE fiber_resolutions r SET last_synced_at = now()
+       FROM due WHERE r.resolution_id = due.resolution_id
+       RETURNING r.*`,
+      [limit, (options.staleMs ?? 0) / 1000]
+    );
+    return result.rows.map(resolutionRow).sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  // Removes reservations whose invoice was never issued. Returns how many.
+  async pruneStaleReservations() {
+    const result = await this.pool.query(
+      "DELETE FROM fiber_resolutions WHERE status = 'invoice_pending' AND reservation_expires_at < now()"
+    );
+    return result.rowCount;
+  }
+
   async updateResolutionStatus(offerId, resolutionId, update) {
     return (await this.#writeStatus(offerId, resolutionId, update, undefined)).record;
   }
@@ -447,15 +492,126 @@ export class PostgresOfferStore {
     return events.rows.map((row) => eventRow(row, byEvent.get(row.event_id) ?? []));
   }
 
+  // Up to `limit` deliveries to attempt now, the one due longest first, each
+  // held for `leaseMs`. Rows another worker is taking are passed over, and a
+  // held row is not offered again until its lease runs out, so two workers
+  // never send the same delivery. By default: every offer, deliveries that are
+  // pending or waiting for a retry, and only those whose time has come (read
+  // from fiber_webhook_deliveries_due_idx). An operator's request narrows it
+  // to one offer or event and may take failed and dead ones regardless of
+  // their schedule. Returns { offer_id, event, delivery, webhook } each;
+  // webhook is undefined when the subscription was deleted.
+  async claimPendingDeliveries(limit, options = {}) {
+    const lease = (options.leaseMs ?? 60000) / 1000;
+    const narrowed =
+      options.offerId !== undefined || options.eventId !== undefined || options.statuses !== undefined || options.ignoreSchedule;
+    const claimed = narrowed
+      ? await this.pool.query(
+          `WITH due AS (
+             SELECT d.event_id, d.webhook_id
+             FROM fiber_webhook_deliveries d
+             JOIN fiber_webhook_events e ON e.event_id = d.event_id
+             WHERE d.status = ANY($3::text[])
+               AND ($4::text IS NULL OR e.offer_id = $4)
+               AND ($5::text IS NULL OR d.event_id = $5)
+               AND ($6::boolean OR d.next_attempt_at IS NULL OR d.next_attempt_at <= now())
+               AND (d.locked_until IS NULL OR d.locked_until <= now())
+             ORDER BY d.next_attempt_at NULLS FIRST, d.created_at
+             LIMIT $1
+             FOR UPDATE OF d SKIP LOCKED
+           )
+           UPDATE fiber_webhook_deliveries d SET locked_until = now() + make_interval(secs => $2)
+           FROM due WHERE d.event_id = due.event_id AND d.webhook_id = due.webhook_id
+           RETURNING d.*`,
+          [
+            limit,
+            lease,
+            options.statuses ?? ["pending", "failed"],
+            options.offerId ?? null,
+            options.eventId ?? null,
+            Boolean(options.ignoreSchedule)
+          ]
+        )
+      : await this.pool.query(
+          `WITH due AS (
+             SELECT event_id, webhook_id
+             FROM fiber_webhook_deliveries
+             WHERE status IN ('pending', 'failed')
+               AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+               AND (locked_until IS NULL OR locked_until <= now())
+             ORDER BY next_attempt_at NULLS FIRST, created_at
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED
+           )
+           UPDATE fiber_webhook_deliveries d SET locked_until = now() + make_interval(secs => $2)
+           FROM due WHERE d.event_id = due.event_id AND d.webhook_id = due.webhook_id
+           RETURNING d.*`,
+          [limit, lease]
+        );
+    if (claimed.rows.length === 0) return [];
+
+    const [events, webhooks] = await Promise.all([
+      this.pool.query("SELECT * FROM fiber_webhook_events WHERE event_id = ANY($1::text[])", [
+        [...new Set(claimed.rows.map((row) => row.event_id))]
+      ]),
+      this.pool.query("SELECT * FROM fiber_webhooks WHERE webhook_id = ANY($1::text[])", [
+        [...new Set(claimed.rows.map((row) => row.webhook_id))]
+      ])
+    ]);
+    const eventById = new Map(events.rows.map((row) => [row.event_id, row]));
+    const webhookById = new Map(
+      await Promise.all(webhooks.rows.map(async (row) => [row.webhook_id, await webhookRow(row, this.cipher)]))
+    );
+    return claimed.rows
+      .sort((left, right) => left.created_at - right.created_at)
+      .map((row) => {
+        const event = eventById.get(row.event_id);
+        const { deliveries: _deliveries, ...eventFields } = eventRow(event, []);
+        return {
+          offer_id: event.offer_id,
+          event: eventFields,
+          delivery: deliveryRow(row),
+          webhook: webhookById.get(row.webhook_id)
+        };
+      });
+  }
+
+  // Removes events created before `before` (an ISO time) that have nothing
+  // left to deliver, oldest first, at most `limit`. Their delivery rows go
+  // with them. Returns how many.
+  async pruneWebhookEvents(options = {}) {
+    const result = await this.pool.query(
+      `DELETE FROM fiber_webhook_events
+       WHERE event_id IN (
+         SELECT e.event_id FROM fiber_webhook_events e
+         WHERE e.created_at < $1::timestamptz
+           AND NOT EXISTS (
+             SELECT 1 FROM fiber_webhook_deliveries d
+             WHERE d.event_id = e.event_id AND d.status IN ('pending', 'failed')
+           )
+         ORDER BY e.created_at
+         LIMIT $2
+       )`,
+      [options.before, options.limit ?? 1000]
+    );
+    return result.rowCount;
+  }
+
+  // Records one attempt and releases the delivery. `update.next_attempt_at`
+  // says when a failed delivery is due again.
   async updateWebhookDelivery(offerId, eventId, webhookId, update) {
     const result = await this.pool.query(
       `UPDATE fiber_webhook_deliveries d SET
          status=$4, attempts=attempts+1, response_status=$5, response_body=NULL,
-         error=$6, last_attempt_at=now(), updated_at=now()
+         error=$6, next_attempt_at=$7::timestamptz, locked_until=NULL,
+         last_attempt_at=now(), updated_at=now()
        FROM fiber_webhook_events e
        WHERE d.event_id=$2 AND d.webhook_id=$3 AND e.event_id=d.event_id AND e.offer_id=$1
        RETURNING d.*`,
-      [offerId, eventId, webhookId, update.status, update.response_status ?? null, update.error ?? null]
+      [
+        offerId, eventId, webhookId, update.status, update.response_status ?? null, update.error ?? null,
+        update.next_attempt_at ?? null
+      ]
     );
     if (!result.rows[0]) throw storeError("webhook delivery does not exist", "WEBHOOK_DELIVERY_NOT_FOUND", 404);
     return deliveryRow(result.rows[0]);
@@ -577,6 +733,8 @@ function deliveryRow(row) {
     response_status: row.response_status,
     error: row.error,
     last_attempt_at: iso(row.last_attempt_at),
+    next_attempt_at: iso(row.next_attempt_at),
+    locked_until: iso(row.locked_until),
     created_at: iso(row.created_at),
     updated_at: iso(row.updated_at)
   });

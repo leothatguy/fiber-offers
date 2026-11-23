@@ -5,6 +5,9 @@ import { assertInvoiceCapacity } from "./resolution-rules.js";
 import { SecretCipher } from "./secret-cipher.js";
 
 export class InMemoryOfferStore {
+  // Resolution ID -> when the settlement pass last asked about it.
+  #lastSynced = new Map();
+
   constructor(initialState = undefined) {
     this.state = clone(
       initialState ?? {
@@ -243,6 +246,59 @@ export class InMemoryOfferStore {
     return record ? clone(record) : undefined;
   }
 
+  // An offer's invoices that still await an outcome, optionally those of one
+  // subscription only.
+  async getOpenResolutions(offerId, options = {}) {
+    await this.load();
+    const records = (this.state.resolutions[offerId] ?? []).filter(
+      (record) =>
+        OPEN_RESOLUTION_STATUSES.has(record.status) &&
+        (options.approvalId === undefined || record.recurrence?.approval_id === options.approvalId)
+    );
+    return clone(records);
+  }
+
+  // Up to `limit` invoices that await an outcome, across all offers, the one
+  // asked about longest ago first. Each is marked as asked now, so the next
+  // call returns others; `staleMs` leaves out those asked about more recently
+  // than that. Each record carries its offer_id.
+  async claimOpenResolutions(limit, options = {}) {
+    await this.load();
+    const now = Date.now();
+    const askedBefore = now - (options.staleMs ?? 0);
+    const open = [];
+    for (const [offerId, records] of Object.entries(this.state.resolutions)) {
+      for (const record of records) {
+        if (!OPEN_RESOLUTION_STATUSES.has(record.status)) continue;
+        const asked = this.#lastSynced.get(record.id) ?? -Infinity;
+        if (asked > askedBefore) continue;
+        open.push({ offerId, record, asked });
+      }
+    }
+    open.sort((left, right) => left.asked - right.asked || left.record.created_at.localeCompare(right.record.created_at));
+    const claimed = open.slice(0, limit);
+    // When each was asked about is not part of the record and is not written
+    // to disk: after a restart every open invoice is simply due.
+    for (const { record } of claimed) this.#lastSynced.set(record.id, now);
+    return claimed.map(({ offerId, record }) => ({ ...clone(record), offer_id: offerId }));
+  }
+
+  // Removes reservations whose invoice was never issued. Returns how many.
+  async pruneStaleReservations() {
+    await this.load();
+    const now = Date.now();
+    let removed = 0;
+    for (const [offerId, records] of Object.entries(this.state.resolutions)) {
+      const kept = records.filter(
+        (record) => record.status !== "invoice_pending" || Date.parse(record.reservation_expires_at) >= now
+      );
+      removed += records.length - kept.length;
+      this.state.resolutions[offerId] = kept;
+    }
+    if (removed > 0) await this.save();
+    return removed;
+  }
+
   async updateResolutionStatus(offerId, resolutionId, update) {
     return (await this.#writeStatus(offerId, resolutionId, update, undefined)).record;
   }
@@ -282,6 +338,7 @@ export class InMemoryOfferStore {
     record.updated_at = now;
     record.status_history ??= [];
     record.status_history.push(statusEvent);
+    if (!OPEN_RESOLUTION_STATUSES.has(update.status)) this.#lastSynced.delete(record.id);
 
     if (update.status === "invoice_paid") {
       record.settled_at = update.settled_at ?? now;
@@ -420,6 +477,69 @@ export class InMemoryOfferStore {
     return clone(this.state.webhook_events[offerId] ?? []);
   }
 
+  // Up to `limit` deliveries to attempt now, the one due longest first, each
+  // held for `leaseMs` so that nobody else takes it meanwhile. By default:
+  // every offer, deliveries that are pending or waiting for a retry, and only
+  // those whose time has come. An operator's request narrows it to one offer
+  // or event and may take failed and dead ones regardless of their schedule.
+  // Returns { offer_id, event, delivery, webhook } each; webhook is undefined
+  // when the subscription was deleted.
+  async claimPendingDeliveries(limit, options = {}) {
+    await this.load();
+    const now = Date.now();
+    const statuses = new Set(options.statuses ?? ["pending", "failed"]);
+    const due = [];
+    for (const [offerId, events] of Object.entries(this.state.webhook_events ?? {})) {
+      if (options.offerId !== undefined && offerId !== options.offerId) continue;
+      for (const event of events) {
+        if (options.eventId !== undefined && event.id !== options.eventId) continue;
+        for (const delivery of event.deliveries) {
+          if (!statuses.has(delivery.status)) continue;
+          if (delivery.locked_until && Date.parse(delivery.locked_until) > now) continue;
+          const dueAt = delivery.next_attempt_at ? Date.parse(delivery.next_attempt_at) : -Infinity;
+          if (!options.ignoreSchedule && dueAt > now) continue;
+          due.push({ offerId, event, delivery, dueAt });
+        }
+      }
+    }
+    due.sort((left, right) => left.dueAt - right.dueAt || left.delivery.created_at.localeCompare(right.delivery.created_at));
+    const claimed = due.slice(0, limit);
+    const lockedUntil = new Date(now + (options.leaseMs ?? 60000)).toISOString();
+    for (const { delivery } of claimed) delivery.locked_until = lockedUntil;
+    return claimed.map(({ offerId, event, delivery }) => {
+      const { deliveries: _deliveries, ...eventFields } = event;
+      return clone({
+        offer_id: offerId,
+        event: { ...eventFields, offer_id: offerId },
+        delivery: { ...delivery, event_id: event.id },
+        webhook: (this.state.webhooks[offerId] ?? []).find((webhook) => webhook.id === delivery.webhook_id)
+      });
+    });
+  }
+
+  // Removes events created before `before` (an ISO time) that have nothing
+  // left to deliver, oldest first, at most `limit`. Returns how many.
+  async pruneWebhookEvents(options = {}) {
+    await this.load();
+    const before = Date.parse(options.before);
+    const limit = options.limit ?? 1000;
+    let removed = 0;
+    for (const [offerId, events] of Object.entries(this.state.webhook_events ?? {})) {
+      const kept = events.filter((event) => {
+        if (removed >= limit) return true;
+        const finished = event.deliveries.every((delivery) => !["pending", "failed"].includes(delivery.status));
+        if (!finished || !(Date.parse(event.created_at) < before)) return true;
+        removed += 1;
+        return false;
+      });
+      this.state.webhook_events[offerId] = kept;
+    }
+    if (removed > 0) await this.save();
+    return removed;
+  }
+
+  // Records one attempt and releases the delivery. `update.next_attempt_at`
+  // says when a failed delivery is due again.
   async updateWebhookDelivery(offerId, eventId, webhookId, update) {
     await this.load();
     const event = this.state.webhook_events[offerId]?.find((candidate) => candidate.id === eventId);
@@ -441,6 +561,8 @@ export class InMemoryOfferStore {
     // Only the status code of a delivery's answer is kept.
     delete delivery.response_body;
     delivery.error = update.error;
+    delivery.next_attempt_at = update.next_attempt_at;
+    delete delivery.locked_until;
 
     await this.save();
     return clone(delivery);
@@ -617,6 +739,9 @@ async function decryptStoredSecrets(state, cipher) {
   }
   return state;
 }
+
+// An invoice that was issued and whose outcome is not known yet.
+const OPEN_RESOLUTION_STATUSES = new Set(["invoice_created", "invoice_received"]);
 
 export function normalizeUsername(username) {
   if (typeof username !== "string" || username.trim() === "") {
