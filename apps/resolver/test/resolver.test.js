@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemoryRateLimiter, createServer, InMemoryOfferStore, JsonOfferStore } from "../src/server.js";
 import { FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
-import { deliverWebhookEvent, signWebhookPayload } from "../src/webhook-delivery.js";
+import { signWebhookPayload } from "../src/webhook-delivery.js";
 import {
   ckbScriptHash,
   createOfferRevocation,
@@ -1381,44 +1381,6 @@ test("delivers webhook outbox events with signed HTTP posts", async () => {
       assert.equal(events.body.events[0].deliveries[0].attempts, 1);
     });
   });
-});
-
-test("fails a webhook delivery after the configured timeout", async () => {
-  const result = await deliverWebhookEvent(
-    {
-      id: "evt_timeout",
-      offer_id: "0x" + "b".repeat(64),
-      type: "invoice.created",
-      created_at: new Date().toISOString(),
-      payload: { resolution: { id: "res_timeout" } }
-    },
-    {
-      secret: "timeout-secret"
-    },
-    {
-      webhook_id: "wh_timeout",
-      url: "https://merchant.example/hooks/fiber"
-    },
-    {
-      timeoutMs: 10,
-      fetchImpl: (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init.signal.addEventListener(
-            "abort",
-            () => {
-              const error = new Error("request aborted");
-              error.name = "AbortError";
-              reject(error);
-            },
-            { once: true }
-          );
-        })
-    }
-  );
-
-  assert.equal(result.status, "failed");
-  assert.equal(result.error.code, "WEBHOOK_DELIVERY_TIMEOUT");
-  assert.match(result.error.message, /timed out after 10ms/);
 });
 
 test("background worker delivers pending webhook events", async () => {

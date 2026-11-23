@@ -284,6 +284,30 @@ With Docker, point `FIBER_RPC_URL` at the host or service address reachable from
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.
 
+## Webhook Targets
+
+A webhook URL makes the resolver send requests from inside your network, so
+with `RESOLVER_ALLOW_PRIVATE_WEBHOOKS=false` (the default in production) a
+delivery can reach only a public address:
+
+- When a webhook is registered, a URL that names a private target is refused
+  with `400 INVALID_WEBHOOK_URL`: a loopback, private, link-local, carrier-NAT
+  or unspecified address in any spelling (`0x7f.1`, `[::ffff:127.0.0.1]`), a
+  single-label name such as `redis`, or `localhost`, `.local`, `.internal`.
+- At every delivery the host name is resolved and each address it returns is
+  checked again. If any of them is not public the delivery fails with
+  `WEBHOOK_TARGET_PRIVATE`, and the connection can only be opened to an address
+  that passed, so a name cannot resolve one way for the check and another way
+  for the request.
+- A redirect is never followed. It is recorded as a failed delivery
+  (`WEBHOOK_REDIRECT_REFUSED`); register the final URL instead.
+- Only the status code of the answer is recorded. The response body is not
+  read, stored or returned. Migration `005` clears bodies stored by earlier
+  versions.
+
+Set `RESOLVER_ALLOW_PRIVATE_WEBHOOKS=true` only for local development, where
+the receiver is on the same machine.
+
 ## Background Workers
 
 Background workers are enabled in the standard live runtime. They poll Fiber invoice status and retry webhook deliveries without manual API calls:
@@ -326,7 +350,7 @@ For a public demo:
 - set `RESOLVER_API_KEY`;
 - enter that key only in the dashboard unlock dialog or a trusted CLI/backend;
 - set `RESOLVER_SECRET_ENCRYPTION_KEY` so webhook secrets are encrypted with AES-256-GCM on disk;
-- keep `RESOLVER_ALLOW_PRIVATE_WEBHOOKS=false` to reject loopback, link-local, and private-network webhook targets;
+- keep `RESOLVER_ALLOW_PRIVATE_WEBHOOKS=false` so webhooks can reach public addresses only (see [Webhook Targets](#webhook-targets));
 - keep the Fiber RPC endpoint private and continuously monitored;
 - treat an unreachable Fiber node as an operational failure rather than silently switching to mock invoices;
 - use managed PostgreSQL and Redis or back up both Docker volumes;

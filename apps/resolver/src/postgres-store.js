@@ -414,12 +414,12 @@ export class PostgresOfferStore {
   async updateWebhookDelivery(offerId, eventId, webhookId, update) {
     const result = await this.pool.query(
       `UPDATE fiber_webhook_deliveries d SET
-         status=$4, attempts=attempts+1, response_status=$5, response_body=$6,
-         error=$7, last_attempt_at=now(), updated_at=now()
+         status=$4, attempts=attempts+1, response_status=$5, response_body=NULL,
+         error=$6, last_attempt_at=now(), updated_at=now()
        FROM fiber_webhook_events e
        WHERE d.event_id=$2 AND d.webhook_id=$3 AND e.event_id=d.event_id AND e.offer_id=$1
        RETURNING d.*`,
-      [offerId, eventId, webhookId, update.status, update.response_status ?? null, update.response_body ?? null, update.error ?? null]
+      [offerId, eventId, webhookId, update.status, update.response_status ?? null, update.error ?? null]
     );
     if (!result.rows[0]) throw storeError("webhook delivery does not exist", "WEBHOOK_DELIVERY_NOT_FOUND", 404);
     return deliveryRow(result.rows[0]);
@@ -539,7 +539,6 @@ function deliveryRow(row) {
     status: row.status,
     attempts: row.attempts,
     response_status: row.response_status,
-    response_body: row.response_body,
     error: row.error,
     last_attempt_at: iso(row.last_attempt_at),
     created_at: iso(row.created_at),

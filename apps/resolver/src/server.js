@@ -35,6 +35,7 @@ import {
 } from "./resolution-rules.js";
 import { InMemoryOfferStore, JsonOfferStore, normalizeUsername } from "./store.js";
 import { deliverWebhookEvent } from "./webhook-delivery.js";
+import { assertWebhookUrlAllowed } from "./webhook-target.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const defaultStaticRoot = resolve(currentDir, "../../demo/public");
@@ -121,6 +122,8 @@ export function createServer(options = {}) {
         ? true
         : booleanEnv(process.env.RESOLVER_RATE_LIMIT_FAIL_OPEN)),
     webhookDeliveryTimeoutMs,
+    // A DNS lookup to use for webhook targets in place of the system's (tests).
+    webhookLookup: options.webhookLookup,
     allowPrivateWebhookTargets:
       options.allowPrivateWebhookTargets ??
       (process.env.RESOLVER_ALLOW_PRIVATE_WEBHOOKS === undefined
@@ -438,7 +441,7 @@ const ROUTES = [
     async ({ response, context, params }) => {
       sendJson(response, 200, {
         offer_id: params.offerId,
-        events: await context.store.listWebhookEvents(params.offerId)
+        events: (await context.store.listWebhookEvents(params.offerId)).map(publicWebhookEvent)
       });
     }
   ),
@@ -1535,6 +1538,15 @@ function publicWebhook(webhook, options = {}) {
   };
 }
 
+// Delivery history as recorded. Response bodies were stored by earlier
+// versions; they are not returned.
+function publicWebhookEvent(event) {
+  return {
+    ...event,
+    deliveries: (event.deliveries ?? []).map(({ response_body: _body, ...delivery }) => delivery)
+  };
+}
+
 async function drainWebhookEvents(context, offerId, options = {}) {
   const events = await context.store.listWebhookEvents(offerId);
   const webhooks = await context.store.listWebhooks(offerId);
@@ -1561,8 +1573,9 @@ async function drainWebhookEvents(context, offerId, options = {}) {
       }
 
       const result = await deliverWebhookEvent(event, webhook, delivery, {
-        fetchImpl: context.fetchImpl,
-        timeoutMs: context.webhookDeliveryTimeoutMs
+        timeoutMs: context.webhookDeliveryTimeoutMs,
+        allowPrivateTargets: context.allowPrivateWebhookTargets,
+        lookup: context.webhookLookup
       });
       const updated = await context.store.updateWebhookDelivery(offerId, event.id, delivery.webhook_id, result);
       deliveries.push(publicDeliveryResult(event.id, updated));
@@ -1607,38 +1620,22 @@ function publicDeliveryResult(eventId, delivery) {
   };
 }
 
+// Checked here as far as the URL's text allows, so the operator hears about a
+// refused target when registering it. The check that counts is made on the
+// resolved address at every delivery; see webhook-target.js.
 function normalizeWebhookUrl(value, context) {
   if (typeof value !== "string" || value.trim() === "") {
     throw httpError(400, "INVALID_WEBHOOK_URL", "webhook url is required");
   }
 
   try {
-    const parsed = new URL(value.trim());
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("protocol must be http or https");
-    if (parsed.username || parsed.password) throw new Error("credentials are not allowed in webhook URLs");
-    if (!context?.allowPrivateWebhookTargets && isPrivateWebhookHost(parsed.hostname)) {
-      throw new Error("private-network webhook targets are disabled");
-    }
-    return parsed.toString();
+    return assertWebhookUrlAllowed(value, { allowPrivateTargets: context?.allowPrivateWebhookTargets }).toString();
   } catch (error) {
-    throw httpError(400, "INVALID_WEBHOOK_URL", "webhook url must be a valid HTTP(S) URL", {
-      cause: error.message
+    throw httpError(400, "INVALID_WEBHOOK_URL", "webhook url must be a public HTTP(S) URL", {
+      cause: error.message,
+      cause_code: error.code
     });
   }
-}
-
-function isPrivateWebhookHost(hostname) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  return (
-    host === "localhost" ||
-    host === "::1" ||
-    host.endsWith(".local") ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)
-  );
 }
 
 function normalizeWebhookEvents(events) {

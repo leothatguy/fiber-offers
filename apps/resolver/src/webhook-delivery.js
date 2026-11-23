@@ -1,13 +1,14 @@
 import { createHmac } from "node:crypto";
+import { postWebhook } from "./webhook-target.js";
 
 const defaultWebhookTimeoutMs = 10000;
 
+// Delivers one event to one webhook and returns what to record about the
+// attempt. Only the status code of the answer is kept, never its body.
+//
+// Options: `timeoutMs`, `allowPrivateTargets`, and `lookup` (a DNS lookup to
+// use in place of the system's, for tests).
 export async function deliverWebhookEvent(event, webhook, delivery, options = {}) {
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  if (typeof fetchImpl !== "function") {
-    throw new Error("webhook delivery requires a fetch implementation");
-  }
-
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const body = JSON.stringify(eventPayload(event));
   const headers = {
@@ -23,39 +24,35 @@ export async function deliverWebhookEvent(event, webhook, delivery, options = {}
     headers["x-fiber-offers-signature"] = signWebhookPayload(webhook.secret, timestamp, body);
   }
 
-  const timeoutMs = deliveryTimeoutMs(options.timeoutMs);
-  const controller = new AbortController();
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-
   try {
-    const response = await fetchImpl(delivery.url, {
-      method: "POST",
+    const response = await postWebhook(delivery.url, {
       headers,
       body,
-      signal: controller.signal
+      timeoutMs: deliveryTimeoutMs(options.timeoutMs),
+      allowPrivateTargets: options.allowPrivateTargets,
+      lookup: options.lookup
     });
-    const responseBody = await safeReadText(response);
-    const ok = response.status >= 200 && response.status < 300;
-
-    return {
-      status: ok ? "delivered" : "failed",
-      response_status: response.status,
-      response_body: responseBody.slice(0, 2000)
-    };
+    if (response.status >= 200 && response.status < 300) {
+      return { status: "delivered", response_status: response.status };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      // Following it would send the event, and the resolver's network
+      // position, wherever the target says.
+      return {
+        status: "failed",
+        response_status: response.status,
+        error: {
+          code: "WEBHOOK_REDIRECT_REFUSED",
+          message: "webhook target answered with a redirect, which is not followed; register the final URL"
+        }
+      };
+    }
+    return { status: "failed", response_status: response.status };
   } catch (error) {
     return {
       status: "failed",
-      error: {
-        message: timedOut ? `webhook delivery timed out after ${timeoutMs}ms` : error.message,
-        code: timedOut ? "WEBHOOK_DELIVERY_TIMEOUT" : error.code
-      }
+      error: { message: error.message, code: error.code }
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -77,12 +74,4 @@ function eventPayload(event) {
     created_at: event.created_at,
     payload: event.payload
   };
-}
-
-async function safeReadText(response) {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
 }

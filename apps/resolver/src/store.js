@@ -433,7 +433,8 @@ export class InMemoryOfferStore {
     delivery.updated_at = now;
     delivery.last_attempt_at = now;
     delivery.response_status = update.response_status;
-    delivery.response_body = update.response_body;
+    // Only the status code of a delivery's answer is kept.
+    delete delivery.response_body;
     delivery.error = update.error;
 
     await this.save();
