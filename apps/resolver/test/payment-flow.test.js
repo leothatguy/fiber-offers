@@ -401,6 +401,8 @@ async function withResolver(callback, options = {}) {
   const server = createServer({
     store: new InMemoryOfferStore(),
     invoiceAdapter: options.invoiceAdapter ?? new LedgerInvoiceAdapter(ledger, options.tamper),
+    // Offers here come from the demo offer route, which exists only in demo mode.
+    demoMode: true,
     topologyClient: false,
     workers: false,
     logger: { error() {}, info() {} }

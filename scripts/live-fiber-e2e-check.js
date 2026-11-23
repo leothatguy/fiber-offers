@@ -4,6 +4,8 @@
 // Starts a resolver in this process, wired to a real merchant node, and drives
 // it only through the public SDK (FiberOffersClient, FiberPaymentFlowClient,
 // FiberPaymentClient, FiberRecurringPaymentScheduler) with a real payer node.
+// The resolver has an API key, as a deployed one does: the merchant's client
+// holds it and the payer's client does not.
 // Every case sends real payments unless FIBER_E2E_DRY_RUN_ONLY=true.
 //
 //   npm run fiber:local -- start          # merchant on 8227, payer on 8229
@@ -23,7 +25,7 @@
 // Exits 0 when no case failed. A case that cannot run here (no token channel,
 // no PostgreSQL) is reported as skipped, with the reason.
 import { execFile } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -52,6 +54,8 @@ const amount = process.env.FIBER_E2E_AMOUNT ?? "100000000";
 const invoiceTtlSeconds = Number(process.env.FIBER_E2E_INVOICE_TTL ?? 10);
 const execute = process.env.FIBER_E2E_DRY_RUN_ONLY !== "true";
 const databaseUrl = process.env.DATABASE_URL;
+// Generated for this run and shared by the resolver replicas it starts.
+const resolverApiKey = randomBytes(24).toString("hex");
 const ckb = { asset_type: "ckb", symbol: "CKB" };
 const routeOptions = clean({
   maxFeeAmount: process.env.FIBER_E2E_MAX_FEE_AMOUNT,
@@ -72,12 +76,14 @@ try {
     payerRpc.call("list_channels", [{}])
   ]);
   const replicaA = await startResolver();
+  // `client` is a payer's: no credentials. `merchant` holds the API key.
   const client = replicaA.client;
+  const merchant = replicaA.merchant;
   const flow = new FiberPaymentFlowClient({ resolverClient: client, paymentClient: payer });
   const pay = (offer, request, options = {}) =>
     flow.payOffer(offer, request, { execute, confirm: true, ...routeOptions, ...options });
   const newOffer = (input, options = {}) =>
-    client.createAndRegisterOfferFromNode(
+    merchant.createAndRegisterOfferFromNode(
       { resolver_url: replicaA.url, amount_min: amount, amount_max: amount, assets: [ckb], ...input },
       { fiberRpcUrl: merchantRpcUrl, ...options }
     );
@@ -93,7 +99,7 @@ try {
     if (!execute) return { offer_id: created.offer.offer_id, payments: [brief(first), brief(second)] };
 
     expect(first.payment_hash !== second.payment_hash, "the two payment hashes are different");
-    const synced = await client.syncResolutions(created.offer.offer_id);
+    const synced = await merchant.syncResolutions(created.offer.offer_id);
     const statuses = synced.results.map((result) => result.resolution?.status ?? result.status);
     expect(statuses.every((status) => status === "invoice_paid"), "resolver records both as invoice_paid", statuses);
     return {
@@ -104,7 +110,7 @@ try {
   });
 
   await runCase("token-invoice", "A token invoice is minted with the token's script and verified", async () => {
-    const diagnostics = await client.diagnostics();
+    const diagnostics = await merchant.diagnostics();
     const token = diagnostics.invoice_source?.assets?.udt?.[0];
     if (!token) return skip("the merchant node whitelists no token with an exact type script");
     const asset = { asset_type: "udt", symbol: token.name ?? "UDT", type_script_hash: token.type_script_hash };
@@ -136,7 +142,7 @@ try {
     expect(paid.status === done, "after the first invoice lapsed, a new one is issued and paid", paid.failure ?? paid.status);
     const afterPayment = execute ? await codeOf(client.requestInvoice(created.offer.offer_id, request)) : undefined;
     if (execute) expect(afterPayment === "OFFER_ALREADY_USED", "once paid, the offer is used up", afterPayment);
-    const resolutions = await client.getResolutions(created.offer.offer_id);
+    const resolutions = await merchant.getResolutions(created.offer.offer_id);
     return {
       offer_id: created.offer.offer_id,
       abandoned_resolution: abandoned.resolution_id,
@@ -194,7 +200,7 @@ try {
     await sleep((invoiceTtlSeconds + 2) * 1000);
     const onNode = await merchantRpc.call("get_invoice", [{ payment_hash: issued.payment_hash }]);
     expect(onNode.status === "Expired", "the node reports the invoice Expired", onNode.status);
-    const synced = await client.syncResolution(created.offer.offer_id, issued.resolution_id);
+    const synced = await merchant.syncResolution(created.offer.offer_id, issued.resolution_id);
     expect(synced.resolution.status === "invoice_expired", "the resolver records invoice_expired", synced.resolution.status);
     // Retrying with the same key replays the dead invoice; the SDK refuses to pay it.
     const replay = await flow.preparePayment(created.offer, { amount, asset: ckb }, { idempotencyKey: key });
@@ -305,10 +311,10 @@ try {
     if (!execute) return skip("needs a real payment to announce");
     const receiver = await startWebhookReceiver();
     const created = await newOffer({ description: "E2E webhook offer" });
-    const webhook = await client.createWebhook(created.offer.offer_id, { url: receiver.url, events: ["invoice.created", "invoice.paid"] });
+    const webhook = await merchant.createWebhook(created.offer.offer_id, { url: receiver.url, events: ["invoice.created", "invoice.paid"] });
     const paid = await pay(created.offer, { amount, asset: ckb });
-    await client.syncResolution(created.offer.offer_id, paid.invoice.resolution_id);
-    await client.deliverWebhookEvents(created.offer.offer_id);
+    await merchant.syncResolution(created.offer.offer_id, paid.invoice.resolution_id);
+    await merchant.deliverWebhookEvents(created.offer.offer_id);
     const types = receiver.requests.map((request) => request.headers["x-fiber-offers-event-type"]);
     expect(types.includes("invoice.created") && types.includes("invoice.paid"), "created and paid were both delivered", types);
     const signaturesValid = receiver.requests.every(
@@ -320,6 +326,40 @@ try {
     return { offer_id: created.offer.offer_id, delivered: types };
   });
 
+  await runCase("access-control", "A payer reads their own payment and nothing of the merchant's", async () => {
+    const created = await newOffer({ description: "E2E access offer" });
+    const offerId = created.offer.offer_id;
+    const invoice = await client.requestInvoice(offerId, { amount, asset: ckb });
+    const own = await client.getResolution(offerId, invoice.resolution_id);
+    const receipt = await client.getReceipt(offerId, invoice.resolution_id);
+    expect(own.invoice.invoice === invoice.invoice, "the payer reads the resolution they were issued");
+
+    const refused = {
+      list_offers: await statusAndCode(client.listOffers()),
+      register_offer: await statusAndCode(client.registerOffer(created.offer)),
+      payment_history: await statusAndCode(client.getResolutions(offerId)),
+      reconciliation: await statusAndCode(client.getReconciliation(offerId)),
+      reconciliation_csv: await statusAndCode(client.getReconciliationCsv(offerId)),
+      recurrence_summary: await statusAndCode(client.getRecurrenceStatus(offerId)),
+      settlement_sync: await statusAndCode(client.syncResolution(offerId, invoice.resolution_id)),
+      webhooks: await statusAndCode(client.getWebhooks(offerId)),
+      diagnostics: await statusAndCode(client.diagnostics())
+    };
+    const open = Object.entries(refused).filter(([, outcome]) => outcome !== "401 UNAUTHORIZED");
+    expect(open.length === 0, "every merchant route refuses a caller without the API key", refused);
+
+    const health = await fetch(`${replicaA.url}/health`).then((response) => response.json());
+    expect(
+      Object.keys(health).sort().join(",") === "invoice_mode,ok,service",
+      "anonymous health says only whether the resolver is up",
+      Object.keys(health)
+    );
+    const exposed = JSON.stringify([invoice, own, receipt]).match(/raw_result|rpc_params|rpc_method/g);
+    expect(!exposed, "payer-facing responses carry no raw Fiber RPC payloads", exposed);
+    expect((await merchant.getResolutions(offerId)).resolutions.length === 1, "the merchant's key reads the history");
+    return { offer_id: offerId, refused_without_key: Object.keys(refused), anonymous_health_fields: Object.keys(health) };
+  });
+
   await runCase("network-mismatch", "An offer signed for another network is refused", async () => {
     const keys = generateOfferKeyPair();
     const otherNetwork = replicaA.network === "mainnet" ? "testnet" : "mainnet";
@@ -327,7 +367,7 @@ try {
       { node_id: merchantInfo.pubkey, network: otherNetwork, public_key: keys.publicKeyPem, resolver_url: replicaA.url, assets: [ckb] },
       keys.privateKeyPem
     );
-    const outcome = await statusAndCode(client.registerOffer(offer));
+    const outcome = await statusAndCode(merchant.registerOffer(offer));
     if (!replicaA.network) return skip("the merchant node is on a private chain; set FIBER_NETWORK to enforce this");
     expect(outcome === "422 OFFER_NETWORK_MISMATCH", "registration is refused", outcome);
     return { node_network: replicaA.network, offer_network: otherNetwork, outcome };
@@ -416,6 +456,7 @@ async function startResolver() {
   const server = createServer({
     store,
     invoiceAdapter,
+    apiKey: resolverApiKey,
     topologyClient: false,
     workers: false,
     allowPrivateWebhookTargets: true,
@@ -426,7 +467,12 @@ async function startResolver() {
   const url = `http://127.0.0.1:${server.address().port}`;
   closers.push(() => new Promise((resolveClose) => server.close(resolveClose)));
   const identity = await invoiceAdapter.getNodeIdentity();
-  return { url, client: new FiberOffersClient({ resolverUrl: url }), network: identity.network };
+  return {
+    url,
+    client: new FiberOffersClient({ resolverUrl: url }),
+    merchant: new FiberOffersClient({ resolverUrl: url, apiKey: resolverApiKey }),
+    network: identity.network
+  };
 }
 
 // A resolver client that lies in one specific way, standing in for a

@@ -3,7 +3,8 @@ import { MockInvoiceAdapter } from "../apps/resolver/src/invoice-adapter.js";
 
 const server = createServer({
   store: new InMemoryOfferStore(),
-  invoiceAdapter: new MockInvoiceAdapter()
+  invoiceAdapter: new MockInvoiceAdapter(),
+  demoMode: true
 });
 
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

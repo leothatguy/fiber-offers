@@ -1,8 +1,11 @@
 import { FiberOffersClient } from "@fiber-offers/sdk";
 
 const resolverUrl = process.env.RESOLVER_URL ?? "http://127.0.0.1:8787";
-const resolver = new FiberOffersClient({ resolverUrl });
+// Merchant routes need the resolver's API key when it has one.
+const resolver = new FiberOffersClient({ resolverUrl, apiKey: process.env.RESOLVER_API_KEY });
 
+// A sample offer signed by the resolver, which it does only in demo mode
+// (RESOLVER_DEMO_MODE=true). A real merchant signs with createOffer instead.
 const offer = await resolver.demoCreateOffer({
   username: "merchant-example",
   description: "Merchant operator example",

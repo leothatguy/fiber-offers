@@ -196,11 +196,16 @@ export interface FiberAddressParts {
   domain: string;
 }
 
+/**
+ * Methods marked "operator only" call routes that need the resolver's API key
+ * (`apiKey` option). Everything else is the payment path and needs no key.
+ */
 export class FiberOffersClient {
   resolverUrl: string;
   fetchImpl: FetchLike;
   apiKey?: string;
   constructor(options?: FiberOffersClientOptions);
+  /** Operator only: the resolver requires its API key. */
   registerOffer(offerOrEncoded: SignedFiberOffer | string, options?: RegisterOfferOptions): Promise<RegisteredOfferResponse>;
   createAndRegisterOffer(
     input: FiberOfferInput,
@@ -219,7 +224,9 @@ export class FiberOffersClient {
     options?: InvoiceRequestOptions
   ): Promise<{ offer: RegisteredOfferResponse; invoice: InvoiceResolutionResponse }>;
   getOffer(offerId: OfferId): Promise<RegisteredOfferResponse>;
+  /** Operator only: the resolver requires its API key. */
   listOffers(): Promise<OfferListResponse>;
+  /** Operator only: the resolver requires its API key. */
   diagnostics(): Promise<ResolverDiagnostics>;
   offerQrUrl(offerId: OfferId, payload?: "link" | "offer"): string;
   checkPayment(
@@ -227,38 +234,64 @@ export class FiberOffersClient {
     request: PaymentRequest,
     options?: InvoiceRequestOptions
   ): Promise<PaymentReadiness>;
+  /** Operator only: the resolver requires its API key. */
   getResolutions(offerOrId: OfferOrId): Promise<ResolutionRecord[]>;
-  /** Pass a subscription ID for that subscription's status; omit it for the offer summary. */
+  /**
+   * With a subscription ID: where that subscription stands (no key needed; the
+   * ID is known only to its payer). Without one: the summary across all
+   * subscribers, which is operator only.
+   */
   getRecurrenceStatus(offerOrId: OfferOrId, approvalId?: string): Promise<RecurrenceStatus>;
   revokeOffer(offerOrId: OfferOrId, revocation: JsonObject): Promise<JsonObject>;
   getResolution(offerOrId: OfferOrId, resolutionId: string): Promise<ResolutionRecord>;
   getReceipt(offerOrId: OfferOrId, resolutionId: string): Promise<JsonObject>;
+  /** Operator only: the resolver requires its API key. */
   getReconciliation(offerOrId: OfferOrId): Promise<JsonObject>;
+  /** Operator only: the resolver requires its API key. */
   getReconciliationCsv(offerOrId: OfferOrId): Promise<string>;
+  /** Operator only: the resolver requires its API key. */
   createWebhook(offerOrId: OfferOrId, webhook: WebhookRegistrationInput): Promise<WebhookCreateResponse>;
+  /** Operator only: the resolver requires its API key. */
   getWebhooks(offerOrId: OfferOrId): Promise<WebhookListResponse>;
+  /** Operator only: the resolver requires its API key. */
   updateWebhook(offerOrId: OfferOrId, webhookId: string, update: WebhookUpdateInput): Promise<WebhookSubscription>;
+  /** Operator only: the resolver requires its API key. */
   deleteWebhook(offerOrId: OfferOrId, webhookId: string): Promise<JsonObject>;
+  /** Operator only: the resolver requires its API key. */
   rotateWebhookSecret(offerOrId: OfferOrId, webhookId: string): Promise<WebhookCreateResponse>;
+  /** Operator only: the resolver requires its API key. */
   testWebhook(offerOrId: OfferOrId, webhookId: string): Promise<WebhookDeliveryResult>;
+  /** Operator only: the resolver requires its API key. */
   getWebhookEvents(offerOrId: OfferOrId): Promise<WebhookEventListResponse>;
+  /** Operator only: the resolver requires its API key. */
   deliverWebhookEvents(offerOrId: OfferOrId, options?: WebhookDeliveryOptions): Promise<WebhookDeliveryResult>;
+  /** Operator only: the resolver requires its API key. */
   deliverWebhookEvent(offerOrId: OfferOrId, eventId: string, options?: WebhookDeliveryOptions): Promise<WebhookDeliveryResult>;
+  /** The URL only; fetching it needs the API key or an operator session. */
   reconciliationCsvUrl(offerOrId: OfferOrId): string;
+  /** Operator only: the resolver requires its API key. */
   updateResolutionStatus(
     offerOrId: OfferOrId,
     resolutionId: string,
     update: ResolutionStatusUpdate
   ): Promise<ResolutionRecord>;
+  /** Operator only: the resolver requires its API key. */
   syncResolution(offerOrId: OfferOrId, resolutionId: string): Promise<ResolutionSyncResult>;
+  /** Operator only: the resolver requires its API key. */
   syncResolutions(offerOrId: OfferOrId, options?: SyncResolutionsOptions): Promise<BatchResolutionSyncResult>;
   requestInvoice(
     offerOrId: OfferOrId,
     request: PaymentRequest,
     options?: InvoiceRequestOptions
   ): Promise<InvoiceResolutionResponse>;
+  /** Operator only: the resolver requires its API key. */
   bindFiberAddress(username: string, offerId: string): Promise<JsonObject>;
   resolveFiberAddress(address: string): Promise<RegisteredOfferResponse>;
+  /**
+   * Operator only, and only on a resolver running with RESOLVER_DEMO_MODE=true:
+   * the resolver generates the offer's key and signs for you. Use createOffer
+   * for anything real, so the key never leaves your side.
+   */
   demoCreateOffer(input: JsonObject): Promise<RegisteredOfferResponse>;
 }
 

@@ -10,7 +10,7 @@ RESOLVER_RATE_LIMIT_MAX=120 \
 npm run dev
 ```
 
-When `RESOLVER_API_KEY` is set, protected write operations require:
+When `RESOLVER_API_KEY` is set, operator routes require:
 
 ```text
 Authorization: Bearer change-me
@@ -28,7 +28,49 @@ the login form long enough to complete that exchange and is never written to
 browser storage. CLI and backend integrations continue to use bearer or
 `x-api-key` authentication.
 
-Public read endpoints such as payment links, QR codes, readiness checks, receipts, and reconciliation reads remain open.
+### What is public and what needs the key
+
+Open to anyone, because a payer's wallet calls them:
+
+- offer lookup, Fiber Address lookup, the payment page and QR codes;
+- `POST /offers/:offer_id/check` and `POST /offers/:offer_id/invoice`;
+- one resolution and its receipt, addressed by the resolution ID that only the
+  payer who requested that invoice holds;
+- one subscription's recurrence status, addressed by the subscription ID that
+  is derived from the payer's own key;
+- revoking an offer, which is authorised by a signature from the offer's key;
+- `GET /health`, which says only whether the resolver is up.
+
+Everything else needs the key: registering and listing offers, Fiber Address
+binding, the list of an offer's resolutions, reconciliation exports, the
+recurrence summary across subscribers, settlement sync and status changes,
+webhooks, `GET /diagnostics` and `GET /topology`. An offer ID is printed in
+every payment link, so anything that lists an offer's payments would otherwise
+hand the merchant's payment history to anyone holding a link.
+
+Public responses carry the invoice and its payment hash, never the raw request
+sent to the Fiber node or its raw answer. `POST /offers/:offer_id/check` runs a
+route check on the payer node only for operators.
+
+The full table is `EXPECTED_ACCESS` in
+`apps/resolver/test/route-access.test.js`; that test fails if a route is added
+without stating who may call it.
+
+### Demo mode
+
+`RESOLVER_DEMO_MODE=true` switches on what exists for a public demo and has no
+place on a merchant's resolver. It is off by default, and the resolver prints a
+warning at startup when it is on.
+
+| With demo mode on | Why it is off by default |
+| --- | --- |
+| `POST /demo/offers` creates an offer with a key generated on the server and returns the private key | An offer's key should never be held by the resolver |
+| `POST` and `GET /demo/webhook-receiver`, a sample webhook inbox (last 50 deliveries, 64 KiB each, no request headers kept) | Unauthenticated writes |
+| `RESOLVER_PUBLIC_OPERATOR_ACCESS=true` gives every visitor an operator session | It makes every operator route public |
+| Anonymous `POST /offers/:offer_id/check` calls run route checks on `PAYER_FIBER_RPC_URL` | They run on the operator's own payer node and report its channels |
+
+`RESOLVER_PUBLIC_OPERATOR_ACCESS` is ignored, with a warning in the log, unless
+demo mode is on.
 
 ## Docker
 
@@ -98,9 +140,13 @@ docker compose up -d --build
 A payer node is not part of the merchant deployment. Configure a separate payer
 RPC only for controlled topology and end-to-end tests.
 
-`GET /health` checks PostgreSQL, Redis, and the configured invoice source. In
-live mode it returns `503` when FNN cannot be reached; `GET /diagnostics` includes
-the detailed peer and channel report.
+`GET /health` checks PostgreSQL, Redis, and the configured invoice source, and
+returns `503` when one of them is down (in live mode, when FNN cannot be
+reached). Anonymous callers get `ok`, `service` and `invoice_mode` only; with
+the API key the response also names the failing dependency and the node. One
+probe answers health checks for five seconds, so they cannot be used to load
+the node. `GET /diagnostics` (API key required) has the detailed peer and
+channel report.
 
 Scale API or worker processes independently:
 
@@ -272,6 +318,11 @@ on horizontally scaled API replicas; use `npm run worker` instead.
 For a public demo:
 
 - deploy behind HTTPS;
+- set `RESOLVER_DEMO_MODE=true` (see [Demo mode](#demo-mode)), and
+  `RESOLVER_PUBLIC_OPERATOR_ACCESS=true` only if every visitor should get the
+  operator workspace;
+- use a testnet node with no funds you care about: demo mode lets visitors
+  create offers and read the node's diagnostics;
 - set `RESOLVER_API_KEY`;
 - enter that key only in the dashboard unlock dialog or a trusted CLI/backend;
 - set `RESOLVER_SECRET_ENCRYPTION_KEY` so webhook secrets are encrypted with AES-256-GCM on disk;

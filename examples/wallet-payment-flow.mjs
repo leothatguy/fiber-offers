@@ -3,11 +3,15 @@ import { FiberOffersClient, FiberPaymentClient, FiberPaymentFlowClient } from "@
 const resolverUrl = process.env.RESOLVER_URL ?? "http://127.0.0.1:8787";
 const payerRpcUrl = process.env.PAYER_FIBER_RPC_URL;
 
+// The wallet's client holds no credentials: paying needs none.
 const resolver = new FiberOffersClient({ resolverUrl });
 const paymentClient = payerRpcUrl ? new FiberPaymentClient({ url: payerRpcUrl }) : undefined;
 const flow = new FiberPaymentFlowClient({ resolverClient: resolver, paymentClient });
 
-const offer = await resolver.demoCreateOffer({
+// Something to pay: a sample offer from a resolver in demo mode
+// (RESOLVER_DEMO_MODE=true). A real wallet starts from an offer link or QR.
+const merchant = new FiberOffersClient({ resolverUrl, apiKey: process.env.RESOLVER_API_KEY });
+const offer = await merchant.demoCreateOffer({
   username: "wallet-example",
   description: "Wallet SDK example",
   amount_min: "1000",

@@ -822,7 +822,7 @@ test("reports configured Fiber topology", async () => {
 test("enforces API key when configured", async () => {
   await withServer(
     async (baseUrl) => {
-      const health = await getJson(`${baseUrl}/health`);
+      const session = await getJson(`${baseUrl}/operator/session`);
       const rejected = await postJson(`${baseUrl}/demo/offers`, {
         username: "auth"
       });
@@ -835,7 +835,8 @@ test("enforces API key when configured", async () => {
         { "x-api-key": "test-key" }
       );
 
-      assert.equal(health.body.auth_required, true);
+      assert.equal(session.body.auth_required, true);
+      assert.equal(session.body.authenticated, false);
       assert.equal(rejected.status, 401);
       assert.equal(rejected.body.error.code, "UNAUTHORIZED");
       assert.equal(listRejected.status, 401);
@@ -2087,6 +2088,10 @@ async function withServer(callback, options = {}) {
     store: new InMemoryOfferStore(),
     invoiceAdapter: options.invoiceAdapter ?? new MockInvoiceAdapter(),
     apiKey: options.apiKey,
+    // These tests create their offers through the demo offer route for brevity,
+    // so the server runs in demo mode unless a test turns it off. What a
+    // resolver exposes with demo mode off is covered in route-access.test.js.
+    demoMode: options.demoMode ?? true,
     publicOperatorAccess: options.publicOperatorAccess,
     topologyClient: options.topologyClient ?? false,
     fetchImpl: options.fetchImpl,

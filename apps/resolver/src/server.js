@@ -52,6 +52,11 @@ const webhookSubscriptionEventTypes = new Set([
 ]);
 const webhookEventTypes = new Set([...webhookSubscriptionEventTypes, "webhook.test"]);
 const operatorSessionCookie = "fiber_offers_operator";
+// The demo webhook inbox keeps the most recent deliveries only.
+const demoInboxLimits = { entries: 50, entryBytes: 64 * 1024, totalBytes: 512 * 1024 };
+// How long one dependency probe answers /health, so anonymous health checks
+// cannot be used to hammer the Fiber node, the database or Redis.
+const healthCacheMs = 5000;
 
 export { InMemoryOfferStore, JsonOfferStore, PostgresOfferStore, createRateLimiter as createMemoryRateLimiter };
 
@@ -68,14 +73,23 @@ export function createServer(options = {}) {
   const staticRoot = options.staticRoot ?? defaultStaticRoot;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const apiKey = options.apiKey ?? process.env.RESOLVER_API_KEY;
-  const publicOperatorAccess = options.publicOperatorAccess ?? booleanEnv(process.env.RESOLVER_PUBLIC_OPERATOR_ACCESS);
+  const logger = options.logger ?? console;
+  // Demo mode switches on everything that exists for the public demo and has no
+  // place on a merchant's resolver: the /demo routes, operator access for every
+  // visitor, and route checks on the operator's payer node for anonymous callers.
+  const demoMode = options.demoMode ?? booleanEnv(process.env.RESOLVER_DEMO_MODE);
+  const publicOperatorAccessRequested =
+    options.publicOperatorAccess ?? booleanEnv(process.env.RESOLVER_PUBLIC_OPERATOR_ACCESS);
+  if (publicOperatorAccessRequested && !demoMode) {
+    logger.warn?.("RESOLVER_PUBLIC_OPERATOR_ACCESS is ignored because RESOLVER_DEMO_MODE is not enabled");
+  }
+  const publicOperatorAccess = Boolean(demoMode && publicOperatorAccessRequested);
   const operatorSessionTtlSeconds = positiveInteger(
     options.operatorSessionTtlSeconds ?? process.env.RESOLVER_ADMIN_SESSION_TTL_SECONDS,
     28800
   );
   const topologyClient = options.topologyClient ?? createTopologyClientFromEnv(process.env, fetchImpl);
-  const demoWebhookInbox = options.demoWebhookInbox ?? [];
-  const logger = options.logger ?? console;
+  const demoWebhookInbox = { entries: [], sizes: [], bytes: 0, sequence: 0 };
   const publicOrigin = normalizePublicOrigin(options.publicOrigin ?? process.env.RESOLVER_PUBLIC_URL);
   // How many reverse proxies this resolver sits behind. Forwarding headers are
   // believed only from that many trusted hops; with 0 they are ignored.
@@ -93,6 +107,7 @@ export function createServer(options = {}) {
     staticRoot,
     fetchImpl,
     apiKey,
+    demoMode,
     publicOperatorAccess,
     operatorSessionTtlSeconds,
     topologyClient,
@@ -141,6 +156,8 @@ export function createServer(options = {}) {
 
   server.store = store;
   server.invoiceAdapter = invoiceAdapter;
+  server.demoMode = demoMode;
+  server.publicOperatorAccess = publicOperatorAccess;
   server.backgroundWorkers = backgroundWorkers;
   server.startBackgroundWorkers = () => backgroundWorkers.start();
   server.stopBackgroundWorkers = () => backgroundWorkers.stop();
@@ -151,6 +168,340 @@ export function createServer(options = {}) {
   });
   if (backgroundWorkers.enabled) backgroundWorkers.start();
   return server;
+}
+
+// ---- Routes ----------------------------------------------------------------
+//
+// Every HTTP route is declared in ROUTES with who may call it. The dispatcher
+// enforces that before the handler runs, so a handler cannot forget the check,
+// and apps/resolver/test/route-access.test.js fails when a route is added
+// without its access being stated there too.
+//
+//   access "public"    anyone: the payment path itself, or a read addressed by
+//                      an ID only its holder knows
+//   access "operator"  the API key or an operator session
+//   demo: true         the route exists only when RESOLVER_DEMO_MODE=true
+//   query              the route applies only when this query parameter is given
+//   offer: true        `:offerId` must name a stored offer (404 otherwise)
+//   rateLimit          per-client limit, applied before anything is looked up
+
+const PATH_PARAMETERS = {
+  offerId: "0x[0-9a-f]{64}",
+  resolutionId: "res_[a-z0-9-]+",
+  webhookId: "wh_[a-z0-9-]+",
+  eventId: "evt_[a-z0-9-]+",
+  username: "[^/]+",
+  format: "json|csv"
+};
+
+const ROUTES = [
+  route("GET", "/health", { access: "public" }, getHealth),
+  route("GET", "/diagnostics", { access: "operator" }, async ({ response, context }) => {
+    sendJson(response, 200, await createDiagnostics(context));
+  }),
+  route("GET", "/topology", { access: "operator" }, async ({ response, context }) => {
+    sendJson(response, 200, await createTopologyReport(context));
+  }),
+
+  route("GET", "/operator/session", { access: "public" }, getOperatorSession),
+  route("POST", "/operator/session", { access: "public" }, loginOperator),
+  route("DELETE", "/operator/session", { access: "operator" }, ({ request, response }) => {
+    response.writeHead(204, {
+      "cache-control": "no-store",
+      "set-cookie": expiredOperatorSessionHeader(request)
+    });
+    response.end();
+  }),
+
+  route("POST", "/demo/offers", { access: "operator", demo: true }, async ({ request, response, context, origin }) => {
+    const body = await readJsonBody(request);
+    sendJson(response, 201, await createDemoOffer(body, origin, context));
+  }),
+  route("POST", "/demo/webhook-receiver", { access: "public", demo: true }, receiveDemoWebhook),
+  route("GET", "/demo/webhook-receiver", { access: "operator", demo: true }, ({ response, context }) => {
+    sendJson(response, 200, { received: context.demoWebhookInbox.entries });
+  }),
+
+  route("GET", "/offers", { access: "operator" }, listOffers),
+  route("POST", "/offers", { access: "operator" }, registerOffer),
+  route("POST", "/fiber-addresses", { access: "operator" }, bindFiberAddress),
+  route("GET", "/.well-known/fiberoffer/:username", { access: "public" }, lookupFiberAddress),
+
+  route("GET", "/offers/:offerId", { access: "public", offer: true }, async ({ response, context, entry, origin }) => {
+    const username = await context.store.getUsernameForOffer(entry.offer.offer_id);
+    sendJson(response, 200, offerResponse(entry, origin, username));
+  }),
+  // Revocation carries its own proof: a signature by the offer's key.
+  route(
+    "DELETE",
+    "/offers/:offerId",
+    { access: "public", offer: true, rateLimit: { scope: "offer-revoke" } },
+    revokeOffer
+  ),
+  route(
+    "GET",
+    "/offers/:offerId/qr.svg",
+    { access: "public", offer: true, rateLimit: { scope: "offer-qr" } },
+    async ({ response, entry, origin, url }) => {
+      const qr = await renderOfferQrSvg(entry, origin, url.searchParams.get("payload") ?? "link");
+      sendSvg(response, 200, qr.svg);
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/check",
+    { access: "public", offer: true, rateLimit: { scope: "offer-check" } },
+    checkOffer
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/invoice",
+    { access: "public", offer: true, rateLimit: { scope: "invoice-create" } },
+    async ({ request, response, context, entry, origin }) => {
+      const body = await readJsonBody(request);
+      const idempotencyKey = invoiceRequestIdempotencyKey(request, body);
+      const result = await resolveInvoice(entry, body, context, origin, { idempotencyKey });
+      sendJson(response, result.idempotent_replay ? 200 : 201, result);
+    }
+  ),
+  // Where one subscription stands, for its payer: the subscription ID is derived
+  // from a key only that payer holds. The same path without it is the summary
+  // across every subscriber, which is the merchant's.
+  route(
+    "GET",
+    "/offers/:offerId/recurrence-status",
+    { access: "public", offer: true, query: "approval_id", rateLimit: { scope: "recurrence-status" } },
+    async ({ response, context, url, entry, origin }) => {
+      const approvalId = url.searchParams.get("approval_id");
+      // The payer asks which cycle to request next. Bring the subscription's
+      // open invoice up to date first, so a payment the node has already seen
+      // is counted. If the node cannot be asked, answer from what is stored.
+      await settleOpenResolutions(context, entry, origin, approvalId).catch(() => {});
+      sendJson(response, 200, await recurrenceStatus(entry, context.store, approvalId));
+    }
+  ),
+  route(
+    "GET",
+    "/offers/:offerId/recurrence-status",
+    { access: "operator", offer: true },
+    async ({ response, context, entry }) => {
+      sendJson(response, 200, await recurrenceStatus(entry, context.store));
+    }
+  ),
+
+  // One resolution and its receipt are addressed by the resolution ID, which
+  // only the payer who requested that invoice (and the merchant) holds.
+  route(
+    "GET",
+    "/offers/:offerId/resolutions/:resolutionId",
+    { access: "public", offer: true },
+    async ({ response, context, params, origin }) => {
+      const resolution = await storedResolution(context, params);
+      sendJson(response, 200, publicResolution(resolution, origin, params.offerId));
+    }
+  ),
+  route(
+    "GET",
+    "/offers/:offerId/resolutions/:resolutionId/receipt.json",
+    { access: "public", offer: true },
+    async ({ response, context, params, entry, origin }) => {
+      const resolution = await storedResolution(context, params);
+      sendJson(response, 200, receiptResponse(entry, resolution, origin));
+    }
+  ),
+
+  // The offer ID is in every payment link, so anything listing an offer's
+  // payments is the merchant's payment history and needs operator access.
+  route(
+    "GET",
+    "/offers/:offerId/resolutions",
+    { access: "operator", offer: true },
+    async ({ response, context, params, origin }) => {
+      const resolutions = await context.store.getResolutions(params.offerId);
+      sendJson(response, 200, {
+        offer_id: params.offerId,
+        resolutions: resolutions.map((resolution) => publicResolution(resolution, origin, params.offerId))
+      });
+    }
+  ),
+  route(
+    "GET",
+    "/offers/:offerId/reconciliation.:format",
+    { access: "operator", offer: true },
+    async ({ response, context, params, origin }) => {
+      const report = await createReconciliationReport(context.store, params.offerId, origin);
+      if (params.format === "csv") {
+        sendCsv(response, 200, reconciliationCsv(report), `fiber-offers-${params.offerId.slice(2, 10)}.csv`);
+        return;
+      }
+      sendJson(response, 200, report);
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/resolutions/sync",
+    { access: "operator", offer: true },
+    async ({ request, response, context, params, origin }) => {
+      const body = await readJsonBody(request);
+      const result = await syncOfferResolutions(context, params.offerId, origin, {
+        includeTerminal: Boolean(body.include_terminal)
+      });
+      sendJson(response, 200, result);
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/resolutions/:resolutionId/sync",
+    { access: "operator", offer: true },
+    async ({ response, context, params, origin }) => {
+      sendJson(
+        response,
+        200,
+        await syncResolutionFromInvoiceSource(context, params.offerId, params.resolutionId, origin)
+      );
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/resolutions/:resolutionId/status",
+    { access: "operator", offer: true },
+    async ({ request, response, context, params, origin }) => {
+      const body = await readJsonBody(request);
+      const resolution = await updateResolutionStatus(context, params.offerId, params.resolutionId, body, origin);
+      sendJson(response, 200, publicResolution(resolution, origin, params.offerId));
+    }
+  ),
+
+  route(
+    "GET",
+    "/offers/:offerId/webhooks",
+    { access: "operator", offer: true },
+    async ({ response, context, params }) => {
+      sendJson(response, 200, {
+        offer_id: params.offerId,
+        webhooks: (await context.store.listWebhooks(params.offerId)).map((webhook) => publicWebhook(webhook))
+      });
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/webhooks",
+    { access: "operator", offer: true },
+    async ({ request, response, context, params }) => {
+      const body = await readJsonBody(request);
+      const webhook = await context.store.addWebhook(params.offerId, normalizeWebhookInput(body, context));
+      sendJson(response, 201, publicWebhook(webhook, { includeSecret: true }));
+    }
+  ),
+  route(
+    "PATCH",
+    "/offers/:offerId/webhooks/:webhookId",
+    { access: "operator", offer: true },
+    async ({ request, response, context, params }) => {
+      await storedWebhook(context, params);
+      const body = await readJsonBody(request);
+      const updated = await context.store.updateWebhook(
+        params.offerId,
+        params.webhookId,
+        normalizeWebhookUpdate(body, context)
+      );
+      sendJson(response, 200, publicWebhook(updated));
+    }
+  ),
+  route(
+    "DELETE",
+    "/offers/:offerId/webhooks/:webhookId",
+    { access: "operator", offer: true },
+    async ({ response, context, params }) => {
+      await storedWebhook(context, params);
+      await context.store.deleteWebhook(params.offerId, params.webhookId);
+      sendJson(response, 200, { offer_id: params.offerId, webhook_id: params.webhookId, deleted: true });
+    }
+  ),
+  route(
+    "POST",
+    "/offers/:offerId/webhooks/:webhookId/rotate-secret",
+    { access: "operator", offer: true },
+    async ({ response, context, params }) => {
+      await storedWebhook(context, params);
+      const updated = await context.store.updateWebhook(params.offerId, params.webhookId, {
+        secret: createWebhookSigningSecret()
+      });
+      sendJson(response, 200, publicWebhook(updated, { includeSecret: true }));
+    }
+  ),
+  route("POST", "/offers/:offerId/webhooks/:webhookId/test", { access: "operator", offer: true }, sendTestWebhook),
+  route(
+    "GET",
+    "/offers/:offerId/webhook-events",
+    { access: "operator", offer: true },
+    async ({ response, context, params }) => {
+      sendJson(response, 200, {
+        offer_id: params.offerId,
+        events: await context.store.listWebhookEvents(params.offerId)
+      });
+    }
+  ),
+  route("POST", "/offers/:offerId/webhook-events/deliver", { access: "operator", offer: true }, deliverWebhookEvents),
+  route(
+    "POST",
+    "/offers/:offerId/webhook-events/:eventId/deliver",
+    { access: "operator", offer: true },
+    deliverWebhookEvents
+  )
+];
+
+// The route table without its handlers, for the access test and for documentation.
+export function describeRoutes() {
+  return ROUTES.map(({ method, path, query, access, demo }) => ({
+    method,
+    path: query ? `${path}?${query}=:${query}` : path,
+    access,
+    demo
+  }));
+}
+
+function route(method, path, options, handler) {
+  const names = [];
+  const source = path
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/:([a-zA-Z]+)/g, (_match, name) => {
+      if (!PATH_PARAMETERS[name]) throw new Error(`route ${path} uses an unknown parameter :${name}`);
+      names.push(name);
+      return `(${PATH_PARAMETERS[name]})`;
+    });
+  if (!["public", "operator"].includes(options.access)) {
+    throw new Error(`route ${method} ${path} must declare access as "public" or "operator"`);
+  }
+  return {
+    method,
+    path,
+    access: options.access,
+    demo: Boolean(options.demo),
+    offer: Boolean(options.offer),
+    rateLimit: options.rateLimit,
+    query: options.query,
+    pattern: new RegExp(`^${source}$`),
+    names,
+    handler
+  };
+}
+
+// The first route that fits wins, so a route narrowed by `query` is listed
+// before the same path without it.
+function matchRoute(method, url) {
+  for (const candidate of ROUTES) {
+    if (candidate.method !== method) continue;
+    if (candidate.query && !url.searchParams.get(candidate.query)) continue;
+    const match = candidate.pattern.exec(url.pathname);
+    if (!match) continue;
+    const params = {};
+    candidate.names.forEach((name, index) => {
+      params[name] = match[index + 1];
+    });
+    return { route: candidate, params };
+  }
+  return undefined;
 }
 
 async function handleRequest(request, response, context) {
@@ -166,433 +517,220 @@ async function handleRequest(request, response, context) {
   }
 
   const url = new URL(request.url, requestOrigin(request));
-  const { pathname } = url;
-
-  if (request.method === "GET" && (await serveStatic(pathname, response, context.staticRoot))) {
+  if (request.method === "GET" && (await serveStatic(url.pathname, response, context.staticRoot))) {
     return;
   }
 
-  if (request.method === "GET" && pathname === "/health") {
-    const dependencies = await dependencyHealth(context);
-    const ok = Object.values(dependencies).every((dependency) => dependency.ok);
-    sendJson(response, ok ? 200 : 503, {
-      ok,
-      service: "fiber-offers-resolver",
-      invoice_mode: context.invoiceAdapter.mode,
+  const matched = matchRoute(request.method, url);
+  // On a resolver that is not in demo mode, a demo route does not exist.
+  if (!matched || (matched.route.demo && !context.demoMode)) {
+    throw httpError(404, "NOT_FOUND", "route was not found");
+  }
+
+  const { route: selected, params } = matched;
+  if (selected.access === "operator") requireApiKey(request, context);
+  if (selected.rateLimit) {
+    await enforceRateLimit(request, context, selected.rateLimit.scope, { max: selected.rateLimit.max });
+  }
+
+  const call = { request, response, context, url, params, origin: requestOrigin(request) };
+  if (selected.offer) {
+    call.entry = await context.store.getOffer(params.offerId);
+    if (!call.entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
+  }
+  await selected.handler(call);
+}
+
+// Anyone may ask whether the resolver is up. Which dependency is down, and the
+// node behind it, are told to operators only.
+async function getHealth({ request, response, context }) {
+  const dependencies = await cachedDependencyHealth(context);
+  const ok = Object.values(dependencies).every((dependency) => dependency.ok);
+  const body = {
+    ok,
+    service: "fiber-offers-resolver",
+    invoice_mode: context.invoiceAdapter.mode
+  };
+  if (isOperator(request, context)) {
+    Object.assign(body, {
       auth_required: Boolean(context.apiKey),
-      public_operator_access: Boolean(context.publicOperatorAccess),
+      demo_mode: context.demoMode,
+      public_operator_access: Boolean(context.apiKey && context.publicOperatorAccess),
       dependencies
     });
+  }
+  sendJson(response, ok ? 200 : 503, body);
+}
+
+function getOperatorSession({ request, response, context }) {
+  const publicSession = Boolean(context.apiKey && context.publicOperatorAccess);
+  if (publicSession && !hasValidApiCredential(request, context)) {
+    response.setHeader("set-cookie", operatorSessionHeader(context, request));
+  }
+  sendJson(response, 200, {
+    auth_required: Boolean(context.apiKey),
+    authenticated: !context.apiKey || publicSession || hasValidApiCredential(request, context),
+    public_operator_access: publicSession,
+    demo_mode: context.demoMode
+  });
+}
+
+async function loginOperator({ request, response, context }) {
+  if (!context.apiKey) {
+    sendJson(response, 200, { authenticated: true, auth_required: false });
     return;
   }
-
-  if (request.method === "GET" && pathname === "/diagnostics") {
-    sendJson(response, 200, await createDiagnostics(context));
-    return;
+  // Each attempt is a guess at the API key.
+  await enforceRateLimit(request, context, "operator-login", { max: 10 });
+  const body = await readJsonBody(request);
+  if (!safeSecretEqual(body.api_key, context.apiKey)) {
+    throw httpError(401, "UNAUTHORIZED", "valid API key is required");
   }
+  response.writeHead(204, {
+    "cache-control": "no-store",
+    "set-cookie": operatorSessionHeader(context, request)
+  });
+  response.end();
+}
 
-  if (pathname === "/operator/session") {
-    if (request.method === "GET") {
-      const publicSession = Boolean(context.apiKey && context.publicOperatorAccess);
-      if (publicSession && !hasValidApiCredential(request, context)) {
-        response.setHeader("set-cookie", operatorSessionHeader(context, request));
-      }
-      sendJson(response, 200, {
-        auth_required: Boolean(context.apiKey),
-        authenticated: !context.apiKey || publicSession || hasValidApiCredential(request, context),
-        public_operator_access: publicSession
-      });
-      return;
-    }
-
-    if (request.method === "POST") {
-      if (!context.apiKey) {
-        sendJson(response, 200, { authenticated: true, auth_required: false });
-        return;
-      }
-      // Each attempt is a guess at the API key.
-      await enforceRateLimit(request, context, "operator-login", { max: 10 });
-      const body = await readJsonBody(request);
-      if (!safeSecretEqual(body.api_key, context.apiKey)) {
-        throw httpError(401, "UNAUTHORIZED", "valid API key is required");
-      }
-      response.writeHead(204, {
-        "cache-control": "no-store",
-        "set-cookie": operatorSessionHeader(context, request)
-      });
-      response.end();
-      return;
-    }
-
-    if (request.method === "DELETE") {
-      requireApiKey(request, context);
-      response.writeHead(204, {
-        "cache-control": "no-store",
-        "set-cookie": expiredOperatorSessionHeader(request)
-      });
-      response.end();
-      return;
-    }
+// The demo page points its sample webhook here. Entries are trimmed to what
+// the page shows, and the inbox is bounded by count and by size.
+async function receiveDemoWebhook({ request, response, context }) {
+  const body = await readJsonBody(request, demoInboxLimits.entryBytes);
+  const inbox = context.demoWebhookInbox;
+  inbox.sequence += 1;
+  const entry = {
+    id: `demo_inbox_${inbox.sequence}`,
+    received_at: new Date().toISOString(),
+    signed: typeof request.headers["x-fiber-offers-signature"] === "string",
+    body
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(entry));
+  inbox.entries.push(entry);
+  inbox.sizes.push(bytes);
+  inbox.bytes += bytes;
+  while (inbox.entries.length > demoInboxLimits.entries || inbox.bytes > demoInboxLimits.totalBytes) {
+    inbox.entries.shift();
+    inbox.bytes -= inbox.sizes.shift();
   }
+  response.writeHead(204, { "cache-control": "no-store" });
+  response.end();
+}
 
-  if (request.method === "GET" && pathname === "/topology") {
-    sendJson(response, 200, await createTopologyReport(context));
-    return;
-  }
-
-  if (pathname === "/demo/webhook-receiver") {
-    if (request.method === "POST") {
-      const body = await readJsonBody(request);
-      context.demoWebhookInbox.push({
-        id: `demo_inbox_${context.demoWebhookInbox.length + 1}`,
-        received_at: new Date().toISOString(),
-        headers: request.headers,
-        body
-      });
-      response.writeHead(204, { "cache-control": "no-store" });
-      response.end();
-      return;
-    }
-
-    if (request.method === "GET") {
-      sendJson(response, 200, {
-        received: context.demoWebhookInbox
-      });
-      return;
-    }
-  }
-
-  if (request.method === "GET" && pathname === "/offers") {
-    requireApiKey(request, context);
-    const entries = await context.store.listOffers();
-    const offers = await Promise.all(
-      entries
-        .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)))
-        .map(async (entry) => {
-          const username = await context.store.getUsernameForOffer(entry.offer.offer_id);
-          return offerListItem(entry, requestOrigin(request), username);
-        })
-    );
-    sendJson(response, 200, { offers });
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/offers") {
-    requireApiKey(request, context);
-    const body = await readJsonBody(request);
-    const { offer, encodedOffer } = submittedOffer(body);
-    const verification = verifyOffer(offer);
-    if (!verification.ok) {
-      throw httpError(400, verification.code, verification.message);
-    }
-
-    const ownership = await verifyOfferNodeOwnership(offer, context);
-    await assertOfferAssetsSupported(offer, context);
-
-    const entry = await context.store.upsertOffer(offer, encodedOffer, {
-      username: body.username,
-      ownership
-    });
-
-    sendJson(response, 201, offerResponse(entry, requestOrigin(request), body.username));
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/demo/offers") {
-    requireApiKey(request, context);
-    const body = await readJsonBody(request);
-    const origin = requestOrigin(request);
-    const responseBody = await createDemoOffer(body, origin, context);
-    sendJson(response, 201, responseBody);
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/fiber-addresses") {
-    requireApiKey(request, context);
-    const body = await readJsonBody(request);
-    if (!body.offer_id) throw httpError(400, "MISSING_OFFER_ID", "offer_id is required");
-
-    const binding = await context.store.bindUsername(body.username, body.offer_id);
-    sendJson(response, 201, {
-      ...binding,
-      address: `${binding.username}@${hostOnly(request)}`,
-      lookup_url: `${requestOrigin(request)}/.well-known/fiberoffer/${binding.username}`
-    });
-    return;
-  }
-
-  const wellKnownMatch = pathname.match(/^\/\.well-known\/fiberoffer\/([^/]+)$/);
-  if (request.method === "GET" && wellKnownMatch) {
-    const username = decodeURIComponent(wellKnownMatch[1]);
-    const result = await context.store.getByUsername(username);
-    if (!result) throw httpError(404, "FIBER_ADDRESS_NOT_FOUND", "Fiber Address was not found");
-
-    sendJson(response, 200, {
-      username: result.username,
-      address: `${result.username}@${hostOnly(request)}`,
-      ...offerResponse(result.entry, requestOrigin(request), result.username)
-    });
-    return;
-  }
-
-  const qrMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/qr\.svg$/);
-  if (request.method === "GET" && qrMatch) {
-    const [, offerId] = qrMatch;
-    await enforceRateLimit(request, context, "offer-qr");
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-
-    const qr = await renderOfferQrSvg(entry, requestOrigin(request), url.searchParams.get("payload") ?? "link");
-    sendSvg(response, 200, qr.svg);
-    return;
-  }
-
-  const reconciliationMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/reconciliation\.(json|csv)$/);
-  if (request.method === "GET" && reconciliationMatch) {
-    const [, offerId, format] = reconciliationMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-
-    const report = await createReconciliationReport(context.store, offerId, requestOrigin(request));
-    if (format === "csv") {
-      sendCsv(response, 200, reconciliationCsv(report), `fiber-offers-${offerId.slice(2, 10)}.csv`);
-      return;
-    }
-
-    sendJson(response, 200, report);
-    return;
-  }
-
-  const receiptMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/resolutions\/(res_[a-z0-9-]+)\/receipt\.json$/);
-  if (request.method === "GET" && receiptMatch) {
-    const [, offerId, resolutionId] = receiptMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-
-    const resolution = await context.store.getResolution(offerId, resolutionId);
-    if (!resolution) throw httpError(404, "RESOLUTION_NOT_FOUND", "resolution_id was not found");
-
-    sendJson(response, 200, receiptResponse(entry, resolution, requestOrigin(request)));
-    return;
-  }
-
-  const webhookMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/(webhooks|webhook-events)$/);
-  if (webhookMatch) {
-    const [, offerId, resource] = webhookMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-
-    if (request.method === "GET" && resource === "webhooks") {
-      requireApiKey(request, context);
-      sendJson(response, 200, {
-        offer_id: offerId,
-        webhooks: (await context.store.listWebhooks(offerId)).map((webhook) => publicWebhook(webhook))
-      });
-      return;
-    }
-
-    if (request.method === "POST" && resource === "webhooks") {
-      requireApiKey(request, context);
-      const body = await readJsonBody(request);
-      const webhook = await context.store.addWebhook(offerId, normalizeWebhookInput(body, context));
-      sendJson(response, 201, publicWebhook(webhook, { includeSecret: true }));
-      return;
-    }
-
-    if (request.method === "GET" && resource === "webhook-events") {
-      requireApiKey(request, context);
-      sendJson(response, 200, {
-        offer_id: offerId,
-        events: await context.store.listWebhookEvents(offerId)
-      });
-      return;
-    }
-  }
-
-  const webhookSubscriptionMatch = pathname.match(
-    /^\/offers\/(0x[0-9a-f]{64})\/webhooks\/(wh_[a-z0-9-]+)(?:\/(test|rotate-secret))?$/
+async function listOffers({ response, context, origin }) {
+  const entries = await context.store.listOffers();
+  const offers = await Promise.all(
+    entries
+      .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)))
+      .map(async (entry) => {
+        const username = await context.store.getUsernameForOffer(entry.offer.offer_id);
+        return offerListItem(entry, origin, username);
+      })
   );
-  if (webhookSubscriptionMatch) {
-    requireApiKey(request, context);
-    const [, offerId, webhookId, action] = webhookSubscriptionMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-    const webhook = await context.store.getWebhook(offerId, webhookId);
-    if (!webhook) throw httpError(404, "WEBHOOK_NOT_FOUND", "webhook subscription was not found");
+  sendJson(response, 200, { offers });
+}
 
-    if (request.method === "PATCH" && !action) {
-      const body = await readJsonBody(request);
-      const updated = await context.store.updateWebhook(offerId, webhookId, normalizeWebhookUpdate(body, context));
-      sendJson(response, 200, publicWebhook(updated));
-      return;
-    }
-
-    if (request.method === "DELETE" && !action) {
-      await context.store.deleteWebhook(offerId, webhookId);
-      sendJson(response, 200, { offer_id: offerId, webhook_id: webhookId, deleted: true });
-      return;
-    }
-
-    if (request.method === "POST" && action === "rotate-secret") {
-      const updated = await context.store.updateWebhook(offerId, webhookId, { secret: createWebhookSigningSecret() });
-      sendJson(response, 200, publicWebhook(updated, { includeSecret: true }));
-      return;
-    }
-
-    if (request.method === "POST" && action === "test") {
-      if (webhook.disabled) throw httpError(409, "WEBHOOK_DISABLED", "resume this webhook before sending a test event");
-      const event = await context.store.addWebhookEvent(
-        offerId,
-        {
-          type: "webhook.test",
-          payload: {
-            offer_id: offerId,
-            webhook_id: webhookId,
-            message: "Fiber Offers webhook test"
-          }
-        },
-        { webhookIds: [webhookId] }
-      );
-      const delivery = await drainWebhookEvents(context, offerId, { eventId: event.id });
-      sendJson(response, 200, { event_id: event.id, ...delivery });
-      return;
-    }
+async function registerOffer({ request, response, context, origin }) {
+  const body = await readJsonBody(request);
+  const { offer, encodedOffer } = submittedOffer(body);
+  const verification = verifyOffer(offer);
+  if (!verification.ok) {
+    throw httpError(400, verification.code, verification.message);
   }
 
-  const webhookDeliveryMatch = pathname.match(
-    /^\/offers\/(0x[0-9a-f]{64})\/webhook-events(?:\/(evt_[a-z0-9-]+))?\/deliver$/
-  );
-  if (request.method === "POST" && webhookDeliveryMatch) {
-    requireApiKey(request, context);
-    const [, offerId, eventId] = webhookDeliveryMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
+  const ownership = await verifyOfferNodeOwnership(offer, context);
+  await assertOfferAssetsSupported(offer, context);
 
-    const body = await readJsonBody(request);
-    const result = await drainWebhookEvents(context, offerId, {
-      eventId,
-      retryFailed: Boolean(body.retry_failed)
-    });
-    sendJson(response, 200, result);
-    return;
-  }
+  const entry = await context.store.upsertOffer(offer, encodedOffer, {
+    username: body.username,
+    ownership
+  });
 
-  const batchResolutionSyncMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/resolutions\/sync$/);
-  if (request.method === "POST" && batchResolutionSyncMatch) {
-    requireApiKey(request, context);
-    const [, offerId] = batchResolutionSyncMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
+  sendJson(response, 201, offerResponse(entry, origin, body.username));
+}
 
-    const body = await readJsonBody(request);
-    const result = await syncOfferResolutions(context, offerId, requestOrigin(request), {
-      includeTerminal: Boolean(body.include_terminal)
-    });
-    sendJson(response, 200, result);
-    return;
-  }
+async function bindFiberAddress({ request, response, context, origin }) {
+  const body = await readJsonBody(request);
+  if (!body.offer_id) throw httpError(400, "MISSING_OFFER_ID", "offer_id is required");
 
-  const resolutionSyncMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/resolutions\/(res_[a-z0-9-]+)\/sync$/);
-  if (request.method === "POST" && resolutionSyncMatch) {
-    requireApiKey(request, context);
-    const [, offerId, resolutionId] = resolutionSyncMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
+  const binding = await context.store.bindUsername(body.username, body.offer_id);
+  sendJson(response, 201, {
+    ...binding,
+    address: `${binding.username}@${hostOnly(request)}`,
+    lookup_url: `${origin}/.well-known/fiberoffer/${binding.username}`
+  });
+}
 
-    const result = await syncResolutionFromInvoiceSource(context, offerId, resolutionId, requestOrigin(request));
-    sendJson(response, 200, result);
-    return;
-  }
+async function lookupFiberAddress({ request, response, context, params, origin }) {
+  const username = decodeURIComponent(params.username);
+  const result = await context.store.getByUsername(username);
+  if (!result) throw httpError(404, "FIBER_ADDRESS_NOT_FOUND", "Fiber Address was not found");
 
-  const resolutionMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})\/resolutions\/(res_[a-z0-9-]+)(?:\/status)?$/);
-  if (resolutionMatch) {
-    const [, offerId, resolutionId] = resolutionMatch;
-    const isStatusRoute = pathname.endsWith("/status");
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
+  sendJson(response, 200, {
+    username: result.username,
+    address: `${result.username}@${hostOnly(request)}`,
+    ...offerResponse(result.entry, origin, result.username)
+  });
+}
 
-    if (request.method === "GET" && !isStatusRoute) {
-      const resolution = await context.store.getResolution(offerId, resolutionId);
-      if (!resolution) throw httpError(404, "RESOLUTION_NOT_FOUND", "resolution_id was not found");
+async function revokeOffer({ request, response, context, params, entry }) {
+  const body = await readJsonBody(request);
+  const verification = verifyOfferRevocation(entry.offer, body.revocation ?? body);
+  if (!verification.ok) throw httpError(400, verification.code, verification.message);
+  const revoked = await context.store.revokeOffer(params.offerId, body.revocation ?? body);
+  sendJson(response, 200, { offer_id: params.offerId, revoked: true, revoked_at: revoked.revoked_at });
+}
 
-      sendJson(response, 200, publicResolution(resolution, requestOrigin(request), offerId));
-      return;
-    }
+async function checkOffer({ request, response, context, entry, origin }) {
+  const body = await readJsonBody(request);
+  const idempotencyKey = invoiceRequestIdempotencyKey(request, body);
+  const result = await checkOfferReadiness(entry, body, context, origin, {
+    idempotencyKey,
+    // A route check runs on the operator's own payer node and reports its
+    // channels, so it is for operators, or for everyone on a demo resolver.
+    includeTopology: context.demoMode || isOperator(request, context)
+  });
+  sendJson(response, 200, result);
+}
 
-    if (request.method === "POST" && isStatusRoute) {
-      requireApiKey(request, context);
-      const body = await readJsonBody(request);
-      const resolution = await updateResolutionStatus(context, offerId, resolutionId, body, requestOrigin(request));
-      sendJson(response, 200, publicResolution(resolution, requestOrigin(request), offerId));
-      return;
-    }
-  }
-
-  const offerMatch = pathname.match(/^\/offers\/(0x[0-9a-f]{64})(?:\/(invoice|resolutions|check|recurrence-status))?$/);
-  if (offerMatch) {
-    const [, offerId, action] = offerMatch;
-    const entry = await context.store.getOffer(offerId);
-    if (!entry) throw httpError(404, "OFFER_NOT_FOUND", "offer_id was not found");
-
-    if (request.method === "DELETE" && !action) {
-      // Unauthenticated and costs a signature verification per call.
-      await enforceRateLimit(request, context, "offer-revoke");
-      const body = await readJsonBody(request);
-      const verification = verifyOfferRevocation(entry.offer, body.revocation ?? body);
-      if (!verification.ok) throw httpError(400, verification.code, verification.message);
-      const revoked = await context.store.revokeOffer(offerId, body.revocation ?? body);
-      sendJson(response, 200, { offer_id: offerId, revoked: true, revoked_at: revoked.revoked_at });
-      return;
-    }
-
-    if (request.method === "GET" && !action) {
-      const username = await context.store.getUsernameForOffer(offerId);
-      sendJson(response, 200, offerResponse(entry, requestOrigin(request), username));
-      return;
-    }
-
-    if (request.method === "GET" && action === "resolutions") {
-      const resolutions = await context.store.getResolutions(offerId);
-      sendJson(response, 200, {
-        offer_id: offerId,
-        resolutions: resolutions.map((resolution) => publicResolution(resolution, requestOrigin(request), offerId))
-      });
-      return;
-    }
-
-    if (request.method === "GET" && action === "recurrence-status") {
-      const approvalId = url.searchParams.get("approval_id");
-      if (approvalId) {
-        // A payer asks which cycle to request next. Bring that subscription's
-        // open invoice up to date first, so a payment the node has already
-        // seen is counted. If the node cannot be asked, answer from what is stored.
-        await enforceRateLimit(request, context, "recurrence-status");
-        await settleOpenResolutions(context, entry, requestOrigin(request), approvalId).catch(() => {});
+async function sendTestWebhook({ response, context, params }) {
+  const webhook = await storedWebhook(context, params);
+  if (webhook.disabled) throw httpError(409, "WEBHOOK_DISABLED", "resume this webhook before sending a test event");
+  const event = await context.store.addWebhookEvent(
+    params.offerId,
+    {
+      type: "webhook.test",
+      payload: {
+        offer_id: params.offerId,
+        webhook_id: params.webhookId,
+        message: "Fiber Offers webhook test"
       }
-      sendJson(response, 200, await recurrenceStatus(entry, context.store, approvalId));
-      return;
-    }
+    },
+    { webhookIds: [params.webhookId] }
+  );
+  const delivery = await drainWebhookEvents(context, params.offerId, { eventId: event.id });
+  sendJson(response, 200, { event_id: event.id, ...delivery });
+}
 
-    if (request.method === "POST" && action === "check") {
-      await enforceRateLimit(request, context, "offer-check");
-      const body = await readJsonBody(request);
-      const idempotencyKey = invoiceRequestIdempotencyKey(request, body);
-      const result = await checkOfferReadiness(entry, body, context, requestOrigin(request), { idempotencyKey });
-      sendJson(response, 200, result);
-      return;
-    }
+async function deliverWebhookEvents({ request, response, context, params }) {
+  const body = await readJsonBody(request);
+  const result = await drainWebhookEvents(context, params.offerId, {
+    eventId: params.eventId,
+    retryFailed: Boolean(body.retry_failed)
+  });
+  sendJson(response, 200, result);
+}
 
-    if (request.method === "POST" && action === "invoice") {
-      await enforceRateLimit(request, context, "invoice-create");
-      const body = await readJsonBody(request);
-      const idempotencyKey = invoiceRequestIdempotencyKey(request, body);
-      const result = await resolveInvoice(entry, body, context, requestOrigin(request), { idempotencyKey });
-      sendJson(response, result.idempotent_replay ? 200 : 201, result);
-      return;
-    }
-  }
+async function storedResolution(context, params) {
+  const resolution = await context.store.getResolution(params.offerId, params.resolutionId);
+  if (!resolution) throw httpError(404, "RESOLUTION_NOT_FOUND", "resolution_id was not found");
+  return resolution;
+}
 
-  throw httpError(404, "NOT_FOUND", "route was not found");
+async function storedWebhook(context, params) {
+  const webhook = await context.store.getWebhook(params.offerId, params.webhookId);
+  if (!webhook) throw httpError(404, "WEBHOOK_NOT_FOUND", "webhook subscription was not found");
+  return webhook;
 }
 
 async function createDemoOffer(body, origin, context) {
@@ -774,8 +912,7 @@ function invoiceResolutionResponse(offerId, record, options = {}) {
           webhook_event_id: options.webhookEvent.id,
           webhook_delivery_count: options.webhookEvent.deliveries.length
         }
-      : {}),
-    raw_result: invoice.raw_result
+      : {})
   };
 }
 
@@ -1223,7 +1360,7 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
       : passCheck("invoice_source", "Resolver is configured for Fiber RPC invoices")
   );
 
-  const topology = await createReadinessTopologyReport(context, body);
+  const topology = options.includeTopology ? await createReadinessTopologyReport(context, body) : undefined;
 
   return analyzePaymentReadiness({
     offer_id: entry.offer.offer_id,
@@ -1289,7 +1426,7 @@ function publicResolution(record, origin, offerId) {
     status,
     amount: record.amount,
     asset: record.asset,
-    invoice: record.invoice,
+    invoice: publicInvoice(record.invoice),
     payment_hash: record.invoice?.payment_hash,
     invoice_url: `${origin}/offers/${offerId}/resolutions/${record.id}`,
     receipt_url: `${origin}/offers/${offerId}/resolutions/${record.id}/receipt.json`,
@@ -1304,6 +1441,21 @@ function publicResolution(record, origin, offerId) {
     recurrence: record.recurrence,
     status_history: record.status_history ?? []
   };
+}
+
+// What a payer needs from a stored invoice. The request sent to the Fiber node
+// and its raw answer stay in the store.
+function publicInvoice(invoice) {
+  if (!invoice) return undefined;
+  return cleanUndefined({
+    mode: invoice.mode,
+    invoice: invoice.invoice,
+    payment_request: invoice.payment_request,
+    payment_hash: invoice.payment_hash,
+    expiry_seconds: invoice.expiry_seconds,
+    expires_at: invoice.expires_at,
+    mocked: invoice.mocked
+  });
 }
 
 function publicInvoiceSyncSource(invoiceSource) {
@@ -1989,6 +2141,14 @@ async function dependencyHealth(context) {
   return result;
 }
 
+async function cachedDependencyHealth(context) {
+  const cached = context.healthCache;
+  if (cached && Date.now() - cached.at < healthCacheMs) return cached.value;
+  const value = await dependencyHealth(context);
+  context.healthCache = { at: Date.now(), value };
+  return value;
+}
+
 async function invoiceSourceHealth(invoiceAdapter) {
   const source = await probeInvoiceSource(invoiceAdapter);
   return {
@@ -2064,6 +2224,12 @@ function requireApiKey(request, context) {
   if (!hasValidApiCredential(request, context)) {
     throw httpError(401, "UNAUTHORIZED", "valid API key is required");
   }
+}
+
+// Whether the caller may see what operators see. With no API key configured
+// (local development) every caller is the operator.
+function isOperator(request, context) {
+  return !context.apiKey || hasValidApiCredential(request, context);
 }
 
 function hasValidApiCredential(request, context) {
@@ -2383,13 +2549,13 @@ function cleanUndefined(value) {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maxBytes = maxJsonBytes) {
   const chunks = [];
   let size = 0;
 
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maxJsonBytes) {
+    if (size > maxBytes) {
       throw httpError(413, "BODY_TOO_LARGE", "JSON body is too large");
     }
     chunks.push(chunk);
@@ -2633,5 +2799,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`Fiber Offers resolver running at http://localhost:${port}`);
     console.log(`Invoice mode: ${server.invoiceAdapter.mode}`);
     console.log(`Settlement workers: ${server.backgroundWorkers.enabled ? "enabled" : "disabled"}`);
+    if (server.demoMode) {
+      console.warn(
+        [
+          "",
+          "WARNING: RESOLVER_DEMO_MODE is on.",
+          "  - The /demo routes are served (offers signed with server-generated keys, a public webhook inbox).",
+          "  - Anyone can run route checks on the payer node through /offers/:id/check.",
+          ...(server.publicOperatorAccess ? ["  - Every visitor is given operator access."] : []),
+          "  Do not use this on a resolver that takes real payments.",
+          ""
+        ].join("\n")
+      );
+    }
   });
 }

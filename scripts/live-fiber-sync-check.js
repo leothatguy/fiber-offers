@@ -10,6 +10,8 @@ try {
     });
   }
 
+  // This check asks the resolver to create and sign its sample offer, which a
+  // resolver does only in demo mode.
   const offer = await request("/demo/offers", {
     method: "POST",
     body: {
@@ -18,6 +20,11 @@ try {
       amount_max: amount,
       description: "Fiber Offers live sync check"
     }
+  }).catch((error) => {
+    if (error.status !== 404) throw error;
+    throw checkError("resolver is not in demo mode; start it with RESOLVER_DEMO_MODE=true (npm run dev:fiber:local does)", {
+      resolver_url: resolverUrl
+    });
   });
   const invoice = await request(`/offers/${offer.offer_id}/invoice`, {
     method: "POST",
@@ -83,6 +90,7 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const error = new Error(body?.error?.message ?? `request failed with ${response.status}`);
     error.code = body?.error?.code;
+    error.status = response.status;
     error.details = body?.error?.details;
     throw error;
   }

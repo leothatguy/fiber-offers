@@ -14,14 +14,26 @@ npm run cli -- revoke 0x<offer-id> --reason "Retired"
 See [Independent Merchant Setup](independent-merchant.md) for the complete
 self-hosted workflow and secret ownership model.
 
+## Access
+
+Routes marked **key** need the resolver's API key (`Authorization: Bearer …`,
+`x-api-key`, or an operator session cookie) and answer `401 UNAUTHORIZED`
+without it. Routes marked **demo** exist only when the resolver runs with
+`RESOLVER_DEMO_MODE=true`. Everything else is the payment path and is open.
+See [Deployment](deployment.md#what-is-public-and-what-needs-the-key).
+
 ## Health And Diagnostics
 
 ```text
 GET /health
-GET /diagnostics
-GET /topology
-GET|POST|DELETE /operator/session
+GET /diagnostics                      key
+GET /topology                         key
+GET|POST /operator/session
+DELETE   /operator/session            key
 ```
+
+`GET /health` tells anonymous callers only whether the resolver is up
+(`ok`, `service`, `invoice_mode`). With the key it adds dependency detail.
 
 `POST /operator/session` exchanges `{ "api_key": "..." }` for a signed,
 short-lived, `HttpOnly`, same-site dashboard cookie. CLI and backend clients use
@@ -34,10 +46,11 @@ the bearer or `x-api-key` header instead.
 ## Offers
 
 ```text
-POST /offers
+GET  /offers                          key
+POST /offers                          key
 GET  /offers/:offer_id
-DELETE /offers/:offer_id
-POST /demo/offers
+DELETE /offers/:offer_id              signed by the offer's key
+POST /demo/offers                     key, demo
 ```
 
 ## Payment UX
@@ -48,10 +61,14 @@ GET  /offers/:offer_id/qr.svg?payload=link
 GET  /offers/:offer_id/qr.svg?payload=offer
 POST /offers/:offer_id/check
 POST /offers/:offer_id/invoice
-GET  /offers/:offer_id/recurrence-status
+GET  /offers/:offer_id/recurrence-status?approval_id=sub_…
+GET  /offers/:offer_id/recurrence-status                      key
 ```
 
-`POST /offers/:offer_id/check` is the merchant-readiness endpoint. It validates the offer request and merchant invoice source. Before an invoice exists, an unknown payer route is neither a pass nor a failure: `payable` is omitted and the next action is `request_invoice`. After invoice creation, the payer wallet uses its own node for a `send_payment` dry-run. A controlled pair fixture can optionally add topology and route evidence.
+With `approval_id` the recurrence status is one subscription's, for its payer.
+Without it, it is the summary across every subscriber and needs the key.
+
+`POST /offers/:offer_id/check` is the merchant-readiness endpoint. It validates the offer request and merchant invoice source. Before an invoice exists, an unknown payer route is neither a pass nor a failure: `payable` is omitted and the next action is `request_invoice`. After invoice creation, the payer wallet uses its own node for a `send_payment` dry-run. A controlled pair fixture can add topology and route evidence; the resolver runs that check on its payer node only for operators, or for everyone in demo mode.
 
 `POST /offers/:offer_id/invoice` accepts an optional `Idempotency-Key` header (or `idempotency_key` request field). Retrying the same key and payment request returns the original invoice resolution instead of creating a duplicate invoice. Reusing a key for a different amount or asset returns `409 IDEMPOTENCY_KEY_REUSED`.
 
@@ -73,26 +90,30 @@ Readiness responses keep the simple compatibility fields `ready` and `next_actio
 ## Fiber Address
 
 ```text
-POST /fiber-addresses
+POST /fiber-addresses                 key
 GET  /.well-known/fiberoffer/:username
 ```
 
 ## Resolution Status
 
 ```text
-GET  /offers/:offer_id/resolutions
+GET  /offers/:offer_id/resolutions                            key
 GET  /offers/:offer_id/resolutions/:resolution_id
-POST /offers/:offer_id/resolutions/:resolution_id/status
-POST /offers/:offer_id/resolutions/:resolution_id/sync
-POST /offers/:offer_id/resolutions/sync
+POST /offers/:offer_id/resolutions/:resolution_id/status      key
+POST /offers/:offer_id/resolutions/:resolution_id/sync        key
+POST /offers/:offer_id/resolutions/sync                       key
 ```
+
+A single resolution is addressed by its ID, which only the payer who requested
+that invoice (and the merchant) holds. Its `invoice` object carries the invoice,
+payment hash and expiry, not the raw Fiber RPC exchange.
 
 ## Reconciliation
 
 ```text
 GET /offers/:offer_id/resolutions/:resolution_id/receipt.json
-GET /offers/:offer_id/reconciliation.json
-GET /offers/:offer_id/reconciliation.csv
+GET /offers/:offer_id/reconciliation.json                     key
+GET /offers/:offer_id/reconciliation.csv                      key
 ```
 
 ## Webhooks

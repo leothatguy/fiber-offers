@@ -114,7 +114,11 @@ async function initCommand(options, context) {
 
 async function doctorCommand(config, context) {
   const [health, nodeBody] = await Promise.all([
-    jsonRequest(context.fetchImpl, `${config.resolverUrl}/health`),
+    // The resolver names the node behind it to operators only, so the
+    // management key goes with this request (and with no other).
+    jsonRequest(context.fetchImpl, `${config.resolverUrl}/health`, {
+      headers: config.apiKey ? { "x-api-key": config.apiKey } : {}
+    }),
     jsonRequest(context.fetchImpl, config.fiberRpcUrl, {
       method: "POST",
       body: { jsonrpc: "2.0", id: "fiber-offers-doctor", method: "node_info", params: [] }
@@ -123,8 +127,10 @@ async function doctorCommand(config, context) {
   const node = nodeBody.result;
   if (!node?.pubkey) throw cliError("Fiber node_info did not return pubkey", "FIBER_NODE_ID_UNAVAILABLE");
   const resolverNode = health.dependencies?.invoice_source?.node_id;
-  const sameNode = !resolverNode || resolverNode === node.pubkey;
-  const ready = health.ok === true && sameNode;
+  // Unknown when the resolver did not report its node: no key was sent, the
+  // key was wrong, or the resolver is in mock mode.
+  const sameNode = resolverNode ? resolverNode === node.pubkey : null;
+  const ready = health.ok === true && sameNode !== false;
   print(context.stdout, {
     ok: ready,
     resolver_url: config.resolverUrl,
@@ -133,6 +139,9 @@ async function doctorCommand(config, context) {
     fiber_node_id: node.pubkey,
     resolver_node_id: resolverNode,
     same_node: sameNode,
+    ...(sameNode === null
+      ? { note: "the resolver did not report its node; set RESOLVER_API_KEY to compare it with this node" }
+      : {}),
     peers: hexNumber(node.peers_count),
     channels: hexNumber(node.channel_count)
   });
@@ -369,7 +378,11 @@ async function jsonRequest(fetchImpl, url, options = {}) {
   try {
     response = await fetchImpl(url, {
       method: options.method ?? "GET",
-      headers: { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}) },
+      headers: {
+        accept: "application/json",
+        ...(options.body ? { "content-type": "application/json" } : {}),
+        ...(options.headers ?? {})
+      },
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch (error) {

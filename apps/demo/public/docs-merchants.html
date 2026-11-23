@@ -21,7 +21,7 @@
 
           <section id="checkout">
             <h2>Merchant checkout model</h2>
-            <p>For a fixed-price checkout, create an offer with <code>pricing_type: "fixed"</code> and one <code>amount</code>. Share its payment link or link QR at checkout. The merchant does not need to generate a one-time invoice before the payer begins.</p>
+            <p>For a fixed-price checkout, create an offer with <code>pricing_type: "fixed"</code> and one <code>amount</code>. Share its payment link or link QR at checkout. The merchant does not need to generate a one-time invoice before the payer begins. The request below uses the demo offer route, which a resolver serves only with <code>RESOLVER_DEMO_MODE=true</code>; on a production resolver, create the same offer with <code>fiber-offers create</code> so it is signed with a key you hold.</p>
             <pre><code>POST /demo/offers
 
 {

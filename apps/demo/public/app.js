@@ -15,8 +15,14 @@ const state = {
   recurringApproval: undefined,
   activityRefreshInFlight: false,
   operatorLoginPromise: undefined,
-  operatorLoginResolve: undefined
+  operatorLoginResolve: undefined,
+  // Whether this resolver serves the /demo routes (RESOLVER_DEMO_MODE).
+  demoMode: false
 };
+
+const demoModeOffMessage =
+  "This resolver is not in demo mode, so it will not create and sign an offer for you. " +
+  "Create the offer with the fiber-offers CLI or the SDK, where the signing key stays with you; it will then be listed here.";
 
 const els = {};
 const workspaceViews = new Set(["overview", "offers", "payments", "integrations", "network"]);
@@ -28,7 +34,6 @@ async function init() {
   bindEvents();
   const paymentOfferId = location.pathname.match(/^\/pay\/(0x[0-9a-f]{64})$/)?.[1];
   configurePageContext(paymentOfferId);
-  els.webhookUrlInput.value = `${location.origin}/demo/webhook-receiver`;
   drawEmptyFingerprint();
   updateExportLinks();
   applyPricingMode();
@@ -39,11 +44,11 @@ async function init() {
   renderOfferDirectory();
   renderOverview();
   showView(viewFromLocationHash(), { updateLocation: false });
-  const health = await loadHealth();
-  if (!paymentOfferId && health?.auth_required) {
-    const session = await api("/operator/session");
-    if (!session.authenticated) await showOperatorLogin();
-  }
+  await loadHealth();
+  const session = await api("/operator/session").catch(() => undefined);
+  state.demoMode = session?.demo_mode === true;
+  applyDemoMode();
+  if (!paymentOfferId && session?.auth_required && !session.authenticated) await showOperatorLogin();
   if (!paymentOfferId) await Promise.all([loadDiagnostics(), loadOfferInventory()]);
   startLiveActivityPolling();
 
@@ -59,6 +64,13 @@ async function init() {
     showView(workspaceViews.has(selectedView) ? selectedView : "offers", { updateLocation: false });
     await loadOffer(selectedOfferId, { updateLocation: false, silent: true });
   }
+}
+
+// The sample webhook receiver and server-signed offers exist only on a demo resolver.
+function applyDemoMode() {
+  els.webhookUrlInput.value = state.demoMode ? `${location.origin}/demo/webhook-receiver` : "";
+  els.offerCreateNotice.textContent = state.demoMode ? "" : demoModeOffMessage;
+  els.offerCreateNotice.hidden = state.demoMode;
 }
 
 function configurePageContext(paymentOfferId) {
@@ -110,6 +122,7 @@ function bindElements() {
     "recurrenceSecondsField",
     "recurrenceSecondsInput",
     "webhookUrlInput",
+    "offerCreateNotice",
     "webhookForm",
     "registerWebhookButton",
     "openWebhookRegisterButton",
@@ -607,6 +620,10 @@ function renderOverview() {
 }
 
 async function createOffer() {
+  if (!state.demoMode) {
+    toast(demoModeOffMessage, true);
+    return;
+  }
   setBusy(true);
   try {
     const pricingMode = selectedPricingMode();

@@ -57,6 +57,7 @@ test("a resolver accepts a cycle signed in the browser and serves the helper", a
   const server = createServer({
     store: new InMemoryOfferStore(),
     invoiceAdapter: new MockInvoiceAdapter(),
+    demoMode: true,
     topologyClient: false,
     workers: false,
     logger: { error() {}, info() {} }

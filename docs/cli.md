@@ -118,6 +118,11 @@ The command checks:
 A healthy HTTP resolver is not enough. `same_node` must be true before creating
 merchant offers.
 
+The resolver names the node behind it to operators only, so `doctor` sends the
+management key (`RESOLVER_API_KEY` or `--api-key`) with its health request.
+Without a valid key `same_node` is `null` and a `note` says the two nodes could
+not be compared.
+
 Example output shape:
 
 ```json

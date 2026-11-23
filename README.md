@@ -69,6 +69,12 @@ npm run dev:mock
 
 Open `http://localhost:8787`.
 
+`dev:mock`, `dev:fiber:local`, `dev:fiber:pair` and `stack:up` start the
+resolver in demo mode (`RESOLVER_DEMO_MODE=true`), which lets the console create
+and sign sample offers for you. Plain `npm run dev` and production deployments
+leave it off: there you sign offers yourself with the CLI or SDK. See
+[Demo mode](docs/deployment.md#demo-mode).
+
 For real payments, run a merchant Fiber node and follow the
 [Independent Merchant Setup](docs/independent-merchant.md). The standard runtime
 uses live Fiber RPC invoices and automatic settlement/webhook workers; mock mode
@@ -138,7 +144,7 @@ For a horizontally scaled local stack with PostgreSQL, Redis, BullMQ, two API
 replicas, and Nginx:
 
 ```bash
-npm run stack:up   # NODE_ENV=development docker compose up --build
+npm run stack:up   # NODE_ENV=development RESOLVER_DEMO_MODE=true docker compose up --build
 ```
 
 The bundled Compose defaults are for local use. In production mode the resolver
@@ -220,34 +226,42 @@ The adapter is isolated in `apps/resolver/src/invoice-adapter.js` so node-versio
 
 ## API Surface
 
+The payment path is open. Routes marked `key` need the resolver's API key, and
+routes marked `demo` exist only with `RESOLVER_DEMO_MODE=true`. See
+[What is public and what needs the key](docs/deployment.md#what-is-public-and-what-needs-the-key).
+
 ```text
 GET  /health
-GET  /diagnostics
-GET  /topology
+GET  /diagnostics                                               key
+GET  /topology                                                  key
 GET  /operator/session
 POST /operator/session
-DELETE /operator/session
-POST /demo/offers
-POST /offers
+DELETE /operator/session                                        key
+POST /demo/offers                                               key, demo
+GET  /offers                                                    key
+POST /offers                                                    key
 GET  /offers/:offer_id
+DELETE /offers/:offer_id                                        signed by the offer's key
 GET  /offers/:offer_id/qr.svg?payload=link
 GET  /offers/:offer_id/qr.svg?payload=offer
 POST /offers/:offer_id/check
 POST /offers/:offer_id/invoice
-GET  /offers/:offer_id/resolutions
+GET  /offers/:offer_id/recurrence-status?approval_id=sub_…
+GET  /offers/:offer_id/recurrence-status                        key
+GET  /offers/:offer_id/resolutions                              key
 GET  /offers/:offer_id/resolutions/:resolution_id
 GET  /offers/:offer_id/resolutions/:resolution_id/receipt.json
-POST /offers/:offer_id/resolutions/:resolution_id/status
-POST /offers/:offer_id/resolutions/:resolution_id/sync
-POST /offers/:offer_id/resolutions/sync
-GET  /offers/:offer_id/reconciliation.json
-GET  /offers/:offer_id/reconciliation.csv
-GET  /offers/:offer_id/webhooks
-POST /offers/:offer_id/webhooks
-PATCH /offers/:offer_id/webhooks/:webhook_id
-DELETE /offers/:offer_id/webhooks/:webhook_id
-POST /offers/:offer_id/webhooks/:webhook_id/test
-POST /offers/:offer_id/webhooks/:webhook_id/rotate-secret
+POST /offers/:offer_id/resolutions/:resolution_id/status        key
+POST /offers/:offer_id/resolutions/:resolution_id/sync          key
+POST /offers/:offer_id/resolutions/sync                         key
+GET  /offers/:offer_id/reconciliation.json                      key
+GET  /offers/:offer_id/reconciliation.csv                       key
+GET  /offers/:offer_id/webhooks                                 key
+POST /offers/:offer_id/webhooks                                 key
+PATCH /offers/:offer_id/webhooks/:webhook_id                    key
+DELETE /offers/:offer_id/webhooks/:webhook_id                   key
+POST /offers/:offer_id/webhooks/:webhook_id/test                key
+POST /offers/:offer_id/webhooks/:webhook_id/rotate-secret       key
 GET  /offers/:offer_id/webhook-events
 POST /offers/:offer_id/webhook-events/deliver
 POST /offers/:offer_id/webhook-events/:event_id/deliver

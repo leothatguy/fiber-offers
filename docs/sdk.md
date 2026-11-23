@@ -286,6 +286,10 @@ const receipt = await merchant.getReceipt(offerId, resolutionId);
 const csv = await merchant.getReconciliationCsv(offerId);
 ```
 
+`getResolution` and `getReceipt` are addressed by a resolution ID and need no
+credentials. The rest list or change the merchant's payments and need the API
+key.
+
 Useful methods include:
 
 - `getResolutions` and `getResolution`;
@@ -438,16 +442,28 @@ succeed:
 
 ## Resolver-client method groups
 
-| Group | Methods |
-| --- | --- |
-| Offers | `registerOffer`, `getOffer`, `listOffers`, `resolveOffer`, `revokeOffer` |
-| Creation | `createOffer`, `createAndRegisterOffer`, `createAndRegisterOfferFromNode` |
-| Payment | `checkPayment`, `requestInvoice`, `resolveAndRequestInvoice` |
-| Fiber Address | `bindFiberAddress`, `resolveFiberAddress` |
-| Settlement | `getResolutions`, `getResolution`, `syncResolution`, `syncResolutions`, `updateResolutionStatus` |
-| Reconciliation | `getReceipt`, `getReconciliation`, `getReconciliationCsv` |
-| Webhooks | `createWebhook`, `getWebhooks`, `updateWebhook`, `deleteWebhook`, `rotateWebhookSecret`, `testWebhook`, delivery methods |
-| Operations | `diagnostics`, `offerQrUrl` |
+The payment path needs no credentials. Everything that reads or changes the
+merchant's side needs the resolver's API key (`apiKey` in the client options);
+without it the resolver answers `401 UNAUTHORIZED`.
+
+| Group | Methods | API key |
+| --- | --- | --- |
+| Offers | `getOffer`, `resolveOffer`, `offerQrUrl` | No |
+| Offers | `revokeOffer` | No: the revocation is signed with the offer's own key |
+| Offers | `registerOffer`, `listOffers` | Yes |
+| Creation | `createOffer` (signs locally, calls no resolver) | No |
+| Creation | `createAndRegisterOffer`, `createAndRegisterOfferFromNode` | Yes |
+| Payment | `checkPayment`, `requestInvoice`, `resolveAndRequestInvoice` | No |
+| Fiber Address | `resolveFiberAddress` | No |
+| Fiber Address | `bindFiberAddress` | Yes |
+| One payment | `getResolution`, `getReceipt` (addressed by the resolution ID) | No |
+| Payment history | `getResolutions`, `getReconciliation`, `getReconciliationCsv` | Yes |
+| Settlement | `syncResolution`, `syncResolutions`, `updateResolutionStatus` | Yes |
+| Recurrence | `getRecurrenceStatus(offer, subscriptionId)` | No: the subscription ID is known only to its payer |
+| Recurrence | `getRecurrenceStatus(offer)` (summary across subscribers) | Yes |
+| Webhooks | `createWebhook`, `getWebhooks`, `updateWebhook`, `deleteWebhook`, `rotateWebhookSecret`, `testWebhook`, delivery methods | Yes |
+| Operations | `diagnostics` | Yes |
+| Demo | `demoCreateOffer` | Yes, and only on a resolver running with `RESOLVER_DEMO_MODE=true` |
 
 ## Security checklist
 

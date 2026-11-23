@@ -137,7 +137,7 @@ Within a subscription:
 - Only one cycle can be outstanding. A second request while an invoice is unpaid is `409 RECURRENCE_CYCLE_OUTSTANDING`.
 - When the caps are spent, further requests are `409 RECURRENCE_CYCLE_CAP_REACHED` or `409 RECURRENCE_SPENDING_CAP_REACHED`.
 
-`GET /offers/:offer_id/recurrence-status?approval_id=sub_…` reports where a subscription stands (`cycles_paid`, `next_cycle`, `outstanding`, remaining caps). Without `approval_id` it summarises the offer across subscriptions.
+`GET /offers/:offer_id/recurrence-status?approval_id=sub_…` reports where a subscription stands (`cycles_paid`, `next_cycle`, `outstanding`, remaining caps). A subscription ID is derived from a key only its payer holds, so this needs no other credential. Without `approval_id` the route summarises the offer across subscriptions and needs the resolver's API key.
 
 The checks that need no history (the cycle amount, and that the cycle number fits the signed caps) are made by `validateResolutionRequest()` in the protocol package, so a wallet runs them offline before it contacts the resolver. Payment history is the resolver's to track.
 
@@ -250,7 +250,7 @@ Response:
 
 ## Resolver Diagnostics
 
-Operators can inspect resolver state and Fiber RPC connectivity:
+Operators can inspect resolver state and Fiber RPC connectivity. Both routes need the resolver's API key, because they report the node's peers and channel balances:
 
 ```text
 GET /diagnostics
@@ -290,6 +290,8 @@ Every invoice request creates a resolution record:
 GET /offers/:offer_id/resolutions
 GET /offers/:offer_id/resolutions/:resolution_id
 ```
+
+One resolution is public to whoever holds its ID: the payer who requested that invoice, and the merchant. The list of an offer's resolutions is the merchant's payment history and needs the resolver's API key, as do the reconciliation exports. An offer ID is not a secret (it is in every payment link), so it never grants access to more than the offer itself.
 
 Resolution statuses:
 

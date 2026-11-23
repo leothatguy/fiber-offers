@@ -44,8 +44,9 @@
             <h2>Run the resolver</h2>
             <pre><code>npm install
 npm run verify
-FIBER_RPC_URL=http://127.0.0.1:8227 npm run dev</code></pre>
+RESOLVER_DEMO_MODE=true FIBER_RPC_URL=http://127.0.0.1:8227 npm run dev</code></pre>
             <p>Open the <a href="/">console</a> at <code>http://localhost:8787</code>. The status should report Fiber RPC, and diagnostics should show automatic workers enabled.</p>
+            <p><code>RESOLVER_DEMO_MODE=true</code> lets the resolver create and sign sample offers for you, which the next step uses. It is for local evaluation and public demos only. A merchant's resolver leaves it off and registers offers the merchant signed with the CLI or SDK.</p>
           </section>
 
           <section id="create-offer">

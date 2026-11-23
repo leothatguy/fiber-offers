@@ -53,9 +53,15 @@ test("CLI checks node ownership, creates, lists, and cryptographically revokes a
   const fetchImpl = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
     if (url === `${resolverUrl}/health`) {
-      return response({ ok: true, dependencies: { invoice_source: { ok: true, node_id: nodeId } } });
+      // As the resolver does: its node is named to operators only.
+      return options.headers["x-api-key"] === "merchant-key"
+        ? response({ ok: true, dependencies: { invoice_source: { ok: true, node_id: nodeId } } })
+        : response({ ok: true, service: "fiber-offers-resolver", invoice_mode: "fiber-rpc" });
     }
     if (url === fiberRpcUrl) {
+      // The management key is for the resolver, never for the node's RPC.
+      assert.equal(options.headers["x-api-key"], undefined);
+      assert.equal(options.headers.authorization, undefined);
       assert.equal(body.method, "node_info");
       return response({ jsonrpc: "2.0", id: body.id, result: { pubkey: nodeId, peers_count: "0x2", channel_count: "0x3" } });
     }
@@ -94,6 +100,19 @@ test("CLI checks node ownership, creates, lists, and cryptographically revokes a
     peers: 2,
     channels: 3
   });
+
+  // Without the key the resolver does not say which node it uses, and doctor
+  // reports that it could not compare rather than claiming a match.
+  const keylessOutput = captureOutput();
+  await main(["doctor", "--resolver-url", resolverUrl, "--fiber-rpc-url", fiberRpcUrl], {
+    cwd,
+    stdout: keylessOutput,
+    fetchImpl
+  });
+  const keyless = JSON.parse(keylessOutput.value);
+  assert.equal(keyless.same_node, null);
+  assert.equal(keyless.resolver_node_id, undefined);
+  assert.match(keyless.note, /RESOLVER_API_KEY/);
 
   const createOutput = captureOutput();
   await main([
