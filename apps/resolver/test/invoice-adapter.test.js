@@ -437,3 +437,68 @@ test("Fiber RPC adapter syncs invoice status with get_invoice", async () => {
   assert.equal(sync.amount, "0x5f5e100");
   assert.equal(sync.currency, "Fibt");
 });
+
+test("the node's identity is asked for once and reused for a while", async () => {
+  const node = { pubkey: `02${"a".repeat(64)}`, calls: 0, failing: false };
+  const client = {
+    async call(method) {
+      assert.equal(method, "node_info");
+      node.calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (node.failing) throw Object.assign(new Error("node is down"), { code: "ECONNREFUSED" });
+      return { pubkey: node.pubkey };
+    }
+  };
+  const adapter = new FiberRpcInvoiceAdapter({ client, nodeInfoTtlMs: 80 });
+
+  // Requests arriving together share one call, and later ones reuse its answer.
+  const together = await Promise.all([adapter.getNodeIdentity(), adapter.getNodeIdentity(), adapter.getNodeIdentity()]);
+  assert.deepEqual(together.map((identity) => identity.node_id), Array(3).fill(node.pubkey));
+  await adapter.getNodeIdentity();
+  assert.equal(node.calls, 1);
+
+  // Registering an offer asks the node now, and what it learns is reused too.
+  node.pubkey = `03${"b".repeat(64)}`;
+  assert.equal((await adapter.getNodeIdentity()).node_id, `02${"a".repeat(64)}`);
+  assert.equal((await adapter.getNodeIdentity({ fresh: true })).node_id, node.pubkey);
+  assert.equal((await adapter.getNodeIdentity()).node_id, node.pubkey);
+  assert.equal(node.calls, 2);
+
+  // After the lifetime it asks again. A failure is reported and not remembered.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  node.failing = true;
+  await assert.rejects(() => adapter.getNodeIdentity(), { code: "ECONNREFUSED" });
+  await assert.rejects(() => adapter.getNodeIdentity(), { code: "ECONNREFUSED" });
+  node.failing = false;
+  assert.equal((await adapter.getNodeIdentity()).node_id, node.pubkey);
+  assert.equal(node.calls, 5);
+});
+
+test("the node's token list comes from the same reused answer, and reuse can be switched off", async () => {
+  const script = { code_hash: `0x${"1".repeat(64)}`, hash_type: "type", args: "0x01" };
+  let calls = 0;
+  const client = {
+    async call(method) {
+      if (method === "node_info") {
+        calls += 1;
+        return { pubkey: `02${"a".repeat(64)}`, udt_cfg_infos: [{ name: "RUSD", script }] };
+      }
+      return { invoice_address: "fibt1invoice", invoice: { data: { payment_hash: `0x${"c".repeat(64)}` } } };
+    }
+  };
+
+  const reusing = new FiberRpcInvoiceAdapter({ client });
+  await reusing.getNodeIdentity();
+  assert.deepEqual(await reusing.unsupportedAssets([{ asset_type: "udt", symbol: "X", type_script_hash: `0x${"9".repeat(64)}` }]).then((missing) => missing.length), 1);
+  await reusing.getNodeIdentity();
+  assert.equal(calls, 1);
+
+  calls = 0;
+  const always = new FiberRpcInvoiceAdapter({ client, nodeInfoTtlMs: 0 });
+  await always.getNodeIdentity();
+  await always.getNodeIdentity();
+  assert.equal(calls, 2);
+
+  assert.throws(() => new FiberRpcInvoiceAdapter({ client, nodeInfoTtlMs: "soon" }), { code: "INVALID_NODE_INFO_TTL" });
+  assert.throws(() => new FiberRpcInvoiceAdapter({ client, nodeInfoTtlMs: -1 }), { code: "INVALID_NODE_INFO_TTL" });
+});

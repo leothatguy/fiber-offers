@@ -69,6 +69,10 @@ export class MockInvoiceAdapter {
 }
 
 export class FiberRpcInvoiceAdapter {
+  // The node's last node_info answer and the lookup in progress, if any.
+  #nodeInfoCache;
+  #nodeInfoLookup;
+
   constructor(options) {
     this.mode = "fiber-rpc";
     this.method = options.method ?? "new_invoice";
@@ -84,6 +88,24 @@ export class FiberRpcInvoiceAdapter {
     // How long an issued invoice stays payable.
     this.invoiceTtlSeconds = normalizeInvoiceTtl(options.invoiceTtlSeconds);
     this.now = options.now ?? Date.now;
+    // How long a node_info answer is reused. 0 asks every time.
+    this.nodeInfoTtlMs = normalizeNodeInfoTtl(options.nodeInfoTtlMs);
+  }
+
+  // The node's node_info, asked at most once per `nodeInfoTtlMs` unless
+  // `fresh`. The node's identity, chain and token list change only when the
+  // node is reconfigured, and an invoice request should not cost a second call
+  // to the node to learn them again. Requests arriving together share one
+  // call. A failed call is not remembered.
+  async #nodeInfo({ fresh = false } = {}) {
+    const cached = this.#nodeInfoCache;
+    if (!fresh && cached && Date.now() < cached.expiresAt) return cached.result;
+    this.#nodeInfoLookup ??= this.client.call(this.probeMethod, []).finally(() => {
+      this.#nodeInfoLookup = undefined;
+    });
+    const result = await this.#nodeInfoLookup;
+    this.#nodeInfoCache = this.nodeInfoTtlMs > 0 ? { result, expiresAt: Date.now() + this.nodeInfoTtlMs } : undefined;
+    return result;
   }
 
   async createInvoice({ offer, amount, asset, resolutionId }) {
@@ -153,11 +175,13 @@ export class FiberRpcInvoiceAdapter {
   }
 
   async #nodeUdtScripts() {
-    return udtScriptsFromNodeInfo(await this.client.call(this.probeMethod, []));
+    return udtScriptsFromNodeInfo(await this.#nodeInfo());
   }
 
-  async getNodeIdentity() {
-    const result = await this.client.call(this.probeMethod, []);
+  // `fresh` asks the node now instead of reusing a recent answer: for
+  // registering an offer, which is rare and worth being exact about.
+  async getNodeIdentity(options = {}) {
+    const result = await this.#nodeInfo(options);
     const nodeId = result?.pubkey ?? result?.public_key ?? result?.node_id;
     if (typeof nodeId !== "string" || !/^(02|03)[0-9a-fA-F]{64}$/.test(nodeId)) {
       const error = new Error("Fiber node_info response did not include a compressed identity public key");
@@ -265,6 +289,7 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
       method: env.FIBER_RPC_INVOICE_METHOD ?? "new_invoice",
       getInvoiceMethod: env.FIBER_RPC_GET_INVOICE_METHOD ?? "get_invoice",
       probeMethod: env.FIBER_RPC_PROBE_METHOD ?? "node_info",
+      nodeInfoTtlMs: env.FIBER_NODE_INFO_TTL_MS,
       network: env.FIBER_NETWORK,
       udtScripts: loadUdtScriptsFromEnv(env),
       invoiceTtlSeconds,
@@ -310,6 +335,19 @@ function quantityToNumber(value) {
   } catch {
     return undefined;
   }
+}
+
+const DEFAULT_NODE_INFO_TTL_MS = 30000;
+
+function normalizeNodeInfoTtl(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_NODE_INFO_TTL_MS;
+  const milliseconds = Number(value);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+    const error = new Error("FIBER_NODE_INFO_TTL_MS must be a whole number of milliseconds, 0 or more");
+    error.code = "INVALID_NODE_INFO_TTL";
+    throw error;
+  }
+  return milliseconds;
 }
 
 function normalizeInvoiceTtl(value) {

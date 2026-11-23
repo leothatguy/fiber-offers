@@ -150,6 +150,12 @@ export function createServer(options = {}) {
       windowMs: positiveInteger(options.rateLimitWindowMs ?? process.env.RESOLVER_RATE_LIMIT_WINDOW_MS, 60000),
       max: positiveInteger(options.rateLimitMax ?? process.env.RESOLVER_RATE_LIMIT_MAX, 120)
         })),
+    // Public reads (an offer, a resolution, a receipt, a Fiber Address) get a
+    // looser limit than requests that do work: five times as many by default.
+    readRateLimitMax: positiveInteger(
+      options.readRateLimitMax ?? process.env.RESOLVER_READ_RATE_LIMIT_MAX,
+      positiveInteger(options.rateLimitMax ?? process.env.RESOLVER_RATE_LIMIT_MAX, 120) * 5
+    ),
     enforceNodeOwnership: options.enforceNodeOwnership ?? invoiceAdapter.mode === "fiber-rpc",
     invoiceLocks: new Map()
   };
@@ -221,7 +227,8 @@ export function createServer(options = {}) {
 //   demo: true         the route exists only when RESOLVER_DEMO_MODE=true
 //   query              the route applies only when this query parameter is given
 //   offer: true        `:offerId` must name a stored offer (404 otherwise)
-//   rateLimit          per-client limit, applied before anything is looked up
+//   rateLimit          per-client limit, applied before anything is looked up;
+//                      with `reads`, the looser limit for reads
 
 const PATH_PARAMETERS = {
   offerId: "0x[0-9a-f]{64}",
@@ -263,9 +270,14 @@ const ROUTES = [
   route("GET", "/offers", { access: "operator" }, listOffers),
   route("POST", "/offers", { access: "operator" }, registerOffer),
   route("POST", "/fiber-addresses", { access: "operator" }, bindFiberAddress),
-  route("GET", "/.well-known/fiberoffer/:username", { access: "public" }, lookupFiberAddress),
+  route(
+    "GET",
+    "/.well-known/fiberoffer/:username",
+    { access: "public", rateLimit: { scope: "address-read", reads: true } },
+    lookupFiberAddress
+  ),
 
-  route("GET", "/offers/:offerId", { access: "public", offer: true }, async ({ response, context, entry, origin }) => {
+  route("GET", "/offers/:offerId", { access: "public", offer: true, rateLimit: { scope: "offer-read", reads: true } }, async ({ response, context, entry, origin }) => {
     const username = await context.store.getUsernameForOffer(entry.offer.offer_id);
     sendJson(response, 200, offerResponse(entry, origin, username));
   }),
@@ -332,7 +344,7 @@ const ROUTES = [
   route(
     "GET",
     "/offers/:offerId/resolutions/:resolutionId",
-    { access: "public", offer: true },
+    { access: "public", offer: true, rateLimit: { scope: "resolution-read", reads: true } },
     async ({ response, context, params, origin }) => {
       const resolution = await storedResolution(context, params);
       sendJson(response, 200, publicResolution(resolution, origin, params.offerId));
@@ -341,7 +353,7 @@ const ROUTES = [
   route(
     "GET",
     "/offers/:offerId/resolutions/:resolutionId/receipt.json",
-    { access: "public", offer: true },
+    { access: "public", offer: true, rateLimit: { scope: "receipt-read", reads: true } },
     async ({ response, context, params, entry, origin }) => {
       const resolution = await storedResolution(context, params);
       sendJson(response, 200, receiptResponse(entry, resolution, origin));
@@ -571,7 +583,13 @@ async function handleRequest(request, response, context) {
 
   const { route: selected, params } = matched;
   if (selected.access === "operator") requireApiKey(request, context);
-  if (selected.rateLimit) {
+  if (selected.rateLimit?.reads) {
+    // A read is limited loosely, and not at all for the operator, whose
+    // backend reads resolutions as fast as webhooks announce them.
+    if (!isOperator(request, context)) {
+      await enforceRateLimit(request, context, selected.rateLimit.scope, { max: context.readRateLimitMax });
+    }
+  } else if (selected.rateLimit) {
     await enforceRateLimit(request, context, selected.rateLimit.scope, { max: selected.rateLimit.max });
   }
 
@@ -703,7 +721,8 @@ async function registerOffer({ request, response, context, origin }) {
     throw httpError(400, verification.code, verification.message);
   }
 
-  const ownership = await verifyOfferNodeOwnership(offer, context);
+  // Registering is rare and its answer is stored, so the node is asked now.
+  const ownership = await verifyOfferNodeOwnership(offer, context, { fresh: true });
   await assertOfferAssetsSupported(offer, context);
 
   const entry = await context.store.upsertOffer(offer, encodedOffer, {
@@ -809,7 +828,7 @@ async function createDemoOffer(body, origin, context) {
   const username = optionalUsername(body.username);
   const assets = body.assets ?? [{ asset_type: body.asset_type ?? "ckb", symbol: body.symbol ?? "CKB" }];
   const pricing = demoOfferPricing(body);
-  const nodeIdentity = await configuredNodeIdentity(context);
+  const nodeIdentity = await configuredNodeIdentity(context, { fresh: true });
   const offer = createSignedOffer(
     {
       node_id: nodeIdentity?.node_id ?? body.node_id ?? demoNodeId(),
@@ -2647,10 +2666,12 @@ function offerListItem(entry, origin, username = undefined) {
   };
 }
 
-async function configuredNodeIdentity(context) {
+// The node this resolver issues invoices from. The adapter reuses a recent
+// answer; `fresh` makes it ask the node now.
+async function configuredNodeIdentity(context, options = {}) {
   if (typeof context.invoiceAdapter.getNodeIdentity !== "function") return undefined;
   try {
-    return await context.invoiceAdapter.getNodeIdentity();
+    return await context.invoiceAdapter.getNodeIdentity(options);
   } catch (error) {
     if (!context.enforceNodeOwnership) return undefined;
     throw httpError(503, "FIBER_NODE_ID_UNAVAILABLE", "recipient node identity is temporarily unavailable", {
@@ -2659,8 +2680,8 @@ async function configuredNodeIdentity(context) {
   }
 }
 
-async function verifyOfferNodeOwnership(offer, context) {
-  const identity = await configuredNodeIdentity(context);
+async function verifyOfferNodeOwnership(offer, context, options = {}) {
+  const identity = await configuredNodeIdentity(context, options);
   if (!identity) {
     return {
       status: "unverified",

@@ -259,8 +259,14 @@ A value that is too high lets a client choose its own address and evade the
 limits; a value that is too low limits your proxy instead of your clients.
 
 Operator login, offer revocation and QR rendering are rate limited along with
-readiness checks and invoice creation. If the limiter's Redis is unreachable,
-requests are served unlimited and the failure is logged; set
+readiness checks and invoice creation: `RESOLVER_RATE_LIMIT_MAX` requests
+(default 120) per client and kind of request in each
+`RESOLVER_RATE_LIMIT_WINDOW_MS` (default one minute). Public reads (an offer,
+a resolution, a receipt, a Fiber Address lookup) get a looser limit of their
+own, `RESOLVER_READ_RATE_LIMIT_MAX`, five times the other by default. A caller
+holding the API key is not held to the read limit, so a merchant's backend can
+read resolutions as fast as webhooks announce them. If the limiter's Redis is
+unreachable, requests are served unlimited and the failure is logged; set
 `RESOLVER_RATE_LIMIT_FAIL_OPEN=false` to answer `503` instead.
 
 ## PostgreSQL
@@ -337,7 +343,7 @@ FIBER_RPC_PASSWORD=secret \
 npm run dev
 ```
 
-The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node. `FIBER_INVOICE_TTL_SECONDS` (default `900`) is how long each issued invoice stays payable.
+The resolver reads the node's network from `node_info` on mainnet and testnet and refuses offers signed for a different one. On a private chain, set `FIBER_NETWORK=dev` so the same check applies. `FIBER_RPC_TIMEOUT_MS` (default `15000`) bounds every call to the node. The node's identity, chain and token list are read from `node_info` and reused for `FIBER_NODE_INFO_TTL_MS` (default `30000`; `0` asks every time), so an invoice request costs the node one call, not two; registering an offer always asks the node afresh. `FIBER_INVOICE_TTL_SECONDS` (default `900`) is how long each issued invoice stays payable.
 
 ### Token (UDT and RGB++) offers
 

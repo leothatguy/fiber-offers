@@ -277,3 +277,48 @@ async function getJson(url) {
   assert.equal(response.status, 200, JSON.stringify(body));
   return body;
 }
+
+test("public reads are limited per client, more loosely than writes, and not for the operator", async () => {
+  const store = new InMemoryOfferStore();
+  const server = createServer({
+    store,
+    invoiceAdapter: new MockInvoiceAdapter(),
+    apiKey: "read-limit-test-key",
+    workers: false,
+    topologyClient: false,
+    rateLimitMax: 2,
+    logger: { error() {}, info() {}, warn() {} }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const offer = await registerOffer(store, { username: "limited" });
+    const record = await addInvoice(store, offer, 1);
+    const reads = {
+      "an offer": `/offers/${offer.offer_id}`,
+      "a resolution": `/offers/${offer.offer_id}/resolutions/${record.id}`,
+      "a receipt": `/offers/${offer.offer_id}/resolutions/${record.id}/receipt.json`,
+      "a Fiber Address": "/.well-known/fiberoffer/limited"
+    };
+    for (const [what, path] of Object.entries(reads)) {
+      // Five times the write limit of two: ten reads pass, the eleventh waits.
+      for (let index = 0; index < 10; index += 1) assert.equal((await fetch(`${url}${path}`)).status, 200, `${what}, read ${index + 1}`);
+      const limited = await fetch(`${url}${path}`);
+      assert.equal(limited.status, 429, what);
+      assert.equal((await limited.json()).error.code, "RATE_LIMITED");
+      assert.ok(Number(limited.headers.get("retry-after")) >= 1);
+      // The merchant's backend, with the key, is not held to it.
+      const operator = await fetch(`${url}${path}`, { headers: { "x-api-key": "read-limit-test-key" } });
+      assert.equal(operator.status, 200, `${what}, with the key`);
+    }
+    // Each kind of read has its own allowance: a write is still possible.
+    const invoice = await fetch(`${url}/offers/${offer.offer_id}/invoice`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amount: "1200", asset: ckb })
+    });
+    assert.equal(invoice.status, 201);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

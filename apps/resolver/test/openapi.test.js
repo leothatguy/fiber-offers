@@ -41,11 +41,7 @@ const REFERENCE_RESOLVER_ONLY = [
 ];
 
 // Statuses the document allows that the exchanges below do not produce, and why.
-const NOT_EXERCISED = {
-  "getOffer 429": "the reference resolver does not limit this read; another resolver may",
-  "getResolution 429": "the reference resolver does not limit this read; another resolver may",
-  "resolveFiberAddress 429": "the reference resolver does not limit this read; another resolver may"
-};
+const NOT_EXERCISED = {};
 
 const operations = Object.entries(document.paths).flatMap(([path, item]) =>
   METHODS.filter((method) => item[method]).map((method) => ({
@@ -333,7 +329,7 @@ test("what the resolver answers on every wallet route fits the schema the docume
   });
 
   // A resolver that allows two requests per window, to see the limit itself.
-  await withResolver({ rateLimitMax: 2 }, async ({ baseUrl, register }) => {
+  await withResolver({ rateLimitMax: 2, readRateLimitMax: 2 }, async ({ baseUrl, register }) => {
     const keys = generateOfferKeyPair();
     const subscriber = generateOfferKeyPair();
     const offer = await register(keys, {
@@ -343,6 +339,9 @@ test("what the resolver answers on every wallet route fits the schema the docume
     });
     const cycle = signRecurrenceRequest(offer, { amount: "2000", asset: CKB, recurrence_cycle: 1 }, subscriber.privateKeyPem);
     const routes = {
+      getOffer: () => fetch(`${baseUrl}/offers/${offer.offer_id}`),
+      getResolution: () => fetch(`${baseUrl}/offers/${offer.offer_id}/resolutions/res_none`),
+      resolveFiberAddress: () => fetch(`${baseUrl}/.well-known/fiberoffer/nobody`),
       requestInvoice: () => post(`${baseUrl}/offers/${offer.offer_id}/invoice`, { amount: "1" }),
       checkReadiness: () => post(`${baseUrl}/offers/${offer.offer_id}/check`, { amount: "1" }),
       getSubscriptionStatus: () => fetch(`${baseUrl}/offers/${offer.offer_id}/recurrence-status?approval_id=${cycle.approval_id}`),
@@ -443,6 +442,7 @@ async function withResolver(options, callback) {
     topologyClient: false,
     workers: false,
     rateLimitMax: options.rateLimitMax ?? 0,
+    readRateLimitMax: options.readRateLimitMax,
     rateLimiter: options.rateLimiter,
     rateLimitFailOpen: options.rateLimitFailOpen,
     logger: options.logger ?? silent
