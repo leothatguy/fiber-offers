@@ -19,3 +19,5 @@ infra/terraform/.env.local
 infra/terraform/backend.local.hcl
 infra/terraform/terraform.tfvars
 *.log
+__pycache__/
+*.pyc
