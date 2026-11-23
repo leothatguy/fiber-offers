@@ -147,6 +147,24 @@ Upgrading from an image that ran as root:
     chown -R node:node /app/apps/resolver/data
   ```
 
+### Checking a running resolver
+
+`npm run resolver:check -- --url URL [--api-key KEY]` uses a resolver from the
+outside, as a merchant and a wallet would: it registers an offer signed on the
+spot, finds it by Fiber Address, requests invoices, repeats a request with the
+same idempotency key, revokes the offer, and confirms that operator routes are
+closed without the key. It needs a resolver that issues mock invoices
+(`FIBER_INVOICE_MODE=mock`), so it suits a staging stack, not a resolver with a
+real node. The script is in the image too:
+
+```bash
+docker compose exec fiber-offers node scripts/running-resolver-check.js \
+  --url http://127.0.0.1:8787 --api-key "$RESOLVER_API_KEY"
+```
+
+CI runs it against the image on its own and against the whole Compose stack
+(`.github/workflows/ci.yml`).
+
 ### Secret encryption and key rotation
 
 Webhook signing secrets are stored as `enc:v2:<salt>:<iv>:<tag>:<ciphertext>`:

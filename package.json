@@ -35,7 +35,8 @@
     "verify": "npm test && npm run smoke",
     "test": "node --test packages/protocol/test/*.test.js packages/sdk/test/*.test.js apps/resolver/test/*.test.js apps/cli/test/*.test.js",
     "test:infra": "node --test apps/resolver/test/postgres-store.test.js apps/resolver/test/redis-rate-limiter.test.js",
-    "smoke": "node scripts/smoke-demo.js"
+    "smoke": "node scripts/smoke-demo.js",
+    "resolver:check": "node scripts/running-resolver-check.js"
   },
   "engines": {
     "node": ">=20.19.0"
