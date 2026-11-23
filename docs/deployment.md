@@ -155,11 +155,13 @@ spot, finds it by Fiber Address, requests invoices, repeats a request with the
 same idempotency key, revokes the offer, and confirms that operator routes are
 closed without the key. It needs a resolver that issues mock invoices
 (`FIBER_INVOICE_MODE=mock`), so it suits a staging stack, not a resolver with a
-real node. The script is in the image too:
+real node. Without `--api-key` it uses `RESOLVER_API_KEY` from its
+environment, which keeps the key off the command line. The script is in the
+image too, where that variable is already set:
 
 ```bash
 docker compose exec fiber-offers node scripts/running-resolver-check.js \
-  --url http://127.0.0.1:8787 --api-key "$RESOLVER_API_KEY"
+  --url http://127.0.0.1:8787
 ```
 
 CI runs it against the image on its own and against the whole Compose stack
