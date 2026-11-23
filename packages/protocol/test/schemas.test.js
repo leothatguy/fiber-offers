@@ -55,7 +55,6 @@ const RULES_BEYOND_A_SCHEMA = new Set([
   "DESCRIPTION_TOO_LONG", // 512 bytes, where the schema can only count characters
   "OFFER_FIELD_TOO_LARGE", // metadata and extensions, in bytes
   "OFFER_TOO_LARGE", // the whole offer, in bytes
-  "INVALID_SIGNED_JSON", // nesting deeper than 8 levels
   "INVALID_URL", // a default port, a "." segment, an IPv6 literal not in RFC 5952 form
   "INVALID_CANONICAL_VALUE", // text that is not well-formed Unicode
   "NON_CANONICAL_OFFER" // the same, where the package can still name the field

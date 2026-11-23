@@ -36,7 +36,9 @@ export const OFFER_LIMITS = Object.freeze({
   // Canonical JSON of `metadata`, and of all extension fields together.
   metadata_bytes: 2048,
   extensions_bytes: 2048,
-  // How deeply `metadata` and extension fields may nest.
+  // How deep a value may sit inside `metadata`, `extensions` or an `x_...`
+  // field. The field's own value is at depth 0; a member of an object or an
+  // element of a list is one deeper than what holds it.
   json_depth: 8
 });
 
@@ -685,7 +687,7 @@ function extensionFields(input) {
   if (fields.extensions !== undefined && !isPlainObject(fields.extensions)) {
     throw new FiberOfferError("extensions must be an object", "INVALID_EXTENSIONS");
   }
-  assertSignableJson(fields, "extensions", OFFER_LIMITS.extensions_bytes);
+  assertSignableJson(fields, "extensions", OFFER_LIMITS.extensions_bytes, { eachField: true });
   return fields;
 }
 
@@ -892,7 +894,12 @@ function normalizeMetadata(metadata) {
 // every implementation: plain JSON, no key that could alter an object, whole
 // numbers only (a fraction has more than one spelling across languages), and a
 // bounded depth and size.
-function assertSignableJson(value, field, maxBytes) {
+//
+// Depth is counted from the signed field itself, so `metadata`, `extensions`
+// and an `x_...` field all get the same allowance. With `eachField`, `value`
+// is the object holding all extension fields: each is walked from depth 0,
+// and the size limit applies to them together.
+function assertSignableJson(value, field, maxBytes, options = {}) {
   const walk = (node, depth) => {
     if (depth > OFFER_LIMITS.json_depth) {
       throw new FiberOfferError(`${field} is nested too deeply`, "INVALID_SIGNED_JSON", { field });
@@ -915,7 +922,7 @@ function assertSignableJson(value, field, maxBytes) {
       }
     }
   };
-  walk(value, 0);
+  for (const signedField of options.eachField ? Object.values(value) : [value]) walk(signedField, 0);
 
   // Also refuses anything that is not JSON at all (functions, class instances).
   const bytes = Buffer.byteLength(canonicalStringify(value));

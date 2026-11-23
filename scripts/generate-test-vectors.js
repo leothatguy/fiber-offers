@@ -165,6 +165,14 @@ const rusd = { asset_type: "udt", symbol: "RUSD", type_script_hash: ckbScriptHas
 
 // --- Valid offers -----------------------------------------------------------
 
+// `leaf` inside `levels` objects and lists, alternating, with an object
+// outermost. The outermost is at depth 0, so the leaf is at depth `levels`.
+function nested(levels, leaf) {
+  let value = leaf;
+  for (let level = levels - 1; level >= 0; level -= 1) value = level % 2 === 0 ? { a: value } : [value];
+  return value;
+}
+
 const fixed = sign(baseInput());
 const validOffers = [
   describeOffer("fixed-price CKB offer", "The smallest useful offer: one asset, one amount.", fixed),
@@ -235,6 +243,11 @@ const validOffers = [
     "non-ASCII description",
     "Text is UTF-8; the description limit is counted in bytes.",
     sign(baseInput({ description: "Café ☕ — 咖啡" }))
+  ),
+  describeOffer(
+    "free-form content at the depth limit",
+    "The value of metadata, of extensions and of an x_ field is at depth 0, and nothing may be deeper than 8. Each of these reaches depth 8: with text, with a number, and with an empty list.",
+    sign(baseInput({ metadata: nested(8, "leaf"), extensions: nested(8, 8), x_trail: nested(8, []) }))
   )
 ];
 
@@ -312,6 +325,9 @@ const invalidObjects = [
   ["token without a type_script_hash", "", signAsWritten(contentOf(fixed, { assets: [{ asset_type: "udt", symbol: "RUSD" }] }))],
   ["fraction in metadata", "Free-form signed content takes whole numbers only.", signAsWritten(contentOf(fixed, { metadata: { price: 9.5 } }))],
   ["constructor key in metadata", "", signAsWritten(contentOf(fixed, { metadata: { nested: { constructor: "x" } } }))],
+  ["metadata nested nine deep", "A value at depth 9, counting metadata itself as depth 0.", signAsWritten(contentOf(fixed, { metadata: nested(9, "leaf") }))],
+  ["extensions nested nine deep", "The same limit, counted the same way, for an extension field.", signAsWritten(contentOf(fixed, { extensions: nested(9, "leaf") }))],
+  ["an x_ field nested nine deep", "", signAsWritten(contentOf(fixed, { x_trail: nested(9, "leaf") }))],
   ["description over the limit", "", signAsWritten(contentOf(fixed, { description: "x".repeat(OFFER_LIMITS.description_bytes + 1) }))],
   ["extra member in the signature object", "It would not be covered by the signature.", { ...fixed, signature: { ...fixed.signature, note: "unsigned" } }],
   ["padded signature value", "base64url without padding is the one spelling.", { ...fixed, signature: { scheme: "ed25519", value: `${fixed.signature.value}==` } }],
@@ -445,7 +461,9 @@ const recurrenceRequests = [
 const vectors = {
   title: "Fiber Offers v1 conformance test vectors",
   format: "fiberoffer-v1",
-  vectors_version: 1,
+  // Counts revisions of this file. 2 added the depth-limit cases; no case of
+  // revision 1 changed.
+  vectors_version: 2,
   notes: [
     "Every value here is fixed. An implementation conforms when it reproduces each output and refuses each invalid case.",
     "Error codes are those of the reference implementation (@fiber-offers/protocol). Another implementation must refuse the same cases; matching the code is recommended, not required.",

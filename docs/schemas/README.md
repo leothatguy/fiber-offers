@@ -50,7 +50,6 @@ does not check:
 | No two assets share `asset_type` and `type_script_hash` (the schema catches only exact repeats) | 2.3 |
 | `description` is at most 512 **bytes** (the schema bounds it at 512 characters) | 2.1 |
 | `metadata`, the extension fields and the whole offer are within their byte limits | 2.5, 2.6 |
-| Free-form content nests at most 8 levels deep | 2.5 |
 | An IPv4 or IPv6 host in `resolver_url` is a real address in its canonical form | 2.2 |
 | Strings are well-formed Unicode | 3 |
 | The encoded string's body is exactly the canonical JSON | 5 |
@@ -69,13 +68,13 @@ The schemas are tested, not just published. `npm test` runs:
 
 - **Against the conformance vectors** (`packages/protocol/test/schemas.test.js`).
   Every valid offer in [`../test-vectors/v1.json`](../test-vectors/README.md)
-  fits the offer schema. Of the 31 invalid offers, the schema refuses the 26
+  fits the offer schema. Of the 34 invalid offers, the schema refuses the 29
   whose fault is in their shape, and the test names the 5 it cannot refuse and
   the step that does (recomputing the ID, verifying the signature, comparing
   amounts). Requests, revocations and cycle proofs are checked the same way.
 - **Against the reference implementation, on offers the vectors do not
   contain.** About 300 offers produced from random terms all fit the schema.
-  About 12,000 offers made by changing a valid one in one place are given to
+  About 14,000 offers made by changing a valid one in one place are given to
   both: the schema never refuses an offer `@fiber-offers/protocol` accepts,
   and whatever the package refuses that the schema accepts falls under one of
   the rules in the table above.

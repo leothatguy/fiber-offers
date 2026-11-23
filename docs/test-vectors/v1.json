@@ -1,7 +1,7 @@
 {
   "title": "Fiber Offers v1 conformance test vectors",
   "format": "fiberoffer-v1",
-  "vectors_version": 1,
+  "vectors_version": 2,
   "notes": [
     "Every value here is fixed. An implementation conforms when it reproduces each output and refuses each invalid case.",
     "Error codes are those of the reference implementation (@fiber-offers/protocol). Another implementation must refuse the same cases; matching the code is recommended, not required.",
@@ -556,6 +556,91 @@
       "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Café ☕ — 咖啡\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x5cb55459256461c8f89b30f9dfd85ce68740fd272a3d749c1bcd573d333de21a\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"IDH0CZFwU1d77ymeoQLG8fVc_Y7F64W3MYu__hM_N5GIV5K5eBfhu8H1t8qnaBIxuN9MTlDC6GdWvWaZpYHvDw\"},\"single_use\":false,\"version\":1}",
       "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysmpvmp6jg8znz2jpc5qjsswty5kuk26zg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8sdtrvg6n2dp48yer2d35xcckxwrx8qukyvesvcukgeny8q6kxefk8qmngvrxvserwvnpxdjrwdpevvckycmyx5mnxepnxvekgefjx9sjytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjfg3yrqs66gem42vtyxumhjmt9dag5c3ecvetxxh6exarrvdzhxdx4ja2lta5y6h6wx4r5j434fv6k2snxdp6nsjp3wsu8zmnpgfyhsa2w89x4gmzygvmywezhwetkzknst9y8v3rhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgxqjqtd",
       "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSMPVMP6JG8ZNZ2JPC5QJSSWTY5KUK26ZG3VYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SDTRVG6N2DP48YER2D35XCCKXWRX8QUKYVESVCUKGENY8Q6KXEFK8QMNGVRXVSERWVNPXDJRWDPEVVCKYCMYX5MNXEPNXVEKGEFJX9SJYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GJFG3YRQS66GEM42VTYXUMHJMT9DAG5C3ECVETXXH6EXARRVDZHXDX4JA2LTA5Y6H6WX4R5J434FV6K2SNXDP6NSJP3WSU8ZMNPGFYHSA2W89X4GMZYGVMYWEZHWETKZKNST9Y8V3RHYF7JCGNND9HXWMR9TA6HXEFZ8FNXZMRNV5KZYAN9WFEKJMMWYGARZLGXQJQTD"
+    },
+    {
+      "name": "free-form content at the depth limit",
+      "note": "The value of metadata, of extensions and of an x_ field is at depth 0, and nothing may be deeper than 8. Each of these reaches depth 8: with text, with a number, and with an empty list.",
+      "offer": {
+        "extensions": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        8
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "x_trail": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        []
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "metadata": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        "leaf"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "offer_id": "0x4f71a102288dd0961f3cbac89d74807160fce8d739728265e395874bede5b360",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "qcRtT0t8t82NQssOwUvxuPecZwica333NHCBsx_wMPZmeT7urZGKOtIBsqhN0-tpfGtgur7To4AOSITauHYpBw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[8]}]}]}]},\"metadata\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[\"leaf\"]}]}]}]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1,\"x_trail\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[[]]}]}]}]}}",
+      "offer_id": "0x4f71a102288dd0961f3cbac89d74807160fce8d739728265e395874bede5b360",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[8]}]}]}]},\"metadata\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[\"leaf\"]}]}]}]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x4f71a102288dd0961f3cbac89d74807160fce8d739728265e395874bede5b360\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1,\"x_trail\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[[]]}]}]}]}}",
+      "signature": "qcRtT0t8t82NQssOwUvxuPecZwica333NHCBsx_wMPZmeT7urZGKOtIBsqhN0-tpfGtgur7To4AOSITauHYpBw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[8]}]}]}]},\"metadata\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[\"leaf\"]}]}]}]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x4f71a102288dd0961f3cbac89d74807160fce8d739728265e395874bede5b360\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"qcRtT0t8t82NQssOwUvxuPecZwica333NHCBsx_wMPZmeT7urZGKOtIBsqhN0-tpfGtgur7To4AOSITauHYpBw\"},\"single_use\":false,\"version\":1,\"x_trail\":{\"a\":[{\"a\":[{\"a\":[{\"a\":[[]]}]}]}]}}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfjhsar9deekjmmwwv3r57ezvy3r5kmmyfsjywjm0v3xzg36tdajycfz8fdnshtat4746l2a05kzymt9w3skgct5vy3r57ezvy3r5kmmyfsjywjm0v3xzg36tdajycfz8fdjymr9v9nzyhtat4746l2a05kzymn9w3mk7untygazyar9wd6xuet5ygkzymn0v3j476tyygazyvpjv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzc3z9s3x7enxv4e976tyygazyvrcx3nrwvtpxycryv3c8pjxgvpexcckvvmrvfskxwpevsmngwpsxucnvvrxvdjnsephxvunwv3cxgmr2efn8y6nsde5vfjkgef4vgenvvpz9s38qatzd35kxhmtv4ujyw3z95kj6tfdgfz5wj2wypg92sjvf9pjqj69tykj6tfd94wxun2rdam5y52eg39ny4nhg9u52s29w994z42jfach2jehwahnvujz23vnxurd9uurzvmxtfykc6txfgerx7tf2dtyzstpgeqn6hrw95kj6tfdg48yggzs24pycj2ryp952kfd95kj6tfz9s38yetndak8vetjta6hympz8g3xsar5wpen5te0danxvetjwvhx6etjvd5xzmn59ejhsctdwpkx2g3vyfekx6r9d4jjyw3zve5kyetjdanxvetj94mrzg3vyfekjemwv9682un9yga8kgnnvd5x2mt9ygazyetyxg6n2vfeygkzyanpd36k2g36yfckx5n52sc8gwr58qeyu5tnwd8hw4tk0p64qetrtfmkjcmpxvenxnjggdp8x7zlwax4qkndv42rwatjtfr5knm5f9p8xutgfccz6arsverhgem4wgm4gme5g984xj25v965sktsgfmjylfvyfekjmn8d3j47atnv53r5enpd3ek2tpzwejhyumfdahzyw339s38shm5wfskjmpz8fajycfz8fdhkgnpyga9k7ezvy3r5kmmyfsjywjmtdw46l2a04wh6hta054q73xw",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFJHSAR9DEEKJMMWWV3R57EZVY3R5KMMYFSJYWJM0V3XZG36TDAJYCFZ8FDNSHTAT4746L2A05KZYMT9W3SKGCT5VY3R57EZVY3R5KMMYFSJYWJM0V3XZG36TDAJYCFZ8FDJYMR9V9NZYHTAT4746L2A05KZYMN9W3MK7UNTYGAZYAR9WD6XUET5YGKZYMN0V3J476TYYGAZYVPJV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZC3Z9S3X7ENXV4E976TYYGAZYVRCX3NRWVTPXYCRYV3C8PJXGVPEXCCKVVMRVFSKXWPEVSMNGWPSXUCNVVRXVDJNSEPHXVUNWV3CXGMR2EFN8Y6NSDE5VFJKGEF4VGENVVPZ9S38QATZD35KXHMTV4UJYW3Z95KJ6TFDGFZ5WJ2WYPG92SJVF9PJQJ69TYKJ6TFD94WXUN2RDAM5Y52EG39NY4NHG9U52S29W994Z42JFACH2JEHWAHNVUJZ23VNXURD9UURZVMXTFYKC6TXFGERX7TF2DTYZSTPGEQN6HRW95KJ6TFDG48YGGZS24PYCJ2RYP952KFD95KJ6TFZ9S38YETNDAK8VETJTA6HYMPZ8G3XSAR5WPEN5TE0DANXVETJWVHX6ETJVD5XZMN59EJHSCTDWPKX2G3VYFEKX6R9D4JJYW3ZVE5KYETJDANXVETJ94MRZG3VYFEKJEMWV9682UN9YGA8KGNNVD5X2MT9YGAZYETYXG6N2VFEYGKZYANPD36K2G36YFCKX5N52SC8GWR58QEYU5TNWD8HW4TK0P64QETRTFMKJCMPXVENXNJGGDP8X7ZLWAX4QKNDV42RWATJTFR5KNM5F9P8XUTGFCCZ6ARSVERHGEM4WGM4GME5G984XJ25V965SKTSGFMJYLFVYFEKJMN8D3J47ATNV53R5ENPD3EK2TPZWEJHYUMFDAHZYW339S38SHM5WFSKJMPZ8FAJYCFZ8FDHKGNPYGA9K7EZVY3R5KMMYFSJYWJMTDW46L2A04WH6HTA054Q73XW"
     }
   ],
   "normalization": [
@@ -1327,6 +1412,146 @@
         }
       },
       "error": "FORBIDDEN_KEY"
+    },
+    {
+      "name": "metadata nested nine deep",
+      "note": "A value at depth 9, counting metadata itself as depth 0.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "metadata": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        {
+                          "a": "leaf"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "offer_id": "0x3e70d4cdf0e8cf67e0dad6eabb631efa012a7852b723fecff4f04b062690a4d6",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0pFiuTA5n5CHvhegzFl_fikgl-2gHjE5SfLBRV0K5Yg5E1ZTZpmfFixXZ7GM9kIxWxRv2D7ZAPYuirjrGH7VDg"
+        }
+      },
+      "error": "INVALID_SIGNED_JSON"
+    },
+    {
+      "name": "extensions nested nine deep",
+      "note": "The same limit, counted the same way, for an extension field.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "extensions": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        {
+                          "a": "leaf"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "offer_id": "0xada914ef8a67692d9acd37e499b2f4e4f5e3f9f20cb2fec74263cdd387d1c994",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "mMkjiEjshOr8aYlQzXBpuaWTkiLFKHUKgtDk_cftHEneAU8G988pBTGXZssZ9znhBTWt2AuaLDj_hVEz0NtmBQ"
+        }
+      },
+      "error": "INVALID_SIGNED_JSON"
+    },
+    {
+      "name": "an x_ field nested nine deep",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "x_trail": {
+          "a": [
+            {
+              "a": [
+                {
+                  "a": [
+                    {
+                      "a": [
+                        {
+                          "a": "leaf"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "offer_id": "0xd7058b4ab5f212792818024205732b93799cb10aca4ceee56fa190a565b24201",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "TlUw9QKGMy3p4lGRsy8kp7iu4yA7caKq_EiGKolJSNSllayt5fArY2FRNooPRl0JYTS_jIkXa1LsFC5044C2BA"
+        }
+      },
+      "error": "INVALID_SIGNED_JSON"
     },
     {
       "name": "description over the limit",

@@ -41,8 +41,8 @@
   },
   "patternProperties": {
     "^x_": {
-      "description": "An extension field: any signable JSON value except null.",
-      "allOf": [{ "$ref": "#/$defs/signableJson" }, { "not": { "type": "null" } }]
+      "description": "An extension field: any JSON value this format can sign, except null. The value itself is at depth 0.",
+      "allOf": [{ "$ref": "#/$defs/valueAtDepth0" }, { "not": { "type": "null" } }]
     }
   },
   "additionalProperties": false,
@@ -124,24 +124,115 @@
       "else": { "type": "object", "properties": { "custom_seconds": false } }
     },
     "freeFormObject": {
-      "description": "metadata and extensions: a JSON object of content this format does not define. Signed with the rest. Spec 2.5.",
+      "description": "metadata and extensions: a JSON object of content this format does not define. Signed with the rest. Spec 2.5. The object itself is at depth 0.",
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/allowedKey" },
-      "additionalProperties": { "$ref": "#/$defs/signableJson" }
+      "additionalProperties": { "$ref": "#/$defs/valueAtDepth1" }
     },
-    "signableJson": {
-      "description": "JSON with one spelling in every language: whole numbers only, and no key that could alter an object. At most 8 levels deep, which this schema does not check.",
+    "scalar": {
+      "description": "Text, true, false, null, or a whole number that every language reads the same.",
       "anyOf": [
         { "type": "string" },
         { "type": "boolean" },
         { "type": "null" },
-        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
-        { "type": "array", "items": { "$ref": "#/$defs/signableJson" } },
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
+      ]
+    },
+    "valueAtDepth0": {
+      "description": "JSON with one spelling in every language, no key that could alter an object, and nothing deeper than depth 8. A schema cannot count, so each depth has its own definition: a value at depth n holds values at depth n + 1.",
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth1" } },
         {
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/allowedKey" },
-          "additionalProperties": { "$ref": "#/$defs/signableJson" }
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth1" }
         }
+      ]
+    },
+    "valueAtDepth1": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth2" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth2" }
+        }
+      ]
+    },
+    "valueAtDepth2": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth3" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth3" }
+        }
+      ]
+    },
+    "valueAtDepth3": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth4" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth4" }
+        }
+      ]
+    },
+    "valueAtDepth4": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth5" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth5" }
+        }
+      ]
+    },
+    "valueAtDepth5": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth6" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth6" }
+        }
+      ]
+    },
+    "valueAtDepth6": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth7" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth7" }
+        }
+      ]
+    },
+    "valueAtDepth7": {
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "items": { "$ref": "#/$defs/valueAtDepth8" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/valueAtDepth8" }
+        }
+      ]
+    },
+    "valueAtDepth8": {
+      "description": "The deepest a value may be: a scalar, or a list or object with nothing in it.",
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        { "type": "array", "maxItems": 0 },
+        { "type": "object", "maxProperties": 0 }
       ]
     },
     "allowedKey": {

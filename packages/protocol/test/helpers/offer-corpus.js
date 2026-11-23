@@ -58,8 +58,14 @@ export function* mutations(offer) {
     ["an x_ field holding null", (copy) => (copy.x_note = null)],
     ["an x_ field holding a fraction", (copy) => (copy.x_note = 0.5)],
     ["extensions as a list", (copy) => (copy.extensions = [])],
-    ["extensions nested nine deep", (copy) => (copy.extensions = nested(9))],
-    ["extensions nested eight deep", (copy) => (copy.extensions = nested(8))],
+    // `nested(n)` puts its leaf at depth n, counting the field's own value as 0.
+    ...["metadata", "extensions", "x_deep"].flatMap((field) => [
+      [`${field} reaching depth 8`, (copy) => (copy[field] = nested(8))],
+      [`${field} reaching depth 9`, (copy) => (copy[field] = nested(9))],
+      [`${field} with an empty list at depth 8`, (copy) => (copy[field] = nested(8, []))],
+      [`${field} with a list of one at depth 8`, (copy) => (copy[field] = nested(8, [1]))],
+      [`${field} with an empty object at depth 8`, (copy) => (copy[field] = nested(8, {}))]
+    ]),
     ["metadata over 2,048 bytes", (copy) => (copy.metadata = { note: "x".repeat(2100) })],
     ["metadata with a forbidden key far down", (copy) => (copy.metadata = { a: [{ b: { prototype: 1 } }] })],
     ["an offer over 4,096 bytes", (copy) => Object.assign(copy, { metadata: { a: "x".repeat(2000) }, extensions: { a: "x".repeat(2000) } })],
@@ -176,9 +182,9 @@ function token(symbol, digit) {
   return { asset_type: "udt", symbol, type_script_hash: `0x${digit.repeat(64).slice(0, 64)}` };
 }
 
-function nested(depth) {
-  let value = "leaf";
-  for (let level = 0; level < depth; level += 1) value = { a: value };
+function nested(depth, leaf = "leaf") {
+  let value = leaf;
+  for (let level = depth - 1; level >= 0; level -= 1) value = level % 2 === 0 ? { a: value } : [value];
   return value;
 }
 

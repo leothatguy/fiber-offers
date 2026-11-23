@@ -2,11 +2,18 @@
 """Independent verifier for the Fiber Offers v1 conformance vectors.
 
     python3 docs/test-vectors/verify.py [path/to/v1.json]
+    python3 docs/test-vectors/verify.py --offers < offers.jsonl
+    python3 docs/test-vectors/verify.py --signed-offers < offers.jsonl
 
 This is a second implementation of the format, written from docs/spec-v1.md and
 sharing no code with @fiber-offers/protocol. If it reproduces every value in
 the vector file and refuses every invalid case, the specification is complete
 enough to implement in another language.
+
+With --offers it reads one offer per line and says, for each, whether its form
+is acceptable; with --signed-offers, whether it verifies. The test suite uses
+both to compare the two implementations on thousands of offers the vector file
+does not contain.
 
 Requires Python 3.9+ and the "cryptography" package (for Ed25519).
 """
@@ -35,8 +42,12 @@ LIMITS = {
     "metadata_bytes": 2048, "extensions_bytes": 2048, "json_depth": 8,
 }
 LIMITS["encoded_length"] = len("fbroffer1") + -(-LIMITS["offer_bytes"] * 8 // 5) + 6
-# ECMAScript WhiteSpace and LineTerminator: what "trimmed" means for a description.
-WHITESPACE = set("\t\n\x0b\x0c\r \xa0     　﻿") | {chr(c) for c in range(0x2000, 0x200B)}
+# What "white space" means for a description: ECMAScript WhiteSpace and LineTerminator.
+WHITESPACE = (
+    {chr(c) for c in range(0x09, 0x0E)}
+    | {chr(c) for c in (0x20, 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF)}
+    | {chr(c) for c in range(0x2000, 0x200B)}
+)
 ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
 RESOLVER_URL = re.compile(
     r"(https?)://"
@@ -85,8 +96,16 @@ def canonical_string(text):
     return json.dumps(text, ensure_ascii=False)
 
 
+def utf8(text):
+    """The UTF-8 bytes of a string; refused when it is not well-formed Unicode."""
+    try:
+        return text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise Refused("strings must be well-formed Unicode")
+
+
 def sha256_hex(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(utf8(text)).hexdigest()
 
 
 # --- Bech32m (BIP-350) ----------------------------------------------------------
@@ -248,7 +267,7 @@ def check_resolver_url(url, network):
 def check_asset(asset):
     require(isinstance(asset, dict), "an asset is an object")
     asset_type = asset.get("asset_type")
-    require(asset_type in ASSET_TYPES, "unknown asset_type")
+    require(isinstance(asset_type, str) and asset_type in ASSET_TYPES, "unknown asset_type")
     symbol = asset.get("symbol")
     require(isinstance(symbol, str) and re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{0,15}", symbol), "symbol is not in canonical form")
     if asset_type == "ckb":
@@ -260,7 +279,10 @@ def check_asset(asset):
     return (asset_type, script_hash)
 
 
-def check_signable_json(value, limit, what):
+def check_signable_json(fields, sized, limit, what):
+    """Free-form signed content. Each of `fields` (the value of `metadata`, of
+    `extensions` or of an `x_...` field) is at depth 0, and what it holds is
+    one deeper at each step. `sized` is what the byte limit applies to."""
     def walk(node, depth):
         require(depth <= LIMITS["json_depth"], f"{what} is nested too deeply")
         if isinstance(node, float):
@@ -274,15 +296,16 @@ def check_signable_json(value, limit, what):
             for key, member in node.items():
                 require(key not in FORBIDDEN_KEYS, f"{key} is not allowed as a key")
                 walk(member, depth + 1)
-    walk(value, 0)
-    require(len(canonical(value).encode("utf-8")) <= limit, f"{what} is too large")
+    for field in fields:
+        walk(field, 0)
+    require(len(utf8(canonical(sized))) <= limit, f"{what} is too large")
 
 
 def check_recurrence(recurrence, offer):
     require(isinstance(recurrence, dict), "recurrence is an object")
     require(set(recurrence) <= {"interval", "amount", "cap_cycles", "spending_cap_total", "custom_seconds"}, "unknown recurrence member")
     interval = recurrence.get("interval")
-    require(interval in INTERVALS, "unknown recurrence interval")
+    require(isinstance(interval, str) and interval in INTERVALS, "unknown recurrence interval")
     amount = check_amount(recurrence.get("amount"), "recurrence.amount")
     if "cap_cycles" in recurrence:
         check_positive_integer(recurrence["cap_cycles"], "recurrence.cap_cycles")
@@ -308,7 +331,7 @@ def check_offer_form(offer):
         require(field in KNOWN_FIELDS or field == "extensions" or field.startswith("x_"), f"unknown field {field}")
     require(offer.get("scheme") == "fiberoffer-v1", "scheme")
     require(is_int(offer.get("version")) and offer["version"] == 1, "version")
-    require(offer.get("network") in NETWORKS, "network")
+    require(isinstance(offer.get("network"), str) and offer["network"] in NETWORKS, "network")
     require(isinstance(offer.get("single_use"), bool), "single_use must be a boolean")
     require(isinstance(offer.get("node_id"), str) and re.fullmatch(r"0[23][0-9a-f]{64}", offer["node_id"]), "node_id is not canonical")
     ed25519_spki_from_pem(offer.get("public_key"), canonical_spelling=True)
@@ -318,7 +341,7 @@ def check_offer_form(offer):
         description = offer["description"]
         require(isinstance(description, str) and description != "", "description must be a non-empty string")
         require(description[0] not in WHITESPACE and description[-1] not in WHITESPACE, "description is not trimmed")
-        require(len(description.encode("utf-8")) <= LIMITS["description_bytes"], "description is too long")
+        require(len(utf8(description)) <= LIMITS["description_bytes"], "description is too long")
 
     assets = offer.get("assets")
     require(isinstance(assets, list) and 1 <= len(assets) <= LIMITS["assets"], "assets must list 1 to 16 assets")
@@ -336,17 +359,17 @@ def check_offer_form(offer):
         check_recurrence(offer["recurrence"], offer)
     if "metadata" in offer:
         require(isinstance(offer["metadata"], dict), "metadata is an object")
-        check_signable_json(offer["metadata"], LIMITS["metadata_bytes"], "metadata")
+        check_signable_json([offer["metadata"]], offer["metadata"], LIMITS["metadata_bytes"], "metadata")
     extensions = {field: value for field, value in offer.items() if field == "extensions" or field.startswith("x_")}
     if "extensions" in extensions:
         require(isinstance(extensions["extensions"], dict), "extensions is an object")
     for value in extensions.values():
         require(value is not None, "an absent field is left out, not null")
-    check_signable_json(extensions, LIMITS["extensions_bytes"], "extension fields")
+    check_signable_json(extensions.values(), extensions, LIMITS["extensions_bytes"], "extension fields")
 
     require(isinstance(offer.get("offer_id"), str) and re.fullmatch(r"0x[0-9a-f]{64}", offer["offer_id"]), "offer_id")
     check_signature_object(offer.get("signature"))
-    require(len(canonical(offer).encode("utf-8")) <= LIMITS["offer_bytes"], "offer is too large")
+    require(len(utf8(canonical(offer))) <= LIMITS["offer_bytes"], "offer is too large")
 
 
 def verify_offer(offer):
@@ -570,7 +593,26 @@ def run(vectors):
     return report
 
 
+def judge_offers(lines, out, check):
+    """Reads one offer per line as JSON and writes one verdict per line:
+    "accept", or "refuse" and why."""
+    for line in lines:
+        try:
+            check(json.loads(line))
+            verdict = "accept"
+        except Refused as refusal:
+            verdict = f"refuse\t{refusal}"
+        out.write(verdict + "\n")
+
+
 def main():
+    # --offers judges only an offer's form (everything of specification 4.3 but
+    # the ID and the signature), so that two implementations can be compared
+    # on offers nobody has signed. --signed-offers verifies in full.
+    modes = {"--offers": check_offer_form, "--signed-offers": verify_offer}
+    if len(sys.argv) == 2 and sys.argv[1] in modes:
+        judge_offers(sys.stdin, sys.stdout, modes[sys.argv[1]])
+        return 0
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("v1.json")
     vectors = json.loads(path.read_text(encoding="utf-8"))
     report = run(vectors)

@@ -115,7 +115,7 @@ With neither bound, a payer may pay any amount. With `amount_min` equal to `amou
 - A reader MAY ignore them. Nothing in them changes the meaning of the fields above. This is the only place for additions a reader may ignore.
 - `metadata` and `extensions` are JSON objects. A field named `x_…` may hold any JSON value except `null`.
 - Numbers in them MUST be integers with absolute value at most 2^53 − 1. Write a decimal as a string.
-- They nest at most 8 levels deep.
+- Nothing in them is deeper than depth 8. The value of `metadata`, of `extensions` or of an `x_…` field is at depth 0; a member of an object, or an element of an array, is one deeper than the object or array that holds it. An empty object or array at depth 8 is therefore allowed, and one that holds anything is not.
 - The keys `__proto__`, `constructor` and `prototype` MUST NOT appear anywhere in an offer.
 - The canonical JSON of `metadata` is at most 2,048 bytes, and so is that of all extension fields taken together as one object.
 
@@ -566,8 +566,8 @@ A resolver reports the first matching failure. Statuses are those of the referen
 
 ## 18. Conformance
 
-An implementation conforms to this document when it reproduces every output in [`test-vectors/v1.json`](test-vectors/README.md) and refuses every invalid case there. The file fixes canonical JSON, type script hashes, twelve valid offers with every intermediate value, and the offers, encodings, requests, revocations and cycle requests that must be refused.
+An implementation conforms to this document when it reproduces every output in [`test-vectors/v1.json`](test-vectors/README.md) and refuses every invalid case there. The file fixes canonical JSON, type script hashes, thirteen valid offers with every intermediate value, and the offers, encodings, requests, revocations and cycle requests that must be refused.
 
-`test-vectors/verify.py` is a second implementation, in Python, written from this document and sharing no code with the reference implementation. It passes every vector.
+`test-vectors/verify.py` is a second implementation, in Python, written from this document and sharing no code with the reference implementation. It passes every vector. The two implementations are also given some 14,000 offers the vector file does not contain, each a valid offer changed in one place, and must accept and refuse the same ones.
 
 [`schemas/`](schemas/README.md) holds a JSON Schema for each object in this document and an OpenAPI description of the routes of sections 6 to 8. They are tested against the vectors, against the reference implementation and against the running reference resolver. Where a schema and this document disagree, this document is right and the schema has a defect.
