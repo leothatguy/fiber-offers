@@ -313,6 +313,57 @@ With Docker, point `FIBER_RPC_URL` at the host or service address reachable from
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.
 
+## Fiber RPC Access
+
+The resolver calls five methods on the merchant node: `node_info`,
+`new_invoice`, `get_invoice`, `list_peers` and `list_channels`. It never needs
+to send a payment or manage a channel, so it should not hold credentials that
+can.
+
+Fiber checks RPC calls against a [Biscuit](https://www.biscuitsec.org/) token
+when the node is started with `rpc.biscuit_public_key`; the token names what
+its holder may do. Give the resolver a token with exactly this:
+
+```datalog
+read("node");
+read("invoices");
+write("invoices");
+read("peers");
+read("channels");
+```
+
+1. Create a key pair with `biscuit keypair` (see Fiber's
+   `docs/biscuit-auth.md`). Keep the private key off the resolver host.
+2. Put the public key in the node's `config.yml` and restart the node:
+
+   ```yaml
+   rpc:
+     biscuit_public_key: "ed25519/<public key>"
+   ```
+
+3. Sign the token: `biscuit generate --private-key <private key> resolver.bc`,
+   where `resolver.bc` holds the five lines above.
+4. Set `FIBER_RPC_TOKEN=<token>` for the resolver and the worker.
+
+Checked against Fiber `v0.10.1`: with this token the resolver creates and
+tracks invoices and reports diagnostics, while `send_payment`, `get_payment`,
+`open_channel`, `shutdown_channel`, `connect_peer` and `graph_nodes` are refused
+with JSON-RPC error `-32999 Unauthorized`. `write("invoices")` also covers
+`cancel_invoice` and `settle_invoice`; Fiber has no narrower permission.
+
+If the node refuses the token, invoice requests fail with
+`502 FIBER_RPC_UNAUTHORIZED` (not retryable) and `GET /diagnostics` shows the
+node as unreachable with cause `-32999`.
+
+`FIBER_RPC_USERNAME` and `FIBER_RPC_PASSWORD` send HTTP Basic credentials
+instead, for a node behind a proxy that checks them. A Fiber node itself does
+not understand them, and they cannot limit which methods are called. When a
+token is set it is the one sent.
+
+A payer node used for the optional topology checks takes its own token in
+`PAYER_FIBER_RPC_TOKEN`. That one needs `write("payments")` for route dry-runs,
+which is one more reason not to configure a payer node on a merchant's resolver.
+
 ## Webhook Targets
 
 A webhook URL makes the resolver send requests from inside your network, so

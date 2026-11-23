@@ -37,6 +37,17 @@ export function invoiceRequestError(code, message, details = undefined, status =
   return error;
 }
 
+// A Fiber node with token authentication answers a missing, invalid or
+// insufficient token with this JSON-RPC error, over HTTP 200 (seen on v0.10.1).
+const FIBER_RPC_UNAUTHORIZED_CODE = -32999;
+
+const unauthorized = {
+  status: 502,
+  code: "FIBER_RPC_UNAUTHORIZED",
+  message: "the resolver is not authorized to use the recipient's Fiber node",
+  retryable: false
+};
+
 export function classifyInvoiceFailure(error) {
   if (error?.invoice_request_error) {
     return {
@@ -55,15 +66,7 @@ export function classifyInvoiceFailure(error) {
     case "transport":
       return { ...unavailable, cause_code: causeCode };
     case "http":
-      if (error.http_status === 401 || error.http_status === 403) {
-        return {
-          status: 502,
-          code: "FIBER_RPC_UNAUTHORIZED",
-          message: "the resolver is not authorized to use the recipient's Fiber node",
-          retryable: false,
-          cause_code: causeCode
-        };
-      }
+      if (error.http_status === 401 || error.http_status === 403) return { ...unauthorized, cause_code: causeCode };
       if (error.retryable) return { ...unavailable, cause_code: causeCode };
       return {
         status: 502,
@@ -73,6 +76,7 @@ export function classifyInvoiceFailure(error) {
         cause_code: causeCode
       };
     case "rpc":
+      if (error.code === FIBER_RPC_UNAUTHORIZED_CODE) return { ...unauthorized, cause_code: causeCode };
       return {
         status: 502,
         code: "FIBER_INVOICE_REJECTED",

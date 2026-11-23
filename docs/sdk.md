@@ -88,6 +88,9 @@ const created = await merchant.createAndRegisterOfferFromNode(
   },
   {
     fiberRpcUrl: "http://127.0.0.1:8227",
+    // Only for a node whose RPC requires a Biscuit token.
+    fiberRpcToken: process.env.FIBER_RPC_TOKEN,
+    // The Fiber Address to register the offer under.
     username: "coffee"
   }
 );
@@ -150,8 +153,9 @@ import { FiberPaymentClient } from "@fiber-offers/sdk";
 
 const payer = new FiberPaymentClient({
   url: "http://127.0.0.1:8229",
-  username: process.env.FIBER_RPC_USERNAME,
-  password: process.env.FIBER_RPC_PASSWORD
+  // A Biscuit token, for a node started with rpc.biscuit_public_key. Paying
+  // needs write("payments"), read("payments") and read("invoices").
+  token: process.env.PAYER_FIBER_RPC_TOKEN
 });
 
 const route = await payer.checkPaymentRoute(invoice.invoice, {

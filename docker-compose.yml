@@ -45,6 +45,9 @@ services:
       FIBER_UDT_SCRIPTS: ${FIBER_UDT_SCRIPTS:-}
       FIBER_INVOICE_TTL_SECONDS: ${FIBER_INVOICE_TTL_SECONDS:-900}
       FIBER_RPC_TIMEOUT_MS: ${FIBER_RPC_TIMEOUT_MS:-15000}
+      # A Biscuit token limited to what the resolver calls; see "Fiber RPC
+      # Access" in docs/deployment.md.
+      FIBER_RPC_TOKEN: ${FIBER_RPC_TOKEN:-}
       RESOLVER_API_KEY: ${RESOLVER_API_KEY:-local-dev-api-key}
       RESOLVER_SECRET_ENCRYPTION_KEY: ${RESOLVER_SECRET_ENCRYPTION_KEY:-local-dev-encryption-key-change-me}
       # Set only while changing the encryption key; see docs/deployment.md.

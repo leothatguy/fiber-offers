@@ -31,6 +31,12 @@ test("live Fiber RPC is required unless mock mode is explicitly selected", () =>
   assert.equal(merchantAlias.mode, "fiber-rpc");
   assert.equal(merchantAlias.client.url, "https://merchant-fiber.example/rpc");
   assert.equal(merchantAlias.client.username, "merchant");
+
+  const withToken = createInvoiceAdapter({
+    FIBER_RPC_URL: "http://127.0.0.1:8227",
+    FIBER_RPC_TOKEN: "resolver-only-biscuit"
+  });
+  assert.equal(withToken.client.token, "resolver-only-biscuit");
 });
 
 test("mock adapter reports mock diagnostics", async () => {

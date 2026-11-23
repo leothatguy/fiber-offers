@@ -1767,6 +1767,11 @@ test("tells payers whether an invoice failure is worth retrying", async () => {
     newInvoice = async () => new Response("Unauthorized", { status: 401 });
     const unauthorized = await postJson(invoiceUrl, request);
 
+    // What a node with token authentication answers when the token is missing,
+    // invalid, or lacks write("invoices").
+    newInvoice = async () => rpcFailure(-32999, "Unauthorized");
+    const tokenRefused = await postJson(invoiceUrl, request);
+
     newInvoice = async () => new Response("<html>Bad Gateway</html>", { status: 502 });
     const proxyDown = await postJson(invoiceUrl, request);
 
@@ -1790,6 +1795,10 @@ test("tells payers whether an invoice failure is worth retrying", async () => {
     assert.equal(unauthorized.status, 502);
     assert.equal(unauthorized.body.error.code, "FIBER_RPC_UNAUTHORIZED");
     assert.equal(unauthorized.body.error.details.retryable, false);
+
+    assert.equal(tokenRefused.status, 502);
+    assert.equal(tokenRefused.body.error.code, "FIBER_RPC_UNAUTHORIZED");
+    assert.equal(tokenRefused.body.error.details.retryable, false);
 
     assert.equal(proxyDown.status, 503);
     assert.equal(proxyDown.body.error.code, "RECIPIENT_UNAVAILABLE");

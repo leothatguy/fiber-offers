@@ -101,6 +101,28 @@ test("CLI checks node ownership, creates, lists, and cryptographically revokes a
     channels: 3
   });
 
+  // A node whose RPC requires a Biscuit token gets it from the environment.
+  const tokenSeen = [];
+  process.env.FIBER_RPC_TOKEN = "node-biscuit-token";
+  try {
+    await main(["doctor", ...common], {
+      cwd,
+      stdout: captureOutput(),
+      fetchImpl: async (url, options = {}) => {
+        if (url === fiberRpcUrl) {
+          tokenSeen.push(options.headers.authorization);
+          return response({ jsonrpc: "2.0", id: "1", result: { pubkey: nodeId, peers_count: "0x0", channel_count: "0x0" } });
+        }
+        // The node's token is never sent to the resolver.
+        assert.notEqual(options.headers?.authorization, "Bearer node-biscuit-token");
+        return response({ ok: true, dependencies: { invoice_source: { ok: true, node_id: nodeId } } });
+      }
+    });
+  } finally {
+    delete process.env.FIBER_RPC_TOKEN;
+  }
+  assert.deepEqual(tokenSeen, ["Bearer node-biscuit-token"]);
+
   // Without the key the resolver does not say which node it uses, and doctor
   // reports that it could not compare rather than claiming a match.
   const keylessOutput = captureOutput();

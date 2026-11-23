@@ -10,11 +10,18 @@ export const DEFAULT_FIBER_RPC_TIMEOUT_MS = 15000;
 //              FIBER_RPC_* string
 // so callers can tell "the node is unreachable, try again" apart from "the node
 // refused this request".
+//
+// Authentication: `token` is a Fiber Biscuit token, sent as a bearer token. A
+// node started with `rpc.biscuit_public_key` requires one, and the token names
+// the RPC methods its holder may call. `username`/`password` send HTTP Basic
+// credentials instead, for a node behind a proxy that checks them. A token wins
+// when both are given, since a request carries one Authorization header.
 export class FiberRpcClient {
   constructor(options = {}) {
     if (!options.url) throw new Error("FiberRpcClient requires a url");
 
     this.url = trimTrailingSlash(options.url);
+    this.token = typeof options.token === "string" && options.token.trim() !== "" ? options.token.trim() : undefined;
     this.username = options.username;
     this.password = options.password;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -37,7 +44,7 @@ export class FiberRpcClient {
           headers: {
             accept: "application/json",
             "content-type": "application/json",
-            ...authHeaders(this.username, this.password)
+            ...authHeaders(this)
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -120,7 +127,8 @@ export class FiberRpcClient {
   }
 }
 
-function authHeaders(username, password) {
+function authHeaders({ token, username, password }) {
+  if (token) return { authorization: `Bearer ${token}` };
   if (!username && !password) return {};
   return {
     authorization: `Basic ${base64Encode(`${username ?? ""}:${password ?? ""}`)}`

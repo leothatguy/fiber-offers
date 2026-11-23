@@ -2212,6 +2212,7 @@ function createTopologyClientFromEnv(env, fetchImpl) {
   return new FiberTopologyClient({
     merchant: {
       url: merchantUrl,
+      token: env.MERCHANT_FIBER_RPC_TOKEN ?? env.FIBER_RPC_TOKEN,
       username: env.MERCHANT_FIBER_RPC_USERNAME ?? env.FIBER_RPC_USERNAME,
       password: env.MERCHANT_FIBER_RPC_PASSWORD ?? env.FIBER_RPC_PASSWORD,
       timeoutMs: env.FIBER_RPC_TIMEOUT_MS,
@@ -2219,6 +2220,8 @@ function createTopologyClientFromEnv(env, fetchImpl) {
     },
     payer: {
       url: payerUrl,
+      // Never the merchant node's token: the payer node has its own key.
+      token: env.PAYER_FIBER_RPC_TOKEN,
       username: env.PAYER_FIBER_RPC_USERNAME ?? env.FIBER_RPC_USERNAME,
       password: env.PAYER_FIBER_RPC_PASSWORD ?? env.FIBER_RPC_PASSWORD,
       timeoutMs: env.FIBER_RPC_TIMEOUT_MS,

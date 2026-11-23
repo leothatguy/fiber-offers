@@ -92,10 +92,13 @@ export {
 const DEFAULT_RESOLVER_TIMEOUT_MS = 30000;
 
 export async function createOffer(input, options = {}) {
+  // `options.username` is the Fiber Address to register the offer under, never
+  // an RPC credential.
   const rpc = options.rpcClient ?? new FiberRpcClient({
     url: options.fiberRpcUrl,
-    username: options.username,
-    password: options.password,
+    token: options.fiberRpcToken,
+    username: options.fiberRpcUsername,
+    password: options.fiberRpcPassword,
     timeoutMs: options.timeoutMs,
     fetchImpl: options.fetchImpl
   });

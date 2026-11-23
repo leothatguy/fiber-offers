@@ -189,10 +189,13 @@ Merchant nodes may use any reachable port or private/hosted URL:
 
 ```bash
 FIBER_RPC_URL=https://fiber-rpc.merchant.example \
-FIBER_RPC_USERNAME=resolver \
-FIBER_RPC_PASSWORD=secret \
+FIBER_RPC_TOKEN=<biscuit token limited to what the resolver calls> \
 npm run dev
 ```
+
+See [Fiber RPC Access](docs/deployment.md#fiber-rpc-access) for the token the
+resolver needs. It can create and track invoices and cannot send payments or
+touch channels.
 
 The node URL and credentials are deployment secrets, not offer fields. A payment link identifies the resolver and offer; it never exposes the merchant RPC endpoint. Each self-hosted resolver instance currently maps to one merchant node. A multi-tenant hosted resolver should add a server-side tenant connection registry and select a trusted node profile by offer ownership, never accept arbitrary RPC URLs from browser or invoice requests.
 
@@ -201,9 +204,11 @@ The node URL and credentials are deployment secrets, not offer fields. A payment
 Optional environment variables:
 
 ```text
+FIBER_RPC_TOKEN
 FIBER_RPC_USERNAME
 FIBER_RPC_PASSWORD
 MERCHANT_FIBER_RPC_URL
+MERCHANT_FIBER_RPC_TOKEN
 MERCHANT_FIBER_RPC_USERNAME
 MERCHANT_FIBER_RPC_PASSWORD
 FIBER_RPC_INVOICE_METHOD=new_invoice

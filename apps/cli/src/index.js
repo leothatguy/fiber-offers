@@ -121,6 +121,7 @@ async function doctorCommand(config, context) {
     }),
     jsonRequest(context.fetchImpl, config.fiberRpcUrl, {
       method: "POST",
+      headers: config.fiberRpcToken ? { authorization: `Bearer ${config.fiberRpcToken}` } : {},
       body: { jsonrpc: "2.0", id: "fiber-offers-doctor", method: "node_info", params: [] }
     })
   ]);
@@ -165,7 +166,7 @@ async function createCommand(options, config, context) {
       ...(options.expiry ? { expiry: positiveInteger(options.expiry, "expiry") } : {}),
       single_use: options["single-use"]
     },
-    { fiberRpcUrl: config.fiberRpcUrl, fetchImpl: context.fetchImpl }
+    { fiberRpcUrl: config.fiberRpcUrl, fiberRpcToken: config.fiberRpcToken, fetchImpl: context.fetchImpl }
   );
   const keyPath = keyFile(config.keysDir, created.offer.offer_id);
   await writePrivateJson(keyPath, {
@@ -232,6 +233,9 @@ function configuration(options, cwd) {
       "Fiber RPC URL"
     ),
     apiKey: options["api-key"] ?? process.env.RESOLVER_API_KEY,
+    // A Fiber Biscuit token, for a node whose RPC requires one. Environment
+    // only: a token on the command line would show in the process list.
+    fiberRpcToken: process.env.FIBER_RPC_TOKEN || undefined,
     keysDir: resolve(cwd, options["keys-dir"] ?? ".fiber-offers/keys")
   };
 }
@@ -466,6 +470,9 @@ Common options:
   --api-key KEY         Resolver management key (prefer RESOLVER_API_KEY)
   --keys-dir PATH       Lifecycle key directory (default: .fiber-offers/keys)
   -h, --help            Show this help
+
+Environment:
+  FIBER_RPC_TOKEN       Biscuit token, for a node whose RPC requires one
 `;
 }
 

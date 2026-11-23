@@ -257,6 +257,9 @@ export function createInvoiceAdapter(env = process.env, options = {}) {
   if (rpcUrl) {
     return new FiberRpcInvoiceAdapter({
       url: rpcUrl,
+      // A Biscuit token limited to what the resolver calls; see "Fiber RPC
+      // access" in docs/deployment.md.
+      token: env.FIBER_RPC_TOKEN ?? env.MERCHANT_FIBER_RPC_TOKEN,
       username: env.FIBER_RPC_USERNAME ?? env.MERCHANT_FIBER_RPC_USERNAME,
       password: env.FIBER_RPC_PASSWORD ?? env.MERCHANT_FIBER_RPC_PASSWORD,
       method: env.FIBER_RPC_INVOICE_METHOD ?? "new_invoice",

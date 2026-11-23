@@ -118,6 +118,10 @@ The command checks:
 A healthy HTTP resolver is not enough. `same_node` must be true before creating
 merchant offers.
 
+If the node's RPC requires a Biscuit token, set `FIBER_RPC_TOKEN` in the
+environment (or the `.env` file the CLI loads). `doctor` and `create` send it
+to the node, and only to the node. `create` needs `read("node")`.
+
 The resolver names the node behind it to operators only, so `doctor` sends the
 management key (`RESOLVER_API_KEY` or `--api-key`) with its health request.
 Without a valid key `same_node` is `null` and a `note` says the two nodes could

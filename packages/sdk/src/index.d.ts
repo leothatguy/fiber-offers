@@ -55,11 +55,19 @@ export interface FiberOffersClientOptions {
   timeoutMs?: number;
 }
 
-export interface CreateOfferOptions extends Partial<FiberRpcClientOptions> {
+export interface CreateOfferOptions {
   rpcClient?: Pick<FiberRpcClient, "call">;
   fiberRpcUrl?: string;
+  /** Fiber Biscuit token for the node's RPC, when the node requires one. */
+  fiberRpcToken?: string;
+  /** HTTP Basic credentials, for a node behind a proxy that checks them. */
+  fiberRpcUsername?: string;
+  fiberRpcPassword?: string;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
   nodeInfoMethod?: string;
   keyPair?: OfferKeyPair;
+  /** The Fiber Address to register the offer under. Not an RPC credential. */
   username?: string;
 }
 
@@ -300,6 +308,13 @@ export function offerQrUrl(offerId: OfferId, resolverUrl: string, payload?: "lin
 
 export interface FiberRpcClientOptions {
   url: string;
+  /**
+   * Fiber Biscuit token, sent as `Authorization: Bearer`. Required by a node
+   * started with `rpc.biscuit_public_key`; it names the methods its holder may
+   * call. Takes precedence over `username`/`password`.
+   */
+  token?: string;
+  /** HTTP Basic credentials, for a node behind a proxy that checks them. */
   username?: string;
   password?: string;
   fetchImpl?: FetchLike;

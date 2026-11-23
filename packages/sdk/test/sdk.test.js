@@ -1249,6 +1249,40 @@ test("FiberRpcClient sends JSON-RPC requests with auth", async () => {
   assert.equal(JSON.parse(calls[0].init.body).method, "node_info");
 });
 
+test("FiberRpcClient sends a Fiber Biscuit token as a bearer token", async () => {
+  const seen = [];
+  const fetchImpl = async (_url, init) => {
+    seen.push(init.headers.authorization);
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: {} }), { status: 200 });
+  };
+
+  await new FiberRpcClient({ url: "http://fiber.test", token: " biscuit-token ", fetchImpl }).call("node_info");
+  // One Authorization header per request: the token wins over Basic credentials.
+  await new FiberRpcClient({ url: "http://fiber.test", token: "biscuit-token", username: "alice", password: "secret", fetchImpl }).call("node_info");
+  await new FiberRpcClient({ url: "http://fiber.test", token: "", fetchImpl }).call("node_info");
+
+  assert.deepEqual(seen, ["Bearer biscuit-token", "Bearer biscuit-token", undefined]);
+});
+
+test("createOffer authenticates to the node with RPC credentials, never the Fiber Address", async () => {
+  const seen = [];
+  const fetchImpl = async (_url, init) => {
+    seen.push(init.headers.authorization);
+    return new Response(
+      JSON.stringify({ jsonrpc: "2.0", id: "1", result: { pubkey: "02" + "a".repeat(64) } }),
+      { status: 200 }
+    );
+  };
+  const input = { resolver_url: "https://resolver.example", assets: [{ asset_type: "ckb", symbol: "CKB" }] };
+
+  // `username` names the Fiber Address to register; it is not sent to the node.
+  await createOffer(input, { fiberRpcUrl: "http://fiber.test", username: "coffee", fetchImpl });
+  await createOffer(input, { fiberRpcUrl: "http://fiber.test", username: "coffee", fiberRpcToken: "biscuit-token", fetchImpl });
+  await createOffer(input, { fiberRpcUrl: "http://fiber.test", fiberRpcUsername: "alice", fiberRpcPassword: "secret", fetchImpl });
+
+  assert.deepEqual(seen, [undefined, "Bearer biscuit-token", "Basic YWxpY2U6c2VjcmV0"]);
+});
+
 test("FiberRpcClient classifies failures so callers know whether to retry", async () => {
   const failureOf = async (fetchImpl, extra = {}) => {
     const rpc = new FiberRpcClient({ url: "http://fiber.test", fetchImpl, ...extra });
