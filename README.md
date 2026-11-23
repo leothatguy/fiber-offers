@@ -4,6 +4,7 @@
 [![SDK](https://img.shields.io/npm/v/%40fiber-offers%2Fsdk?label=sdk)](https://www.npmjs.com/package/@fiber-offers/sdk)
 [![CLI](https://img.shields.io/npm/v/%40fiber-offers%2Fcli?label=cli)](https://www.npmjs.com/package/@fiber-offers/cli)
 [![GitHub Release](https://img.shields.io/github/v/release/leothatguy/fiber-offers)](https://github.com/leothatguy/fiber-offers/releases/latest)
+[![CI](https://github.com/leothatguy/fiber-offers/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/leothatguy/fiber-offers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Reusable static payment offers for Fiber Network.

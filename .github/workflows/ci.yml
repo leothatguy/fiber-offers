@@ -1,0 +1,224 @@
+# Runs on every push and on pull requests.
+#
+#   tests    the whole suite on each supported Node line, against real
+#            PostgreSQL and Redis, with nothing allowed to skip
+#   audit    known vulnerabilities and registry signatures of the dependencies
+#   image    the Docker image and the Compose stack, built, started and used
+#
+# Not here yet: the live two-node Fiber run (it needs funded testnet nodes) and
+# a browser bundle check. Both are tracked in docs/remediation-plan.md.
+#
+# Actions are pinned to a commit. The comment beside each is the release it is.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Named explicitly so that every step runs with "-eo pipefail": a command that
+# fails in the middle of a pipe fails the step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    name: Tests (Node ${{ matrix.node }})
+    # A branch of this repository with a pull request open gets both events;
+    # the push run is enough.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24, 26]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fiber_offers_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/fiber_offers_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # The second implementation of the format (docs/test-vectors/verify.py)
+      # needs it. Without it those tests would skip, which the check below
+      # does not allow.
+      - name: Python cryptography package
+        run: python3 -c "import cryptography" || (sudo apt-get update -q && sudo apt-get install -y -q python3-cryptography)
+      - run: npm ci
+      - name: Create the database tables
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+      - name: Tests
+        run: npm test 2>&1 | tee test-output.txt
+      # A test that skips proves nothing. With the services above and Python
+      # in place, none has a reason to. The summary line is "ℹ skipped 0" or,
+      # in TAP, "# skipped 0", depending on the Node version.
+      - name: No test was skipped
+        run: |
+          grep -E '^(ℹ|#) (tests|pass|fail|skipped) ' test-output.txt
+          grep -Eq '^(ℹ|#) skipped 0$' test-output.txt
+      - name: Smoke test
+        run: npm run smoke
+
+  audit:
+    name: Dependency audit
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Known vulnerabilities
+        run: npm audit
+      - name: Registry signatures
+        run: npm audit signatures
+
+  image:
+    name: Docker image and Compose stack
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compose files are valid
+        run: |
+          docker compose version
+          docker compose -f docker-compose.yml config --quiet
+          # The production file must stop when a secret is missing...
+          if docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet 2> refusal.txt; then
+            echo "::error::the production Compose file accepted missing secrets"
+            exit 1
+          fi
+          cat refusal.txt
+          # ...and be valid once they are given.
+          POSTGRES_PASSWORD=ci-only-postgres-password \
+          RESOLVER_API_KEY=ci-only-api-key-0123456789abcdef \
+          RESOLVER_SECRET_ENCRYPTION_KEY=ci-only-encryption-key-0123456789abcdef \
+          RESOLVER_PUBLIC_URL=https://resolver.example \
+          FIBER_SECRET_KEY_PASSWORD=ci-only-node-password \
+            docker compose -f docker-compose.yml -f docker-compose.production.yml config --quiet
+
+      - name: Build the image
+        run: docker build --tag fiber-offers:ci .
+
+      - name: The image does not run as root
+        run: |
+          uid="$(docker run --rm fiber-offers:ci id -u)"
+          echo "the image runs as uid $uid"
+          test "$uid" != "0"
+
+      - name: The image refuses to start in production without its settings
+        run: |
+          if docker run --rm fiber-offers:ci > refusal.txt 2>&1; then
+            echo "::error::the image started in production with no settings"
+            exit 1
+          fi
+          cat refusal.txt
+          grep -q "Refusing to start" refusal.txt
+          grep -q "DATABASE_URL" refusal.txt
+
+      # One container, the file store, no API key: the smallest deployment.
+      - name: One container on the file store
+        run: |
+          docker run --detach --name resolver --publish 127.0.0.1:8787:8787 \
+            --env NODE_ENV=development --env FIBER_INVOICE_MODE=mock fiber-offers:ci
+          docker exec resolver node scripts/running-resolver-check.js --url http://127.0.0.1:8787 | tee check.json
+          test "$(jq -r .store check.json)" = "json"
+          # The published port answers from outside the container.
+          curl --fail --silent --show-error http://127.0.0.1:8787/health
+          # The store file belongs to the unprivileged user and is private.
+          test "$(docker exec resolver stat --format '%U %a' apps/resolver/data/offers.json)" = "node 600"
+          # SIGTERM stops it cleanly, and the store is still there afterwards.
+          docker stop resolver
+          test "$(docker inspect --format '{{.State.ExitCode}}' resolver)" = "0"
+          docker start resolver
+          offer_id="$(jq -r .offer_id check.json)"
+          curl --fail --silent --show-error --retry 20 --retry-delay 1 --retry-connrefused \
+            "http://127.0.0.1:8787/offers/$offer_id" | jq --exit-status '.offer.offer_id == $id and .revoked_at != null' --arg id "$offer_id"
+
+      - name: Logs of the single container
+        if: always()
+        run: |
+          docker logs resolver || true
+          docker rm --force resolver || true
+
+      # The whole stack: gateway, two resolver replicas, worker, PostgreSQL,
+      # Redis and the RPC relay, with mock invoices because CI has no Fiber node.
+      - name: The Compose stack
+        env:
+          NODE_ENV: development
+          FIBER_INVOICE_MODE: mock
+        run: |
+          docker compose up --detach --build
+          docker run --rm --network host fiber-offers:ci node scripts/running-resolver-check.js \
+            --url http://127.0.0.1:8787 --api-key local-dev-api-key --wait-seconds 180 | tee stack-check.json
+          test "$(jq -r .store stack-check.json)" = "postgresql"
+          test "$(jq -r .rate_limiter stack-check.json)" = "redis"
+          for service in fiber-offers worker fiber-rpc-proxy fiber-rpc-host-relay; do
+            uid="$(docker compose exec -T "$service" id -u)"
+            echo "$service runs as uid $uid"
+            test "$uid" != "0"
+          done
+          docker compose ps
+          # The resolvers and the worker stop cleanly on SIGTERM.
+          containers="$(docker compose ps --quiet fiber-offers worker)"
+          docker compose stop fiber-offers worker
+          for container in $containers; do
+            code="$(docker inspect --format '{{.State.ExitCode}}' "$container")"
+            echo "$(docker inspect --format '{{.Name}}' "$container") exited with $code"
+            test "$code" = "0"
+          done
+
+      - name: Logs of the stack
+        if: always()
+        env:
+          NODE_ENV: development
+          FIBER_INVOICE_MODE: mock
+        run: |
+          docker compose ps --all || true
+          docker compose logs --no-color --tail 200 || true
+          docker compose down --volumes || true
