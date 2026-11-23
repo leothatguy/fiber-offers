@@ -45,5 +45,9 @@
     "ioredis": "^5.11.1",
     "pg": "^8.22.0",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "typescript": "7.0.2"
   }
 }
