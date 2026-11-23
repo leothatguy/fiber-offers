@@ -108,6 +108,10 @@ export interface RegisteredOfferResponse {
   encoded_offer?: string;
   fiber_address?: string;
   payment_link?: string;
+  /** False when the stored offer no longer passes verification and cannot be paid. */
+  valid?: boolean;
+  invalid_code?: string;
+  invalid_reason?: string;
   [key: string]: unknown;
 }
 
@@ -122,6 +126,10 @@ export interface OfferListItem {
   disabled?: boolean;
   fiber_address?: string;
   payment_link?: string;
+  /** False when the stored offer no longer passes verification and cannot be paid. */
+  valid?: boolean;
+  invalid_code?: string;
+  invalid_reason?: string;
   created_at?: string;
   updated_at?: string;
 }

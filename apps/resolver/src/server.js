@@ -10,7 +10,6 @@ import {
   encodeOffer,
   FiberOfferError,
   generateOfferKeyPair,
-  offerToPaymentLink,
   validateResolutionRequest,
   verifyOffer,
   verifyOfferRevocation,
@@ -824,9 +823,16 @@ async function resolveInvoice(entry, body, context, origin, options = {}) {
   return withOfferInvoiceLock(context, entry.offer.offer_id, async () => {
     const startedAt = Date.now();
     assertOfferActive(entry);
-    const verification = verifyOffer(entry.offer);
+    // A stored offer can stop passing verification when the rules tighten
+    // between versions. That is the offer's fault, not the payer's request.
+    const verification = safeVerifyOffer(entry.offer);
     if (!verification.ok) {
-      throw httpError(400, verification.code, verification.message);
+      throw httpError(
+        409,
+        "OFFER_INVALID",
+        "this offer does not pass verification and cannot be paid; ask the merchant for a new one",
+        { cause_code: verification.code, cause: verification.message, retryable: false }
+      );
     }
 
     await verifyOfferNodeOwnership(entry.offer, context);
@@ -1382,7 +1388,7 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
     amount: request?.amount ?? body?.amount,
     asset: request?.asset ?? body?.asset,
     invoice_mode: context.invoiceAdapter.mode,
-    payment_link: offerToPaymentLink(entry.offer, origin),
+    payment_link: paymentLink(entry.offer, origin),
     invoice: invoiceFromReadinessBody(body),
     checks,
     topology
@@ -2341,7 +2347,7 @@ function offerResponse(entry, origin, username = undefined) {
     offer_id: entry.offer.offer_id,
     encoded_offer: entry.encoded_offer,
     offer: entry.offer,
-    payment_link: offerToPaymentLink(entry.offer, origin),
+    payment_link: paymentLink(entry.offer, origin),
     qr_link_url: `${qrBase}?payload=link`,
     qr_offer_url: `${qrBase}?payload=offer`,
     fiber_address: normalizedUsername ? `${normalizedUsername}@${new URL(origin).host}` : undefined,
@@ -2350,8 +2356,22 @@ function offerResponse(entry, origin, username = undefined) {
     updated_at: entry.updated_at,
     disabled: Boolean(entry.disabled),
     revoked_at: entry.revoked_at,
-    ownership: entry.ownership
+    ownership: entry.ownership,
+    ...offerValidity(entry.offer)
   };
+}
+
+// The link is built from the stored ID alone, so it can be shown even for an
+// offer that no longer passes verification.
+function paymentLink(offer, origin) {
+  return `${origin.replace(/\/$/, "")}/pay/${offer.offer_id}`;
+}
+
+function offerValidity(offer) {
+  const verification = safeVerifyOffer(offer);
+  return verification.ok
+    ? { valid: true }
+    : { valid: false, invalid_code: verification.code, invalid_reason: verification.message };
 }
 
 function offerListItem(entry, origin, username = undefined) {
@@ -2367,7 +2387,10 @@ function offerListItem(entry, origin, username = undefined) {
     single_use: offer.single_use,
     disabled: entry.disabled,
     fiber_address: normalizedUsername ? `${normalizedUsername}@${new URL(origin).host}` : undefined,
-    payment_link: offerToPaymentLink(offer, origin),
+    payment_link: paymentLink(offer, origin),
+    // False for an offer stored by an earlier version that no longer passes
+    // verification. It cannot be paid and has to be issued again.
+    ...offerValidity(offer),
     created_at: entry.created_at,
     updated_at: entry.updated_at
   };

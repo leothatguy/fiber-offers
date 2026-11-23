@@ -201,6 +201,14 @@ retry can help. `error.details.retryable` is always present on these responses:
 JSON-RPC error code. The node's error message is written to the resolver log and
 is not returned to the payer. A failed request leaves no resolution behind.
 
+A stored offer that does not pass verification is not payable. An invoice
+request for it fails with `409 OFFER_INVALID` (`retryable: false`), with the
+verification failure in `error.details.cause_code`. This happens to offers
+stored by an earlier version when the rules tighten, for example one signed
+with an uppercase `node_id`. `GET /offers` and `GET /offers/:offer_id` report
+such an offer with `valid: false` and `invalid_code`, so the merchant can find
+it and issue a new one.
+
 ## Resolution Flow
 
 1. Merchant creates and signs an offer.

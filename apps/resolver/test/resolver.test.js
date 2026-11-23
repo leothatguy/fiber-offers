@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { sign as cryptoSign } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,11 +9,14 @@ import { createMemoryRateLimiter, createServer, InMemoryOfferStore, JsonOfferSto
 import { FiberRpcInvoiceAdapter, MockInvoiceAdapter } from "../src/invoice-adapter.js";
 import { signWebhookPayload } from "../src/webhook-delivery.js";
 import {
+  base64UrlEncode,
+  canonicalStringify,
   ckbScriptHash,
   createOfferRevocation,
   createSignedOffer,
   encodeOffer,
   generateOfferKeyPair,
+  sha256Hex,
   signRecurrenceRequest,
   subscriptionId
 } from "../../../packages/protocol/src/index.js";
@@ -2002,6 +2006,61 @@ test("the in-memory rate limiter forgets expired buckets", () => {
   // A per-call limit overrides the default.
   assert.equal(limiter.take("login:a", 5000, { max: 1 }).allowed, true);
   assert.equal(limiter.take("login:a", 5000, { max: 1 }).allowed, false);
+});
+
+test("an offer stored before the rules tightened is flagged, not served as payable", async () => {
+  await withServer(async (baseUrl, server) => {
+    const valid = await postJson(`${baseUrl}/demo/offers`, { amount: "1000", description: "Still valid" });
+
+    // An offer as an earlier version would have accepted it: correctly signed,
+    // with its node ID in uppercase.
+    const keys = generateOfferKeyPair();
+    const canonical = createSignedOffer(
+      {
+        node_id: "02" + "a".repeat(64),
+        public_key: keys.publicKeyPem,
+        resolver_url: baseUrl,
+        description: "Signed under the old rules",
+        assets: [{ asset_type: "ckb", symbol: "CKB" }]
+      },
+      keys.privateKeyPem
+    );
+    const { offer_id: _id, signature: _signature, ...content } = { ...canonical, node_id: canonical.node_id.toUpperCase() };
+    const withId = { ...content, offer_id: `0x${sha256Hex(content)}` };
+    const legacy = {
+      ...withId,
+      signature: {
+        scheme: "ed25519",
+        value: base64UrlEncode(cryptoSign(null, Buffer.from(canonicalStringify(withId)), keys.privateKeyPem))
+      }
+    };
+    await server.store.upsertOffer(legacy, "fbroffer1stored-by-an-earlier-version");
+
+    const list = await getJson(`${baseUrl}/offers`);
+    const fetched = await getJson(`${baseUrl}/offers/${legacy.offer_id}`);
+    const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
+    const invoice = await postJson(`${baseUrl}/offers/${legacy.offer_id}/invoice`, request);
+    const check = await postJson(`${baseUrl}/offers/${legacy.offer_id}/check`, request);
+    const stillPayable = await postJson(`${baseUrl}/offers/${valid.body.offer_id}/invoice`, request);
+
+    // One bad offer does not take the list down; it is marked.
+    assert.equal(list.status, 200);
+    const listed = Object.fromEntries(list.body.offers.map((item) => [item.offer_id, item]));
+    assert.equal(listed[valid.body.offer_id].valid, true);
+    assert.equal(listed[legacy.offer_id].valid, false);
+    assert.equal(listed[legacy.offer_id].invalid_code, "NON_CANONICAL_OFFER");
+
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.body.valid, false);
+    assert.equal(fetched.body.payment_link, `${baseUrl}/pay/${legacy.offer_id}`);
+
+    assert.equal(invoice.status, 409);
+    assert.equal(invoice.body.error.code, "OFFER_INVALID");
+    assert.equal(invoice.body.error.details.cause_code, "NON_CANONICAL_OFFER");
+    assert.equal(check.status, 200);
+    assert.equal(check.body.ready, false);
+    assert.equal(stillPayable.status, 201);
+  });
 });
 
 function readyDirectTopology() {

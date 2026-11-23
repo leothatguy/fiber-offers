@@ -28,6 +28,15 @@ the login form long enough to complete that exchange and is never written to
 browser storage. CLI and backend integrations continue to use bearer or
 `x-api-key` authentication.
 
+### After an upgrade: offers that no longer verify
+
+Releases can tighten what a valid offer is. An offer stored before that still
+appears in `GET /offers` (and `fiber-offers list`), marked `valid: false` with
+an `invalid_code`, and its payment page still loads. Invoice requests for it
+are refused with `409 OFFER_INVALID`. Create a replacement with the current
+CLI or SDK and share the new link; an offer cannot be repaired, because any
+change to it changes its ID and needs a new signature.
+
 ### What is public and what needs the key
 
 Open to anyone, because a payer's wallet calls them:
