@@ -1,0 +1,2279 @@
+{
+  "title": "Fiber Offers v1 conformance test vectors",
+  "format": "fiberoffer-v1",
+  "vectors_version": 1,
+  "notes": [
+    "Every value here is fixed. An implementation conforms when it reproduces each output and refuses each invalid case.",
+    "Error codes are those of the reference implementation (@fiber-offers/protocol). Another implementation must refuse the same cases; matching the code is recommended, not required.",
+    "The keys below are derived from the published seed labels (seed = SHA-256 of the label). They are test keys.",
+    "Unless a vector gives its own \"now\", the current time is 1800000000 (unix seconds)."
+  ],
+  "now": 1800000000,
+  "limits": {
+    "offer_bytes": 4096,
+    "encoded_length": 6569,
+    "description_bytes": 512,
+    "resolver_url_length": 512,
+    "assets": 16,
+    "symbol_length": 16,
+    "metadata_bytes": 2048,
+    "extensions_bytes": 2048,
+    "json_depth": 8
+  },
+  "keys": {
+    "offer": {
+      "seed_label": "fiber-offers test vector: offer key v1",
+      "seed_hex": "5d2bb9fc6d161b5a1c7374b1db797c66c898e97593f266cb5361e6143b36eb12",
+      "public_key_hex": "12a2905113aab8aef0a3aac14d8de99bff35ddf6489627c9db7ca24950006850",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+      "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIF0rufxtFhtaHHN0sdt5fGbImOl1k/Jmy1Nh5hQ7NusS\n-----END PRIVATE KEY-----\n"
+    },
+    "subscriber": {
+      "seed_label": "fiber-offers test vector: subscriber key v1",
+      "seed_hex": "3138b212c0382632ed31c9e4a1f7ebfa2adc31ac61474c7fe8a05d6d56543dd2",
+      "public_key_hex": "80e48b70e71a6eba7afd7744358cd7c77be6e4528259825aefb7f9d75267a988",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----",
+      "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDE4shLAOCYy7THJ5KH36/oq3DGsYUdMf+igXW1WVD3S\n-----END PRIVATE KEY-----\n",
+      "subscription_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5"
+    },
+    "stranger": {
+      "seed_label": "fiber-offers test vector: stranger key v1",
+      "seed_hex": "cb847c9a452e9c8fa73d4935a2c99b3b63b235c58495c5ae0979db80cc5d1872",
+      "public_key_hex": "ef4eb434d935d627ec696dd5c36b2b6f611bb664aff3ea8cb7cc86a458a996e6",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA7060NNk11ifsaW3Vw2srb2EbtmSv8+qMt8yGpFipluY=\n-----END PUBLIC KEY-----",
+      "private_key_pem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIMuEfJpFLpyPpz1JNaLJmztjsjXFhJXFrgl524DMXRhy\n-----END PRIVATE KEY-----\n"
+    }
+  },
+  "canonical_json": [
+    {
+      "name": "members are ordered by key",
+      "input_json": "{\"b\":1,\"a\":2,\"c\":{\"z\":true,\"y\":null}}",
+      "canonical": "{\"a\":2,\"b\":1,\"c\":{\"y\":null,\"z\":true}}"
+    },
+    {
+      "name": "number-like keys are ordered as text, not as numbers",
+      "input_json": "{\"1\":\"one\",\"2\":\"two\",\"10\":\"ten\",\"a\":\"letter\",\"-1\":\"minus\"}",
+      "canonical": "{\"-1\":\"minus\",\"1\":\"one\",\"10\":\"ten\",\"2\":\"two\",\"a\":\"letter\"}"
+    },
+    {
+      "name": "keys are compared by UTF-16 code unit",
+      "input_json": "{\"é\":1,\"e\":2,\"E\":3,\"😀\":4,\"￿\":5,\"\":6}",
+      "canonical": "{\"\":6,\"E\":3,\"e\":2,\"é\":1,\"😀\":4,\"￿\":5}"
+    },
+    {
+      "name": "a member named __proto__ is an ordinary member",
+      "input_json": "{\"z\":1,\"__proto__\":{\"a\":1}}",
+      "canonical": "{\"__proto__\":{\"a\":1},\"z\":1}"
+    },
+    {
+      "name": "arrays keep their order",
+      "input_json": "[3,1,[2,{\"b\":1,\"a\":2}]]",
+      "canonical": "[3,1,[2,{\"a\":2,\"b\":1}]]"
+    },
+    {
+      "name": "strings are escaped as JSON.stringify escapes them",
+      "input_json": "{\"text\":\"line\\nbreak \\\"quoted\\\" back\\\\slash tab\\t unit\\u001f del sep  é 😀\"}",
+      "canonical": "{\"text\":\"line\\nbreak \\\"quoted\\\" back\\\\slash tab\\t unit\\u001f del sep  é 😀\"}"
+    },
+    {
+      "name": "whole numbers, booleans and null",
+      "input_json": "{\"zero\":0,\"negative\":-7,\"large\":9007199254740991,\"yes\":true,\"no\":false,\"nothing\":null}",
+      "canonical": "{\"large\":9007199254740991,\"negative\":-7,\"no\":false,\"nothing\":null,\"yes\":true,\"zero\":0}"
+    },
+    {
+      "name": "empty containers",
+      "input_json": "{\"object\":{},\"array\":[],\"text\":\"\"}",
+      "canonical": "{\"array\":[],\"object\":{},\"text\":\"\"}"
+    }
+  ],
+  "type_script_hashes": [
+    {
+      "name": "RUSD on CKB testnet",
+      "script": {
+        "code_hash": "0x1142755a044bf2ee358cba9f2da187ce928c91cd4dc8692ded0337efa677d21a",
+        "hash_type": "type",
+        "args": "0x878fcc6f1f08d48e87bb1c3b3d5083f23f8a39c5d5c764f253b55b998526439b"
+      },
+      "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+    },
+    {
+      "name": "secp256k1_blake160 lock (mainnet system script), empty args",
+      "script": {
+        "code_hash": "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+        "hash_type": "type",
+        "args": "0x"
+      },
+      "type_script_hash": "0x15f2b094f66a983a93c8c33be6a6ab774c3f5edbe384e1994c8b64182805a099"
+    },
+    {
+      "name": "data1 hash type with 20-byte args",
+      "script": {
+        "code_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "hash_type": "data1",
+        "args": "0x2222222222222222222222222222222222222222"
+      },
+      "type_script_hash": "0x551dd9c5a78f76209d39a7cd66a531f5aa89c8b30a5b0e6983969f5647dba8fe"
+    }
+  ],
+  "valid_offers": [
+    {
+      "name": "fixed-price CKB offer",
+      "note": "The smallest useful offer: one asset, one amount.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgs2t9ec",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SENYV4JKGCMXXSEXZVFJXY6RGWFKXQUKZC3SV5URSEF5XUENJWFCV3JNGV338P3NSDRYXP3RJDEKXVUKZCEEX5CX2VPHXDNRVDESVDNZYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GJS89JNZ7Z9DSUXKKNCX3EKC5RTD9DX5ENPG9E5YDRC89JX75P3T995SH65V394QDJ8FP4KV635W3EYZEZ89434W6ZVF939YWP4FFUX25J9WVKHQKJ9XSUHGC26XDP8G6ZEDE0KJSNHYF7JCGNND9HXWMR9TA6HXEFZ8FNXZMRNV5KZYAN9WFEKJMMWYGARZLGS2T9EC"
+    },
+    {
+      "name": "open amount with a minimum",
+      "note": "No amount_max: the payer chooses any amount of at least amount_min.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Tip jar",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "1000",
+        "single_use": false,
+        "offer_id": "0x2c25ff1c741c9e6fa7885b4c20bfc12a5335cdb88e425eda627efdbc08e9c051",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "bVOjJTksA2f9A7NN5P6lY9l6S6SfxsgZhHBEDkTlF9BAvZpRIWbY7qXyKWBqO3WXm9sSkz0qSeAi6eSseT3XCw"
+        }
+      },
+      "id_preimage": "{\"amount_min\":\"1000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Tip jar\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x2c25ff1c741c9e6fa7885b4c20bfc12a5335cdb88e425eda627efdbc08e9c051",
+      "signing_payload": "{\"amount_min\":\"1000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Tip jar\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x2c25ff1c741c9e6fa7885b4c20bfc12a5335cdb88e425eda627efdbc08e9c051\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "bVOjJTksA2f9A7NN5P6lY9l6S6SfxsgZhHBEDkTlF9BAvZpRIWbY7qXyKWBqO3WXm9sSkz0qSeAi6eSseT3XCw",
+      "canonical_json": "{\"amount_min\":\"1000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Tip jar\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x2c25ff1c741c9e6fa7885b4c20bfc12a5335cdb88e425eda627efdbc08e9c051\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"bVOjJTksA2f9A7NN5P6lY9l6S6SfxsgZhHBEDkTlF9BAvZpRIWbY7qXyKWBqO3WXm9sSkz0qSeAi6eSseT3XCw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdd9hzyw3zxycrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazy4rfwqsx5ctjygkzymn9w3mk7untygazyar9wd6xuet5ygkzymn0v3j476tyygazyvpjv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzc3z9s3x7enxv4e976tyygazyvrcxf3nydtxvcckxde5x93njefkvesnwwpcx43rgcejxp3xvce3xfsn2venx43kgc3c8pjngv34v4jxzd3jxajkverzvvcrsefevvcr2vfz9s38qatzd35kxhmtv4ujyw3z95kj6tfdgfz5wj2wypg92sjvf9pjqj69tykj6tfd94wxun2rdam5y52eg39ny4nhg9u52s29w994z42jfach2jehwahnvujz23vnxurd9uurzvmxtfykc6txfgerx7tf2dtyzstpgeqn6hrw95kj6tfdg48yggzs24pycj2ryp952kfd95kj6tfz9s38yetndak8vetjta6hympz8g3xsar5wpen5te0danxvetjwvhx6etjvd5xzmn59ejhsctdwpkx2g3vyfekx6r9d4jjyw3zve5kyetjdanxvetj94mrzg3vyfekjemwv9682un9yga8kgnnvd5x2mt9ygazyetyxg6n2vfeygkzyanpd36k2g36yf39vnm2ff2xku6pxfnrjsfhfe8r25pkd3vnjmpk2vm9xencwdn456zggfz5g665d3rrjsjpwed8q5jf2a39jdm3tpu5k46zw98nx46cd5uhx5mt0gc8z5m9g95nve2nwdj4gv6cgdmjylfvyfekjmn8d3j47atnv53r5enpd3ek2tpzwejhyumfdahzyw3305a0a85w",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZY4RFWQSX5CTJYGKZYMN9W3MK7UNTYGAZYAR9WD6XUET5YGKZYMN0V3J476TYYGAZYVPJV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZC3Z9S3X7ENXV4E976TYYGAZYVRCXF3NYDTXVCCKXDE5X93NJEFKVESNWWPCX43RGCEJXP3XVCE3XFSN2VENX43KGC3C8PJNGV34V4JXZD3JXAJKVERZVVCRSEFEVVCR2VFZ9S38QATZD35KXHMTV4UJYW3Z95KJ6TFDGFZ5WJ2WYPG92SJVF9PJQJ69TYKJ6TFD94WXUN2RDAM5Y52EG39NY4NHG9U52S29W994Z42JFACH2JEHWAHNVUJZ23VNXURD9UURZVMXTFYKC6TXFGERX7TF2DTYZSTPGEQN6HRW95KJ6TFDG48YGGZS24PYCJ2RYP952KFD95KJ6TFZ9S38YETNDAK8VETJTA6HYMPZ8G3XSAR5WPEN5TE0DANXVETJWVHX6ETJVD5XZMN59EJHSCTDWPKX2G3VYFEKX6R9D4JJYW3ZVE5KYETJDANXVETJ94MRZG3VYFEKJEMWV9682UN9YGA8KGNNVD5X2MT9YGAZYETYXG6N2VFEYGKZYANPD36K2G36YF39VNM2FF2XKU6PXFNRJSFHFE8R25PKD3VNJMPK2VM9XENCWDN456ZGGFZ5G665D3RRJSJPWED8Q5JF2A39JDM3TPU5K46ZW98NX46CD5UHX5MT0GC8Z5M9G95NVE2NWDJ4GV6CGDMJYLFVYFEKJMN8D3J47ATNV53R5ENPD3EK2TPZWEJHYUMFDAHZYW3305A0A85W"
+    },
+    {
+      "name": "no amount bounds",
+      "note": "Neither bound: any positive amount. Absent fields are left out of the JSON entirely.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "single_use": false,
+        "offer_id": "0x21d535d859220b2c84ba19b45edea8611f1c5e23d13f3ee5d76f30d7ee4531f0",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "dgjll0RQpYKPocXcJw3AKSMZRWt_b4QY2fv3G4SqFvDia5lKw0M87xZv56XtRoOJfHU5Yn2dbsqDqOiOURSFCw"
+        }
+      },
+      "id_preimage": "{\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x21d535d859220b2c84ba19b45edea8611f1c5e23d13f3ee5d76f30d7ee4531f0",
+      "signing_payload": "{\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x21d535d859220b2c84ba19b45edea8611f1c5e23d13f3ee5d76f30d7ee4531f0\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "dgjll0RQpYKPocXcJw3AKSMZRWt_b4QY2fv3G4SqFvDia5lKw0M87xZv56XtRoOJfHU5Yn2dbsqDqOiOURSFCw",
+      "canonical_json": "{\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x21d535d859220b2c84ba19b45edea8611f1c5e23d13f3ee5d76f30d7ee4531f0\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"dgjll0RQpYKPocXcJw3AKSMZRWt_b4QY2fv3G4SqFvDia5lKw0M87xZv56XtRoOJfHU5Yn2dbsqDqOiOURSFCw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnwv468wmmjdv3r5gn5v4ehgmn9ws3zcgnwdajx2hmfvs3r5g3sxfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzygkzymmxvejhyhmfvs3r5g3s0qerzep4xv6kgwp48yeryvrzxf3nsdrzvycnjc35x4jkgetp8qmrzvtxx93n2efjxdjrzvmxxdjk2dtyxumxvvesvsmk2ef5x5enze3sygkzyur4vfkxjc6lddjhjg36ygkj6tfd94py236ffcs9q42zf3y5xgztg4vj6tfd95k4cmjdgdhhwsj3t9zykvjkwaqhj32pg4c5k5242f8hza2txamk7dnjgf29jvmsd5hnsvfnvedyjmrfve9ryvmed9f4vs2pv9ryz02udckj6tfd94z5u3pq2p25ynzfgvsyk32e95kj6tfdygkzyun9wdhkcan9wf0h2unvygazy6r5w3c8xw309ahkven9wfejumt9wf3ksctwwshx27rpd4cxcefz9s38xcmgv4kk2g36yfnxjcn9wfhkven9wgkhvvfz9s38x6t8deshgatjv53r57ezwd3ksetdv53r5gn9vser2df38y3zcgnkv9k82efz8g3xgem2d3krq5j3wpv5k5r0vdvxxjnhxdq5k56dtff9wazlvg69zkfjvemrx3e52dc5vajyd9sn2mztwucy6wph0pd8vdfktp69ym60ffnys4f4t9hryerzwdc5gu20d98425jngephwgna9s38x6twvakx2hm4wdjjywnxv9k8xefvyfmx2unnd9hkug36x97shw2zpt",
+      "encoded_uppercase": "FBROFFER10V3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNWV468WMMJDV3R5GN5V4EHGMN9WS3ZCGNWDAJX2HMFVS3R5G3SXFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZYGKZYMMXVEJHYHMFVS3R5G3S0QERZEP4XV6KGWP48YERYVRZXF3NSDRZVYCNJC35X4JKGETP8QMRZVTXX93N2EFJXDJRZVMXXDJK2DTYXUMXVVESVSMK2EF5X5ENZE3SYGKZYUR4VFKXJC6LDDJHJG36YGKJ6TFD94PY236FFCS9Q42ZF3Y5XGZTG4VJ6TFD95K4CMJDGDHHWSJ3T9ZYKVJKWAQHJ32PG4C5K5242F8HZA2TXAMK7DNJGF29JVMSD5HNSVFNVEDYJMRFVE9RYVMED9F4VS2PV9RYZ02UDCKJ6TFD94Z5U3PQ2P25YNZFGVSYK32E95KJ6TFDYGKZYUN9WDHKCAN9WF0H2UNVYGAZY6R5W3C8XW309AHKVEN9WFEJUMT9WF3KSCTWWSHX27RPD4CXCEFZ9S38XCMGV4KK2G36YFNXJCN9WFHKVEN9WGKHVVFZ9S38X6T8DESHGATJV53R57EZWD3KSETDV53R5GN9VSER2DF38Y3ZCGNKV9K82EFZ8G3XGEM2D3KRQ5J3WPV5K5R0VDVXXJNHXDQ5K56DTFF9WAZLVG69ZKFJVEMRX3E52DC5VAJYD9SN2MZTWUCY6WPH0PD8VDFKTP69YM60FFNYS4F4T9HRYERZWDC5GU20D98425JNGEPHWGNA9S38X6TWVAKX2HM4WDJJYWNXV9K8XEFVYFMX2UNND9HKUG36X97SHW2ZPT"
+    },
+    {
+      "name": "token offer (UDT) alongside CKB",
+      "note": "A token is named by the hash of its CKB type script.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Stablecoin checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "500",
+        "amount_max": "2500",
+        "single_use": false,
+        "offer_id": "0x7acba3e0467a53801521ba9daeb0e2b604820446fe7de4c248fd520f1349ccf8",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "dXOLsZrui2TUrHUgk6Sj1yoRI-cNnrBeqD-YBGkvV_lcWgwM9D2jY2Ri1O1cAr1BbN9md28lB04mlebkbHrDBA"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"2500\",\"amount_min\":\"500\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"},{\"asset_type\":\"udt\",\"symbol\":\"RUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Stablecoin checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x7acba3e0467a53801521ba9daeb0e2b604820446fe7de4c248fd520f1349ccf8",
+      "signing_payload": "{\"amount_max\":\"2500\",\"amount_min\":\"500\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"},{\"asset_type\":\"udt\",\"symbol\":\"RUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Stablecoin checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x7acba3e0467a53801521ba9daeb0e2b604820446fe7de4c248fd520f1349ccf8\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "dXOLsZrui2TUrHUgk6Sj1yoRI-cNnrBeqD-YBGkvV_lcWgwM9D2jY2Ri1O1cAr1BbN9md28lB04mlebkbHrDBA",
+      "canonical_json": "{\"amount_max\":\"2500\",\"amount_min\":\"500\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"},{\"asset_type\":\"udt\",\"symbol\":\"RUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Stablecoin checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x7acba3e0467a53801521ba9daeb0e2b604820446fe7de4c248fd520f1349ccf8\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"dXOLsZrui2TUrHUgk6Sj1yoRI-cNnrBeqD-YBGkvV_lcWgwM9D2jY2Ri1O1cAr1BbN9md28lB04mlebkbHrDBA\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxg6nqvpz9s3xzmt0w4h8ghmdd9hzyw3zx5crqg3vyfshxum9w3ejywjm0v3xzumnv4697arewpjjyw3zvd4kyg3vyfehjmtzdakzyw3zgd95ygna93ajyctnwdjhghm509cx2g36yf6kgapz9s38x7tdvfhkcg36yff9256yygkzyarewpj47umrwf5hqazldpshx6pz8g3rq7p5x43rxvnpxf3xxdpj8q6kgvrpxqunvdecv43rzvfexccxgerr8qmnqdmzvverwdee8qurwcfs89jrgwpjv5ukyen989snycmyvc6nygnat5kzyer9wd3hy6tsw35k7m3z8g39xarpvfkx2cm0d9hzqcmgv43kkmm4ws3zcgnwv468wmmjdv3r5gn5v4ehgmn9ws3zcgnwdajx2hmfvs3r5g3sxfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzygkzymmxvejhyhmfvs3r5g3s0qmkzcmzvyek2vp5xcmkzdfn8qcrzdfjx93xzwtyv9jkyvr9xf3rvvp58qerqdp5xenx2dmyv56xxv358pnxgdfjxpnrzve5893kxe3cygkzyur4vfkxjc6lddjhjg36ygkj6tfd94py236ffcs9q42zf3y5xgztg4vj6tfd95k4cmjdgdhhwsj3t9zykvjkwaqhj32pg4c5k5242f8hza2txamk7dnjgf29jvmsd5hnsvfnvedyjmrfve9ryvmed9f4vs2pv9ryz02udckj6tfd94z5u3pq2p25ynzfgvsyk32e95kj6tfdygkzyun9wdhkcan9wf0h2unvygazy6r5w3c8xw309ahkven9wfejumt9wf3ksctwwshx27rpd4cxcefz9s38xcmgv4kk2g36yfnxjcn9wfhkven9wgkhvvfz9s38x6t8deshgatjv53r57ezwd3ksetdv53r5gn9vser2df38y3zcgnkv9k82efz8g3xgkz0f3e45un4dye9g4tjfp2kw6ek2d4rz7t02fyj6c6wdeeyyet3gsk4jsj8ddm9vhmvvdtkwa6d89zry6jexffxjv20x935zu33gf3yuwtdvsersmzzxq6x6mr9vf4kyjrjg3pyzgna9s38x6twvakx2hm4wdjjywnxv9k8xefvyfmx2unnd9hkug36x97se67955",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXG6NQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZX5CRQG3VYFSHXUM9W3EJYWJM0V3XZUMNV4697AREWPJJYW3ZVD4KYG3VYFEHJMTZDAKZYW3ZGD95YGNA93AJYCTNWDJHGHM509CX2G36YF6KGAPZ9S38X7TDVFHKCG36YFF9256YYGKZYAREWPJ47UMRWF5HQAZLDPSHX6PZ8G3RQ7P5X43RXVNPXF3XXDPJ8Q6KGVRPXQUNVDECV43RZVFEXCCXGERR8QMNQDMZVVERWDEE8QURWCFS89JRGWPJV5UKYEN989SNYCMYVC6NYGNAT5KZYER9WD3HY6TSW35K7M3Z8G39XARPVFKX2CM0D9HZQCMGV43KKMM4WS3ZCGNWV468WMMJDV3R5GN5V4EHGMN9WS3ZCGNWDAJX2HMFVS3R5G3SXFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZYGKZYMMXVEJHYHMFVS3R5G3S0QMKZCMZVYEK2VP5XCMKZDFN8QCRZDFJX93XZWTYV9JKYVR9XF3RVVP58QERQDP5XENX2DMYV56XXV358PNXGDFJXPNRZVE5893KXE3CYGKZYUR4VFKXJC6LDDJHJG36YGKJ6TFD94PY236FFCS9Q42ZF3Y5XGZTG4VJ6TFD95K4CMJDGDHHWSJ3T9ZYKVJKWAQHJ32PG4C5K5242F8HZA2TXAMK7DNJGF29JVMSD5HNSVFNVEDYJMRFVE9RYVMED9F4VS2PV9RYZ02UDCKJ6TFD94Z5U3PQ2P25YNZFGVSYK32E95KJ6TFDYGKZYUN9WDHKCAN9WF0H2UNVYGAZY6R5W3C8XW309AHKVEN9WFEJUMT9WF3KSCTWWSHX27RPD4CXCEFZ9S38XCMGV4KK2G36YFNXJCN9WFHKVEN9WGKHVVFZ9S38X6T8DESHGATJV53R57EZWD3KSETDV53R5GN9VSER2DF38Y3ZCGNKV9K82EFZ8G3XGKZ0F3E45UN4DYE9G4TJFP2KW6EK2D4RZ7T02FYJ6C6WDEEYYET3GSK4JSJ8DDM9VHMVVDTKWA6D89ZRY6JEXFFXJV20X935ZU33GF3YUWTDVSERSMZZXQ6X6MR9VF4KYJRJG3PYZGNA9S38X6TWVAKX2HM4WDJJYWNXV9K8XEFVYFMX2UNND9HKUG36X97SE67955"
+    },
+    {
+      "name": "RGB++ asset",
+      "note": "Same rule as a UDT: asset_type rgbpp, identified by type_script_hash.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "rgbpp",
+            "symbol": "RGBUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xf60960fcccd3d1a6ad7ad5c6887d1d19ace0806d4950163e4ee2bcee8bdfe2b2",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "x1iPZiHe7pPSPgaHhu9xthRj9bDw4xg76gdGa23HRFcFT4njJ_RRAJozH7Jc31KKGHdiUdChJ6zlX51T0g7yAw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"rgbpp\",\"symbol\":\"RGBUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0xf60960fcccd3d1a6ad7ad5c6887d1d19ace0806d4950163e4ee2bcee8bdfe2b2",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"rgbpp\",\"symbol\":\"RGBUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xf60960fcccd3d1a6ad7ad5c6887d1d19ace0806d4950163e4ee2bcee8bdfe2b2\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "x1iPZiHe7pPSPgaHhu9xthRj9bDw4xg76gdGa23HRFcFT4njJ_RRAJozH7Jc31KKGHdiUdChJ6zlX51T0g7yAw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"rgbpp\",\"symbol\":\"RGBUSD\",\"type_script_hash\":\"0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52\"}],\"description\":\"Coffee checkout\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xf60960fcccd3d1a6ad7ad5c6887d1d19ace0806d4950163e4ee2bcee8bdfe2b2\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"x1iPZiHe7pPSPgaHhu9xthRj9bDw4xg76gdGa23HRFcFT4njJ_RRAJozH7Jc31KKGHdiUdChJ6zlX51T0g7yAw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yfexwcnswq3zcgnn09kkymmvygazy5j8gf24x3pz9s38g7tsv40hxcmjd9c8ghmgv9eksg36ygc8sdp4vgenycfjvf3ngv3cx4jrqcfs8ymrwwr9vgcnzwfkxpjxgcecxucrwcnrxgmnwwfc8qmkzvpevs6rsvn9893xvefevyexxerxx5ezyl2a9s3xgetnvdexjur5d9hkug36yfpk7enxv4jjqcmgv43kkmm4ws3zcgnwv468wmmjdv3r5gn5v4ehgmn9ws3zcgnwdajx2hmfvs3r5g3sxfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzygkzymmxvejhyhmfvs3r5g3s0pnrvvpexccxvcmrvdjrxep3vymxzephv9jr2cek8qurwep3vscnjctrv5crsvpkvs6rjdfsxymrxef5v4jnycnrv4jnscnyvejnyc3jygkzyur4vfkxjc6lddjhjg36ygkj6tfd94py236ffcs9q42zf3y5xgztg4vj6tfd95k4cmjdgdhhwsj3t9zykvjkwaqhj32pg4c5k5242f8hza2txamk7dnjgf29jvmsd5hnsvfnvedyjmrfve9ryvmed9f4vs2pv9ryz02udckj6tfd94z5u3pq2p25ynzfgvsyk32e95kj6tfdygkzyun9wdhkcan9wf0h2unvygazy6r5w3c8xw309ahkven9wfejumt9wf3ksctwwshx27rpd4cxcefz9s38xcmgv4kk2g36yfnxjcn9wfhkven9wgkhvvfz9s38x6t8deshgatjv53r57ezwd3ksetdv53r5gn9vser2df38y3zcgnkv9k82efz8g38svtf2pdxjjr9xac9q56svas5s6r489u8g6zjdguky3rhx3uxwdekvajywcfjxdy9y3nrge2rgmn2ff04y5jpffhh5jphff3nxv2tfdr5serf24jyx6z2xeaxckp4x92rqeeh09qhwgna9s38x6twvakx2hm4wdjjywnxv9k8xefvyfmx2unnd9hkug36x97sv8yqze",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YFEXWCNSWQ3ZCGNN09KKYMMVYGAZY5J8GF24X3PZ9S38G7TSV40HXCMJD9C8GHMGV9EKSG36YGC8SDP4VGENYCFJVF3NGV3CX4JRQCFS8YMRWWR9VGCNZWFKXPJXGCECXUCRWCNRXGMNWWFC8QMKZVPEVS6RSVN9893XVEFEVYEXXERXX5EZYL2A9S3XGETNVDEXJUR5D9HKUG36YFPK7ENXV4JJQCMGV43KKMM4WS3ZCGNWV468WMMJDV3R5GN5V4EHGMN9WS3ZCGNWDAJX2HMFVS3R5G3SXFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZYGKZYMMXVEJHYHMFVS3R5G3S0PNRVVPEXCCXVCMRVDJRXEP3VYMXZEPHV9JR2CEK8QURWEP3VSCNJCTRV5CRSVPKVS6RJDFSXYMRXEF5V4JNYCNRV4JNSCNYVEJNYC3JYGKZYUR4VFKXJC6LDDJHJG36YGKJ6TFD94PY236FFCS9Q42ZF3Y5XGZTG4VJ6TFD95K4CMJDGDHHWSJ3T9ZYKVJKWAQHJ32PG4C5K5242F8HZA2TXAMK7DNJGF29JVMSD5HNSVFNVEDYJMRFVE9RYVMED9F4VS2PV9RYZ02UDCKJ6TFD94Z5U3PQ2P25YNZFGVSYK32E95KJ6TFDYGKZYUN9WDHKCAN9WF0H2UNVYGAZY6R5W3C8XW309AHKVEN9WFEJUMT9WF3KSCTWWSHX27RPD4CXCEFZ9S38XCMGV4KK2G36YFNXJCN9WFHKVEN9WGKHVVFZ9S38X6T8DESHGATJV53R57EZWD3KSETDV53R5GN9VSER2DF38Y3ZCGNKV9K82EFZ8G38SVTF2PDXJJR9XAC9Q56SVAS5S6R489U8G6ZJDGUKY3RHX3UXWDEKVAJYWCFJXDY9Y3NRGE2RGMN2FF04Y5JPFFHH5JPHFF3NXV2TFDR5SERF24JYX6Z2XEAXCKP4X92RQEEH09QHWGNA9S38X6TWVAKX2HM4WDJJYWNXV9K8XEFVYFMX2UNND9HKUG36X97SV8YQZE"
+    },
+    {
+      "name": "single-use offer with an expiry",
+      "note": "expiry is a JSON integer of unix seconds.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Order 1042",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "expiry": 1900000000,
+        "single_use": true,
+        "offer_id": "0xc318dfd14f83e4189467e0086ae6bed501f49f912203f00716912b3b4caed35a",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "oBVVLQ038gmVgOO-t8hntXOsq9i_2TWe9ajD4XbPo6e6GsAYXDhwT1hhrtrSlIol9NtIVY59QDjqpG_c9I4eCw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Order 1042\",\"expiry\":1900000000,\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":true,\"version\":1}",
+      "offer_id": "0xc318dfd14f83e4189467e0086ae6bed501f49f912203f00716912b3b4caed35a",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Order 1042\",\"expiry\":1900000000,\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xc318dfd14f83e4189467e0086ae6bed501f49f912203f00716912b3b4caed35a\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":true,\"version\":1}",
+      "signature": "oBVVLQ038gmVgOO-t8hntXOsq9i_2TWe9ajD4XbPo6e6GsAYXDhwT1hhrtrSlIol9NtIVY59QDjqpG_c9I4eCw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Order 1042\",\"expiry\":1900000000,\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xc318dfd14f83e4189467e0086ae6bed501f49f912203f00716912b3b4caed35a\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"oBVVLQ038gmVgOO-t8hntXOsq9i_2TWe9ajD4XbPo6e6GsAYXDhwT1hhrtrSlIol9NtIVY59QDjqpG_c9I4eCw\"},\"single_use\":true,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazynmjv3jhygp3xq6ryg3vyfjhsurfwfujyw338ycrqvpsxqcrqvpvyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8scenxyuxgenyxy6xvwpnv56rzwpexsmrwefsxqurvct9xe3x2ep4xqckvdpevcunzv3jxqekvvpsxucnvwf3xf3rxc35vdsk2epnx4sjytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gn0gft9vnz3xqensemd2en57nedwsuxsmn5tp8hxufed90ny4zhv5ukz6jyx3vxy5r0xejnv3mng9v4s3rgwa2rz6rgwf68y5mvf9hkcw2ww3y4vkf489g5g6n3wpr47ceefy6x2smhyf7jcgnnd9hxwmr9ta6hxefz8f68yat99s38vetjwd5k7m3z8gch6xhkmmt",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYNMJV3JHYGP3XQ6RYG3VYFJHSURFWFUJYW338YCRQVPSXQCRQVPVYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SCENXYUXGENYXY6XVWPNV56RZWPEXSMRWEFSXQURVCT9XE3X2EP4XQCKVDPEVCUNZV3JXQEKVVPSXUCNVWF3XF3RXC35VDSK2EPNX4SJYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GN0GFT9VNZ3XQENSEMD2EN57NEDWSUXSMN5TP8HXUFED90NY4ZHV5UKZ6JYX3VXY5R0XEJNV3MNG9V4S3RGWA2RZ6RGWF68Y5MVF9HKCW2WW3Y4VKF489G5G6N3WPR47CEEFY6X2SMHYF7JCGNND9HXWMR9TA6HXEFZ8F68YAT99S38VETJWD5K7M3Z8GCH6XHKMMT"
+    },
+    {
+      "name": "recurring offer capped by cycles",
+      "note": "Each subscriber may pay at most cap_cycles cycles.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Monthly plan",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "2000",
+        "amount_max": "2000",
+        "recurrence": {
+          "interval": "monthly",
+          "amount": "2000",
+          "cap_cycles": 12
+        },
+        "single_use": false,
+        "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "d-zzE7XxQe5B9BHA1gAjmMA2AjjGkNJcYuplHYhQqC3OEBU61DBdfuH0j2RYiY3qYTTVdE7jefYpU4QVL1rNBQ"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"2000\",\"amount_min\":\"2000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Monthly plan\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"2000\",\"cap_cycles\":12,\"interval\":\"monthly\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "signing_payload": "{\"amount_max\":\"2000\",\"amount_min\":\"2000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Monthly plan\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"2000\",\"cap_cycles\":12,\"interval\":\"monthly\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "d-zzE7XxQe5B9BHA1gAjmMA2AjjGkNJcYuplHYhQqC3OEBU61DBdfuH0j2RYiY3qYTTVdE7jefYpU4QVL1rNBQ",
+      "canonical_json": "{\"amount_max\":\"2000\",\"amount_min\":\"2000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Monthly plan\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"2000\",\"cap_cycles\":12,\"interval\":\"monthly\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"d-zzE7XxQe5B9BHA1gAjmMA2AjjGkNJcYuplHYhQqC3OEBU61DBdfuH0j2RYiY3qYTTVdE7jefYpU4QVL1rNBQ\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxgcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxgcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazynt0de6xsmreypcxcctwygkzymn9w3mk7untygazyar9wd6xuet5ygkzymn0v3j476tyygazyvpjv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzc3z9s3x7enxv4e976tyygazyvrc8yungwp5vfsngvpjxccxzdtzvvenzdp5xsek2dfcxg6xvctyxd3nyef5xucnsc358qmrxc3nxqckydtr8yux2wty8qunxef4vfjnsc3z9s38qatzd35kxhmtv4ujyw3z95kj6tfdgfz5wj2wypg92sjvf9pjqj69tykj6tfd94wxun2rdam5y52eg39ny4nhg9u52s29w994z42jfach2jehwahnvujz23vnxurd9uurzvmxtfykc6txfgerx7tf2dtyzstpgeqn6hrw95kj6tfdg48yggzs24pycj2ryp952kfd95kj6tfz9s38yetrw4e8yetwvdjjywnmyfsk6mm4de6zyw3zxgcrqvpz9s3xxctsta3hjcmvv4ejyw33xgkzy6tww3jhyanpds3r5gnddah8g6rv0y386tpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gny94a853fhtpu9zef4ggu5yjzpx9n5z6ndf4qnyst2dfrkknj2vdvh2urvfpvks5t3gve5732z25mrz3zzv3n82jpsdge9yktftyehzk2523txg3fhdfjkvkts2569z4jvx9eyusj3yf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlg7usdgv",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXGCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXGCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYNT0DE6XSMREYPCXCCTWYGKZYMN9W3MK7UNTYGAZYAR9WD6XUET5YGKZYMN0V3J476TYYGAZYVPJV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZC3Z9S3X7ENXV4E976TYYGAZYVRC8YUNGWP5VFSNGVPJXCCXZDTZVVENZDP5XSEK2DFCXG6XVCTYXD3NYEF5XUCNSC358QMRXC3NXQCKYDTR8YUX2WTY8QUNXEF4VFJNSC3Z9S38QATZD35KXHMTV4UJYW3Z95KJ6TFDGFZ5WJ2WYPG92SJVF9PJQJ69TYKJ6TFD94WXUN2RDAM5Y52EG39NY4NHG9U52S29W994Z42JFACH2JEHWAHNVUJZ23VNXURD9UURZVMXTFYKC6TXFGERX7TF2DTYZSTPGEQN6HRW95KJ6TFDG48YGGZS24PYCJ2RYP952KFD95KJ6TFZ9S38YETRW4E8YETWVDJJYWNMYFSK6MM4DE6ZYW3ZXGCRQVPZ9S3XXCTSTA3HJCMVV4EJYW33XGKZY6TWW3JHYANPDS3R5GNDDAH8G6RV0Y386TPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GNY94A853FHTPU9ZEF4GGU5YJZPX9N5Z6NDF4QNYST2DFRKKNJ2VDVH2URVFPVKS5T3GVE5732Z25MRZ3ZZV3N82JPSDGE9YKTFTYEHZK2523TXG3FHDFJKVKTS2569Z4JVX9EYUSJ3YF7JCGNND9HXWMR9TA6HXEFZ8FNXZMRNV5KZYAN9WFEKJMMWYGARZLG7USDGV"
+    },
+    {
+      "name": "recurring offer with a custom interval and a spending cap",
+      "note": "custom_seconds is present only with the custom_seconds interval.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Metered access",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "50",
+        "amount_max": "50",
+        "recurrence": {
+          "interval": "custom_seconds",
+          "amount": "50",
+          "spending_cap_total": "1200",
+          "custom_seconds": 3600
+        },
+        "single_use": false,
+        "offer_id": "0x95a9903a9fd25d5ba3c06ffcbca66711f529b01c497876c9d57ab7186fcb1850",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "hSQ9q4oBJjVHn5uE0GjjCDGZ5PymnZ-Xa0tFlmRFhnstRbkdZCmML4Sf4NMUe0HMxJL6tmnnJ0aNF7nw6yffAg"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"50\",\"amount_min\":\"50\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Metered access\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"50\",\"custom_seconds\":3600,\"interval\":\"custom_seconds\",\"spending_cap_total\":\"1200\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x95a9903a9fd25d5ba3c06ffcbca66711f529b01c497876c9d57ab7186fcb1850",
+      "signing_payload": "{\"amount_max\":\"50\",\"amount_min\":\"50\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Metered access\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x95a9903a9fd25d5ba3c06ffcbca66711f529b01c497876c9d57ab7186fcb1850\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"50\",\"custom_seconds\":3600,\"interval\":\"custom_seconds\",\"spending_cap_total\":\"1200\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "hSQ9q4oBJjVHn5uE0GjjCDGZ5PymnZ-Xa0tFlmRFhnstRbkdZCmML4Sf4NMUe0HMxJL6tmnnJ0aNF7nw6yffAg",
+      "canonical_json": "{\"amount_max\":\"50\",\"amount_min\":\"50\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Metered access\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x95a9903a9fd25d5ba3c06ffcbca66711f529b01c497876c9d57ab7186fcb1850\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"recurrence\":{\"amount\":\"50\",\"custom_seconds\":3600,\"interval\":\"custom_seconds\",\"spending_cap_total\":\"1200\"},\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"hSQ9q4oBJjVHn5uE0GjjCDGZ5PymnZ-Xa0tFlmRFhnstRbkdZCmML4Sf4NMUe0HMxJL6tmnnJ0aNF7nw6yffAg\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zx5czytpzv9kk7atww30k66twygazydfsygkzyctnwdjhguez8fdhkgnpwdek2azlw3uhqefz8g3xx6mzygkzyumed43x7mpz8g3yxj6zyf746tpzv3jhxcmjd9c8g6t0dc3r5gjdv46x2un9vssxzcmrv4ehxg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8swf4vyunjvpnvyukvepjx4jr2cnpxd3nqdnxve3kycmpxcmrwvf3vc6nywtzxqckxdpexuurwdnr89jr2dmpvgmnzwpkve3kyvfcx5czytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjkxatjwfjkucm9yga8kgnpd4hh2mn5ygazydfsygkzycm4wd6x7m2lwdjkxmmwv3ejyw3nxccrqtpzd9h8getjweskcg36yf3h2um5dak47um9vdhkuernygkzyumsv4hxg6twva0kxctsta6x7arpds3r5g33xgcrqgna9s38yetndak8vetjta6hympz8g3xsar5wpen5te0danxvetjwvhx6etjvd5xzmn59ejhsctdwpkx2g3vyfekx6r9d4jjyw3zve5kyetjdanxvetj94mrzg3vyfekjemwv9682un9yga8kgnnvd5x2mt9ygazyetyxg6n2vfeygkzyanpd36k2g36yf59x5fewy6x7sj2dftysm34w4znq3m2dfp5g366x4g8jmtwtgk4scfsw3rxcm2jge5xuum52f3xkez6gdk56np52dnrgnjd24jnqjzd0p9ycdn5d4hxuj3sv98yvdmwwum8jenxg9njylfvyfekjmn8d3j47atnv53r5enpd3ek2tpzwejhyumfdahzyw3305twjztr",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZX5CZYTPZV9KK7ATWW30K66TWYGAZYDFSYGKZYCTNWDJHGUEZ8FDHKGNPWDEK2AZLW3UHQEFZ8G3XX6MZYGKZYUMED43X7MPZ8G3YXJ6ZYF746TPZV3JHXCMJD9C8G6T0DC3R5GJDV46X2UN9VSSXZCMRV4EHXG3VYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SWF4VYUNJVPNVYUKVEPJX4JR2CNPXD3NQDNXVE3KYCMPXCMRWVF3VC6NYWTZXQCKXDPEXUURWDNR89JR2DMPVGMNZWPKVE3KYVFCX5CZYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJKXATJWFJKUCM9YGA8KGNPD4HH2MN5YGAZYDFSYGKZYCM4WD6X7M2LWDJKXMMWV3EJYW3NXCCRQTPZD9H8GETJWESKCG36YF3H2UM5DAK47UM9VDHKUERNYGKZYUMSV4HXG6TWVA0KXCTSTA6X7ARPDS3R5G33XGCRQGNA9S38YETNDAK8VETJTA6HYMPZ8G3XSAR5WPEN5TE0DANXVETJWVHX6ETJVD5XZMN59EJHSCTDWPKX2G3VYFEKX6R9D4JJYW3ZVE5KYETJDANXVETJ94MRZG3VYFEKJEMWV9682UN9YGA8KGNNVD5X2MT9YGAZYETYXG6N2VFEYGKZYANPD36K2G36YF59X5FEWY6X7SJ2DFTYSM34W4ZNQ3M2DFP5G366X4G8JMTWTGK4SCFSW3RXCM2JGE5XUUM52F3XKEZ6GDK56NP52DNRGNJD24JNQJZD0P9YCDN5D4HXUJ3SV98YVDMWWUM8JENXG9NJYLFVYFEKJMN8D3J47ATNV53R5ENPD3EK2TPZWEJHYUMFDAHZYW3305TWJZTR"
+    },
+    {
+      "name": "metadata and extension fields",
+      "note": "Free-form signed content. Number-like keys show the member order that matters.",
+      "offer": {
+        "extensions": {
+          "loyalty": {
+            "tier": 2
+          }
+        },
+        "x_checkout": "kiosk-7",
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "metadata": {
+          "2": "two",
+          "10": "ten",
+          "order": "A-42",
+          "tags": [
+            "retail",
+            "eu"
+          ],
+          "nested": {
+            "b": 2,
+            "a": 1
+          }
+        },
+        "offer_id": "0xe87f50a8dd3ac83ac729c13ce055ae611794a80fbf683e20e6cb22a6161a7896",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "kR9_A0MKFA8OAcUbUu-skKrzXjretUKlooXH_mK1S6i2WExzqBgM839VNq3YawdIN39goMFJLlE87kGG4WkMDA"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"loyalty\":{\"tier\":2}},\"metadata\":{\"10\":\"ten\",\"2\":\"two\",\"nested\":{\"a\":1,\"b\":2},\"order\":\"A-42\",\"tags\":[\"retail\",\"eu\"]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1,\"x_checkout\":\"kiosk-7\"}",
+      "offer_id": "0xe87f50a8dd3ac83ac729c13ce055ae611794a80fbf683e20e6cb22a6161a7896",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"loyalty\":{\"tier\":2}},\"metadata\":{\"10\":\"ten\",\"2\":\"two\",\"nested\":{\"a\":1,\"b\":2},\"order\":\"A-42\",\"tags\":[\"retail\",\"eu\"]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xe87f50a8dd3ac83ac729c13ce055ae611794a80fbf683e20e6cb22a6161a7896\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1,\"x_checkout\":\"kiosk-7\"}",
+      "signature": "kR9_A0MKFA8OAcUbUu-skKrzXjretUKlooXH_mK1S6i2WExzqBgM839VNq3YawdIN39goMFJLlE87kGG4WkMDA",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"extensions\":{\"loyalty\":{\"tier\":2}},\"metadata\":{\"10\":\"ten\",\"2\":\"two\",\"nested\":{\"a\":1,\"b\":2},\"order\":\"A-42\",\"tags\":[\"retail\",\"eu\"]},\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xe87f50a8dd3ac83ac729c13ce055ae611794a80fbf683e20e6cb22a6161a7896\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"kR9_A0MKFA8OAcUbUu-skKrzXjretUKlooXH_mK1S6i2WExzqBgM839VNq3YawdIN39goMFJLlE87kGG4WkMDA\"},\"single_use\":false,\"version\":1,\"x_checkout\":\"kiosk-7\"}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfjhsar9deekjmmwwv3r57ezd3hhjctvw3ujywnmyf6xjetjygarylta9s3x6et5v9jxzarpyga8kg33xq3r5gn5v4hzytpzxg3r5gn5wahjytpzdejhxar9vs3r57ezvy3r5vfvyf3zyw3j05kzymmjv3jhyg36yfqj6dpjygkzyarpvaejywjmyfex2arpd9kzytpzv46jyhta9s3xuet5wahhy6ez8g38getnw3hx2apz9s3xummyv40kjepz8g3rqvnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyg3vyfhkven9wf0kjepz8g3rq7r98qmkvdfsvyuxgepnv93nsvmpvvmnywtrxyekxefsx56kzefkxycnwwf5vyurqenzvcmrsvm9xgcx2dnrvgerycfkxymrzcfh8qunvg3vyfc82cnvd93476m90y3r5g3d95kj6t2zg4r5jn3q2p25ynzfgvsyk32e95kj6tfdt3hy6sm0wap9zk2yfve9va6p09z5z3t3fdg425j0w965kdmhdum8ysj5tyehqmf08qcnxej6f9kxjej2xgehj62n2eq5zc2xgy74cm3d95kj6t29fezzq5z4gfxyjseqfdz4jtfd95kj6g3vyfex2um0d3mx2ujlw4excg36yf58garswvaz7tm0venx2unn9ekk2unrdpskuapwv4uxzmtsd3jjytpzwd3ksetdv53r5gnxd93x2un0venx2u3dwccjytpzwd5kwmnpw36hyefz8fajyumrdpjk6efz8g3x2epjx56nzwfz9s38vctvw4jjyw3zddfrjh6pxpx5k3jp8p85zc64vf2h2ttndd9hy7jcdfex2az4fdkx7m6cfp0k6je32vmxjvjhg4u85u2zvaxnsvee2e88zv6ev9mkgj2wxvukwm6dge9ycmz98qmkk368x3tkkn2ygy386tpzwd5kuemvv40h2um9ygaxvctvwdjjcgnkv4e8x6t0dc3r5vfvyfu97cmgv43kkmm4ws3r5gntd9hhx6edxu3866e8d39",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFJHSAR9DEEKJMMWWV3R57EZD3HHJCTVW3UJYWNMYF6XJETJYGARYLTA9S3X6ET5V9JXZARPYGA8KG33XQ3R5GN5V4HZYTPZXG3R5GN5WAHJYTPZDEJHXAR9VS3R57EZVY3R5VFVYF3ZYW3J05KZYMMJV3JHYG36YFQJ6DPJYGKZYARPVAEJYWJMYFEX2ARPD9KZYTPZV46JYHTA9S3XUET5WAHHY6EZ8G38GETNW3HX2APZ9S3XUMMYV40KJEPZ8G3RQVNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYG3VYFHKVEN9WF0KJEPZ8G3RQ7R98QMKVDFSVYUXGEPNV93NSVMPVVMNYWTRXYEKXEFSX56KZEFKXYCNWWF5VYURQENZVCMRSVM9XGCX2DNRVGERYCFKXYMRZCFH8QUNVG3VYFC82CNVD93476M90Y3R5G3D95KJ6T2ZG4R5JN3Q2P25YNZFGVSYK32E95KJ6TFDT3HY6SM0WAP9ZK2YFVE9VA6P09Z5Z3T3FDG425J0W965KDMHDUM8YSJ5TYEHQMF08QCNXEJ6F9KXJEJ2XGEHJ62N2EQ5ZC2XGY74CM3D95KJ6T29FEZZQ5Z4GFXYJSEQFDZ4JTFD95KJ6G3VYFEX2UM0D3MX2UJLW4EXCG36YF58GARSWVAZ7TM0VENX2UNN9EKK2UNRDPSKUAPWV4UXZMTSD3JJYTPZWD3KSETDV53R5GNXD93X2UN0VENX2U3DWCCJYTPZWD5KWMNPW36HYEFZ8FAJYUMRDPJK6EFZ8G3X2EPJX56NZWFZ9S38VCTVW4JJYW3ZDDFRJH6PXPX5K3JP8P85ZC64VF2H2TTNDD9HY7JCDFEX2AZ4FDKX7M6CFP0K6JE32VMXJVJHG4U85U2ZVAXNSVEE2E88ZV6EV9MKGJ2WXVUKWM6DGE9YCMZ98QMKK368X3TKKN2YGY386TPZWD5KUEMVV40H2UM9YGAXVCTVWDJJCGNKV4E8X6T0DC3R5VFVYFU97CMGV43KKMM4WS3R5GNTD9HHX6EDXU3866E8D39"
+    },
+    {
+      "name": "mainnet offer with a resolver path",
+      "note": "resolver_url keeps a path and drops the trailing slash.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "mainnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://pay.merchant.example/fiber",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x4d17e03a28494fa425c1765e8c44aa966a314c53e16c3ee4c86f2c72d9dfb98d",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0ewM1lHvN3ZhP4-jJeLXJOeaokBj07iGVj-kHahYNxo65bEigo0o-GihttN5EghOJ2MH1CK5Ca-1lg3wPgnTCA"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"mainnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://pay.merchant.example/fiber\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x4d17e03a28494fa425c1765e8c44aa966a314c53e16c3ee4c86f2c72d9dfb98d",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"mainnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x4d17e03a28494fa425c1765e8c44aa966a314c53e16c3ee4c86f2c72d9dfb98d\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://pay.merchant.example/fiber\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "0ewM1lHvN3ZhP4-jJeLXJOeaokBj07iGVj-kHahYNxo65bEigo0o-GihttN5EghOJ2MH1CK5Ca-1lg3wPgnTCA",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"mainnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x4d17e03a28494fa425c1765e8c44aa966a314c53e16c3ee4c86f2c72d9dfb98d\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://pay.merchant.example/fiber\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"0ewM1lHvN3ZhP4-jJeLXJOeaokBj07iGVj-kHahYNxo65bEigo0o-GihttN5EghOJ2MH1CK5Ca-1lg3wPgnTCA\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yfkkz6twdejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8sdryxymk2vpnvyersdpex3nxzdpjx43nzdekx4jnsce5x3skzwfkxesnxvf5vv6nxef3xe3nxet9x33nsdnxxf3nwvny89jxvc3e8pjzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7urp0yhx6etjvd5xzmn59ejhsctdwpkx2tmxd93x2u3z9s38xcmgv4kk2g36yfnxjcn9wfhkven9wgkhvvfz9s38x6t8deshgatjv53r57ezwd3ksetdv53r5gn9vser2df38y3zcgnkv9k82efz8g3rqethf5ckcjrkfce456zsxskk5jn9f3vy5nm9v9hkksn2xqmkj36kdgkkkjrpdpv5u7r0xc6ky3tfvahnqmedga5ksar5fc652emgfa9ryn2gx9p5kd2rvyknzmr8xdm4qemw23p5zgna9s38x6twvakx2hm4wdjjywnxv9k8xefvyfmx2unnd9hkug36x97sky0axr",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFHX2ARHDAEXKG36YFKKZ6TWDEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SDRYXYMK2VPNVYERSDPEX3NXZDPJX43NZDEKX4JNSCE5X3SKZWFKXESNXVF5VV6NXEF3XE3NXET9X33NSDNXXF3NWVNY89JXVC3E8PJZYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7URP0YHX6ETJVD5XZMN59EJHSCTDWPKX2TMXD93X2U3Z9S38XCMGV4KK2G36YFNXJCN9WFHKVEN9WGKHVVFZ9S38X6T8DESHGATJV53R57EZWD3KSETDV53R5GN9VSER2DF38Y3ZCGNKV9K82EFZ8G3RQETHF5CKCJRKFCE456ZSXSKK5JN9F3VY5NM9V9HKKSN2XQMKJ36KDGKKKJRPDPV5U7R0XC6KY3TFVAHNQMEDGA5KSAR5FC652EMGFA9RYN2GX9P5KD2RVYKNZMR8XDM4QEMW23P5ZGNA9S38X6TWVAKX2HM4WDJJYWNXV9K8XEFVYFMX2UNND9HKUG36X97SKY0AXR"
+    },
+    {
+      "name": "dev network over plain http",
+      "note": "http is acceptable on the dev network, or for a loopback address on any network.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "dev",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "http://resolver.internal:8787",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xc5a872c20d237863c254a26fdfbc00c408ce3600791ee9a01ef74ed0afe3ef62",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "d-6iXs78DXXHbsdROOUwtnidttsPntOqd8Pc0BHW1Zv04zdkHa5Por8Q3aE7tXaoWG9B1htR2r96nNwuPaEPCw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"dev\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"http://resolver.internal:8787\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0xc5a872c20d237863c254a26fdfbc00c408ce3600791ee9a01ef74ed0afe3ef62",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"dev\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xc5a872c20d237863c254a26fdfbc00c408ce3600791ee9a01ef74ed0afe3ef62\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"http://resolver.internal:8787\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "d-6iXs78DXXHbsdROOUwtnidttsPntOqd8Pc0BHW1Zv04zdkHa5Por8Q3aE7tXaoWG9B1htR2r96nNwuPaEPCw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Coffee checkout\",\"network\":\"dev\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xc5a872c20d237863c254a26fdfbc00c408ce3600791ee9a01ef74ed0afe3ef62\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"http://resolver.internal:8787\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"d-6iXs78DXXHbsdROOUwtnidttsPntOqd8Pc0BHW1Zv04zdkHa5Por8Q3aE7tXaoWG9B1htR2r96nNwuPaEPCw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yfjx2a3z9s3xummyv40kjepz8g3rqvnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyg3vyfhkven9wf0kjepz8g3rq7rrx4snsdejvverqepjxvmnsd3nvver2drpxgmxverxvf3nqvrrxscrscm9xvmrqvph8yck2efevycrzetxxu6x2epsv9nx2vm9vcmryg3vyfc82cnvd93476m90y3r5g3d95kj6t2zg4r5jn3q2p25ynzfgvsyk32e95kj6tfdt3hy6sm0wap9zk2yfve9va6p09z5z3t3fdg425j0w965kdmhdum8ysj5tyehqmf08qcnxej6f9kxjej2xgehj62n2eq5zc2xgy74cm3d95kj6t29fezzq5z4gfxyjseqfdz4jtfd95kj6g3vyfex2um0d3mx2ujlw4excg36yf58gars8ghj7un9wdhkcan9wghxjmn5v4exuctv8gurwwphygkzyumrdpjk6efz8g3xv6tzv4ex7enxv4ez6a33ygkzyumfvahxzar4wfjjywnmyfekx6r9d4jjyw3zv4jrydf4xyujytpzweskcat9ygazyepdxe54sueh8pz9skzgvfekg5j0fa2hwarwd9j8garn2ph8gnm3vsu9qcesgfy9wv26wccrg7nyddyxzd2sdaers5fnv9znwazcv9h4w3eeggcksazjxferjdnwfemh25rpg4gyxaez05kzyumfdenkce2lw4ek2g36veskcum99s38vetjwd5k7m3z8gch6n25qs6",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFHX2ARHDAEXKG36YFJX2A3Z9S3XUMMYV40KJEPZ8G3RQVNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYG3VYFHKVEN9WF0KJEPZ8G3RQ7RRX4SNSDEJVVERQEPJXVMNSD3NVVER2DRPXGMXVERXVF3NQVRRXSCRSCM9XVMRQVPH8YCK2EFEVYCRZETXXU6X2EPSV9NX2VM9VCMRYG3VYFC82CNVD93476M90Y3R5G3D95KJ6T2ZG4R5JN3Q2P25YNZFGVSYK32E95KJ6TFDT3HY6SM0WAP9ZK2YFVE9VA6P09Z5Z3T3FDG425J0W965KDMHDUM8YSJ5TYEHQMF08QCNXEJ6F9KXJEJ2XGEHJ62N2EQ5ZC2XGY74CM3D95KJ6T29FEZZQ5Z4GFXYJSEQFDZ4JTFD95KJ6G3VYFEX2UM0D3MX2UJLW4EXCG36YF58GARS8GHJ7UN9WDHKCAN9WGHXJMN5V4EXUCTV8GURWWPHYGKZYUMRDPJK6EFZ8G3XV6TZV4EX7ENXV4EZ6A33YGKZYUMFVAHXZAR4WFJJYWNMYFEKX6R9D4JJYW3ZV4JRYDF4XYUJYTPZWESKCAT9YGAZYEPDXE54SUEH8PZ9SKZGVFEKG5J0FA2HWARWD9J8GARN2PH8GNM3VSU9QCESGFY9WV26WCCRG7NYDDYXZD2SDAERS5FNV9ZNWAZCV9H4W3EEGGCKSAZJXFERJDNWFEMH25RPG4GYXAEZ05KZYUMFDENKCE2LW4EK2G36VESKCUM99S38VETJWD5K7M3Z8GCH6N25QS6"
+    },
+    {
+      "name": "non-ASCII description",
+      "note": "Text is UTF-8; the description limit is counted in bytes.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Café ☕ — 咖啡",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x5cb55459256461c8f89b30f9dfd85ce68740fd272a3d749c1bcd573d333de21a",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "IDH0CZFwU1d77ymeoQLG8fVc_Y7F64W3MYu__hM_N5GIV5K5eBfhu8H1t8qnaBIxuN9MTlDC6GdWvWaZpYHvDw"
+        }
+      },
+      "id_preimage": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Café ☕ — 咖啡\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "offer_id": "0x5cb55459256461c8f89b30f9dfd85ce68740fd272a3d749c1bcd573d333de21a",
+      "signing_payload": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Café ☕ — 咖啡\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x5cb55459256461c8f89b30f9dfd85ce68740fd272a3d749c1bcd573d333de21a\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"single_use\":false,\"version\":1}",
+      "signature": "IDH0CZFwU1d77ymeoQLG8fVc_Y7F64W3MYu__hM_N5GIV5K5eBfhu8H1t8qnaBIxuN9MTlDC6GdWvWaZpYHvDw",
+      "canonical_json": "{\"amount_max\":\"100000000\",\"amount_min\":\"100000000\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"description\":\"Café ☕ — 咖啡\",\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0x5cb55459256461c8f89b30f9dfd85ce68740fd272a3d749c1bcd573d333de21a\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"scheme\":\"fiberoffer-v1\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"IDH0CZFwU1d77ymeoQLG8fVc_Y7F64W3MYu__hM_N5GIV5K5eBfhu8H1t8qnaBIxuN9MTlDC6GdWvWaZpYHvDw\"},\"single_use\":false,\"version\":1}",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysmpvmp6jg8znz2jpc5qjsswty5kuk26zg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8sdtrvg6n2dp48yer2d35xcckxwrx8qukyvesvcukgeny8q6kxefk8qmngvrxvserwvnpxdjrwdpevvckycmyx5mnxepnxvekgefjx9sjytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjfg3yrqs66gem42vtyxumhjmt9dag5c3ecvetxxh6exarrvdzhxdx4ja2lta5y6h6wx4r5j434fv6k2snxdp6nsjp3wsu8zmnpgfyhsa2w89x4gmzygvmywezhwetkzknst9y8v3rhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgxqjqtd",
+      "encoded_uppercase": "FBROFFER10V3XZMT0W4H8GHMDV9UZYW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSMPVMP6JG8ZNZ2JPC5QJSSWTY5KUK26ZG3VYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SDTRVG6N2DP48YER2D35XCCKXWRX8QUKYVESVCUKGENY8Q6KXEFK8QMNGVRXVSERWVNPXDJRWDPEVVCKYCMYX5MNXEPNXVEKGEFJX9SJYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GJFG3YRQS66GEM42VTYXUMHJMT9DAG5C3ECVETXXH6EXARRVDZHXDX4JA2LTA5Y6H6WX4R5J434FV6K2SNXDP6NSJP3WSU8ZMNPGFYHSA2W89X4GMZYGVMYWEZHWETKZKNST9Y8V3RHYF7JCGNND9HXWMR9TA6HXEFZ8FNXZMRNV5KZYAN9WFEKJMMWYGARZLGXQJQTD"
+    }
+  ],
+  "normalization": [
+    {
+      "name": "loosely written input",
+      "note": "A producer brings its input to canonical form before taking the ID. This input yields the fixed-price CKB offer above.",
+      "input": {
+        "network": null,
+        "node_id": "02ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "public_key": "-----BEGIN PUBLIC KEY-----\r\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\r\n-----END PUBLIC KEY-----\r\n",
+        "resolver_url": "HTTPS://Offers.Merchant.Example:443/",
+        "description": "  Coffee checkout  ",
+        "assets": [
+          {
+            "asset_type": "CKB",
+            "symbol": "ckb"
+          }
+        ],
+        "amount_min": 100000000,
+        "amount_max": "000100000000"
+      },
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf"
+    }
+  ],
+  "invalid_offers": [
+    {
+      "name": "description changed after signing",
+      "note": "The ID no longer matches the content.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Free coffee",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw"
+        }
+      },
+      "error": "OFFER_ID_MISMATCH"
+    },
+    {
+      "name": "content and ID changed, signature kept",
+      "note": "The ID is right for the new content; the signature is not.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Free coffee",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x78c125808c90f95dca951e893a26e27b4bbb19d65ee49594b8ced58c3fc04a2f",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw"
+        }
+      },
+      "error": "INVALID_SIGNATURE"
+    },
+    {
+      "name": "signed by another Ed25519 key",
+      "note": "A valid signature, but not by the key the offer names.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "jWDYROKPKAxlwb7g6jZLVGM2ag2gYzspuiu8sPqh9UW75cqAkqLdLabCTo9H_INZVzPhX5FhR0vuhgBdelM8Cw"
+        }
+      },
+      "error": "INVALID_SIGNATURE"
+    },
+    {
+      "name": "P-256 key under the ed25519 scheme",
+      "note": "The signature really is by the named key (ECDSA with SHA-256), so a verifier that does not check the key type accepts it.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEiilVfZWiqXBnHHCKZImgtajwscku\nqLXZZJwyKCPq3gLJR9lWd7RZdf5HsmSfOabjhSTnMRw9awmhJ/TpYEUIKA==\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xb44f4a27e98b6c23b962b9809bed448580ffe58e4950c078f31e7f276ab26b43",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "MEYCIQCiO31S47bbSSJutXd2XSxuDjA9ELGtjYdpKiYlnZpFlQIhANQd1_uX_R711zDXwcPISrtj_LSazBSwMcuzNVWF1hOc"
+        }
+      },
+      "error": "INVALID_KEY_TYPE"
+    },
+    {
+      "name": "uppercase node_id",
+      "note": "Validly signed, not canonical.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x87d7505a39d5b09ab8e945adbf0858930b9827285a39cc871e6eea0c47b181b6",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "NSZuoJ-EaHSVoR_d_aZmEpv3bcYp_9rPyoyJA4MDXt-UysO6oWdSPanuwNpPGtMEkQybHP6IFsVipxm6DtS0CQ"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "amount with leading zeros",
+      "note": "Validly signed, not canonical.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "0100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x36afeaa5ed4b8181ff4a8e1d092d8f2920b9e7238ded4244ff9bfd5f7b81fec1",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "R89zifPeX_vZ61Hm81fVM9aI3nuYwyYKRC5bd6XOS6HFlg0XZz_7ptQmXE48n_gwmjkxvgeMfQ3m8hRSNqMdDQ"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "amount as a JSON number",
+      "note": "Amounts are strings.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": 100000000,
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfab2547372325883d6332ce9bee01b3c8b7da83d91629bc8acf9b1ac6afd34e8",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "9xt9XYCeT7j5_bAkoDWXYKYxpnhrztaKQ2_fuuHNSOIiHSle4RFAUeBZ1QyEjd7kS3GdHwdmP7zJ4mFHXNogAQ"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "resolver_url with a trailing slash",
+      "note": "Validly signed, not canonical.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example/",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x881380c18eecc0eefbd8da5a5d312f5d9762b04ff7acd9d973d9f2b4bf301ab4",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "LAqoGI-qQ22zOCHUuBSKvd79c-XeB_W6YI-_r_B1t282U4EBbsw5d69w-PaRWyKIxEFojzOBRmVreBEU9k2QCg"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "lowercase asset symbol",
+      "note": "Validly signed, not canonical.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "ckb"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x88c771bc2161c94d8b1ebe5c01a677e7e4e04b668ba09f2694a24f67d15be086",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "2y6peauPqnG0QzuINV801aJnb8LJlVz6IYYFtBjJxS0zYBJVSK5T4eOEIk5ev9JMbycNiNDe-mXy4ucmfjRsDQ"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "null for an absent field",
+      "note": "An absent field is left out, never null.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "recurrence": null,
+        "offer_id": "0x1339a75f674632ee2decff3574e5446cf4488e626699332bc7f179e4ccc1ebe1",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "6Z_eha8wVBlXZs_lKp9Np3lRv32a94846g6bzU3OzROkQF4MV8-wGg-Y_dTY2yoonfpDhPQ6gMnZx65ALOWHBA"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "public key with a trailing newline",
+      "note": "Validly signed, not canonical.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----\n",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xc70e600d7440eb3e6c16ecebfa97f4442b4cb032996e54fecb52fcf32017e844",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "_ou5SNHCkSHDtdXZKMSBWVCNgY61vN30VS0eQu1rTLPm5VljjCk_B3cfatO_1JX66_e3-6eloeTvkP5nRuTiCw"
+        }
+      },
+      "error": "NON_CANONICAL_OFFER"
+    },
+    {
+      "name": "unknown top-level field",
+      "note": "Only extensions and x_ fields may be added.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "payer_must": "something new",
+        "offer_id": "0x6301054bf11c7f700f69faa860a7fec9db539d40462fccf0b7b3f36bd1d325f2",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "OOSwmwu3fu2jDGWbsEqi_bWbJO56cjddI2hAegYeuL8JTOS2RV7PmKLqEETPRAYrqCGJLt9SY98WJC_fvUoIDQ"
+        }
+      },
+      "error": "UNKNOWN_OFFER_FIELD"
+    },
+    {
+      "name": "missing network",
+      "note": "network is required.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xcba23e2e580b887bde97a1b843dcc9b9c0e9947fb6281f54f4bab4e7b667b27c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "f7VDDp6rgLYppghOBMa6IVoMbv4S9cCzBLpiX6Pmd1LlP-jZorS_mACs_eOEYw3k0nK8ogvBL3N9VdaARdCKDw"
+        }
+      },
+      "error": "INVALID_NETWORK"
+    },
+    {
+      "name": "unsupported version",
+      "note": "A v1 reader refuses any other version.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 2,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xd25c89924caa135024e1533a1b70fbb89208a8da928efe403049f831fc139a04",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "LFAAMt9tudbF4pXL75mIQ7jrDb915sO9FoInSktrR4sXnUqoE1uCbfqoBgXxAIucCwRevL_bUpmYywkgITQ2Bg"
+        }
+      },
+      "error": "INVALID_VERSION"
+    },
+    {
+      "name": "plain http on testnet",
+      "note": "http only on dev or for a loopback address.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "http://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x2238f6287a0172cc0efa8107a233fc7e9dd4b86b74416cb0b9af407b6b094840",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "S9AHQifWwxNJ9Qq1dJazaeWCn0_2ECAmDWgSIlkUBDm8KT2p6dVUFdRLwfy91OdlzayKEM0du7f8xOeVFzhbDg"
+        }
+      },
+      "error": "INSECURE_RESOLVER_URL"
+    },
+    {
+      "name": "credentials in resolver_url",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://user:secret@offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x66783c28fd25c5f1e43f4cfe012fd0cb8d87de335825cc082fb72b539cd6f33c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "dBzQ-aH79vrIZRYW8S9zgCLRyfFuRVvqhg3DAgHP-_bKPetTUfPqjJWKHyQ3zIYFYLhFMD1G3Yi28UhHqqk-Bw"
+        }
+      },
+      "error": "INVALID_URL"
+    },
+    {
+      "name": "single_use together with recurrence",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": true,
+        "recurrence": {
+          "interval": "monthly",
+          "amount": "100000000",
+          "cap_cycles": 3
+        },
+        "offer_id": "0x29da1a313761452fad0d290ffc35f72ce844b9a0665b59920be65d61dd590805",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "9xvn6wma0oNBBy1RAurzDsGzaaOqlB0UbWDcSr141QfYn659_txbQhTih1eJlos2PrGycv2W-5bI6NlmiLRzDg"
+        }
+      },
+      "error": "SINGLE_USE_RECURRENCE_CONFLICT"
+    },
+    {
+      "name": "recurrence amount outside the bounds",
+      "note": "No cycle could ever be paid.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "recurrence": {
+          "interval": "monthly",
+          "amount": "5",
+          "cap_cycles": 3
+        },
+        "offer_id": "0xf174740fcaa2ea2e935ca1086db410cf10c78b308b0d98593c5351a79caa614d",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "tKL1KA-G-JzhLccrTrKSQ7ufWtrWdK9JuBLq3JuDUnaBXtqbecMQTSgn1DCjSc1Hd8d-7qHs7wGyrZ7Hqxi_BA"
+        }
+      },
+      "error": "RECURRENCE_AMOUNT_OUT_OF_BOUNDS"
+    },
+    {
+      "name": "recurrence without a cap",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "recurrence": {
+          "interval": "monthly",
+          "amount": "100000000"
+        },
+        "offer_id": "0xc3f603855d14da0f4ef6645f4de93067adf9c4b03ee5a39f7c5f3ff49796b2ee",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "mGEE_wArWI6vHh0LQXGRJecgPP9QcSEdz_JtB86pO4HblO80t4F0faELN-2LOLn9ea3OB6k5EYYUPmP1cPz-DQ"
+        }
+      },
+      "error": "RECURRENCE_CAP_REQUIRED"
+    },
+    {
+      "name": "amount_min above amount_max",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "200000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x5bb0b0e918b8ffd0aa4abafcd13b8accd750bf94be863f908e1c781ab05a8e8f",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "I4VQOC9yLVXtTQBsu4Q3m5EQLYrupi1_tAG5JgBD4P2wQK8aFUwALNI5H1LlKsYB8M-U1XmksxGSGSq2xv74DQ"
+        }
+      },
+      "error": "INVALID_AMOUNT_BOUNDS"
+    },
+    {
+      "name": "zero amount",
+      "note": "Zero would be a second way to write 'no bound'.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "0",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xe6e8d5cbb63df389b9235d53a26f130c332a5536a2494b2baad20b29202ad2b4",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "Q_rRNGYaqOTtWwemzvpjHM9wUoCX06a3fEt5YnJlV4RhUSYK6lAAr2537hUk_RHkXURSMSx5uxpd8jZJAisTBw"
+        }
+      },
+      "error": "INVALID_AMOUNT"
+    },
+    {
+      "name": "the same asset twice",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xd5f3dcce7aa64d2fede5690a51e275a9844142215628fcc4a06cb4ca74c602fe",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "YVN7EskCbWAR9lSmXu4Qi6zXrSU_uv0vTHOrfNT2iJLPzffvJVxfGr9k4rdUfryZSpbb_Z0TlqpTI7KAcwmAAA"
+        }
+      },
+      "error": "DUPLICATE_ASSET"
+    },
+    {
+      "name": "ckb asset with another symbol",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "USDT"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xc20adee2eb88c81dbf163dc8671922cb6dbfeed653894c0eac1f7b2546bea39e",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "xlpbr6D86WhF6CHZf8gZandW99XoiAzEjcDP3wT8D0e0laRiBNwdx_nZNrqadk2MJ0ay6igJMcsgFRHCHublDw"
+        }
+      },
+      "error": "INVALID_ASSET_SYMBOL"
+    },
+    {
+      "name": "token without a type_script_hash",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0x708c6d788f17e5655e257bc79f9f628aed2211b3f39942f326fdff2ad98b0ea6",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "4sJXxrSVvlZwC7aEXCCaBXn3x9AhpeotQiSB6C2sJpTUvo46mXArf2rqlYl53inqEod0hp5KZnNe24g2C2d8Dw"
+        }
+      },
+      "error": "MISSING_FIELD"
+    },
+    {
+      "name": "fraction in metadata",
+      "note": "Free-form signed content takes whole numbers only.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "metadata": {
+          "price": 9.5
+        },
+        "offer_id": "0x06cd04b0b43cd4881cf84d59cb39e3da68e2ce71ff595bf2cdc95cd7943cadf5",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "q-9KV-u3jPeTTdJH6ZatXUBdyTLkrQp1DnyIt-PCQdQgyBYpnvX-gEkaTW5MrddnPUi67A4TybIsaeF4iXM6AQ"
+        }
+      },
+      "error": "INVALID_SIGNED_JSON"
+    },
+    {
+      "name": "constructor key in metadata",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "metadata": {
+          "nested": {
+            "constructor": "x"
+          }
+        },
+        "offer_id": "0x568b863d031d0710003d5944ff76b3a547dc441d4812658ddb2666ae1898a21b",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "oaYYgS2Bqr6Y_YDWtUHeCJ2apRre7oRadE_T9muQGSUArFWpTNbjmNqZobsG4VJNEfC2RcR-uUO4C5c5ptf4Cg"
+        }
+      },
+      "error": "FORBIDDEN_KEY"
+    },
+    {
+      "name": "description over the limit",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xf2177249378beab340d3384eb340114a47d24faa7b61d210c8a751ac0b5b9ce5",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "V0ubFOCVkq_LTZwoeJnXgDcaADx3RR2h0_AYrlUHwLW70kSQ6tiHM3Im9QVk86DQrcaJx5_YJVQawUPqHOzdDQ"
+        }
+      },
+      "error": "DESCRIPTION_TOO_LONG"
+    },
+    {
+      "name": "extra member in the signature object",
+      "note": "It would not be covered by the signature.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw",
+          "note": "unsigned"
+        }
+      },
+      "error": "INVALID_SIGNATURE"
+    },
+    {
+      "name": "padded signature value",
+      "note": "base64url without padding is the one spelling.",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw=="
+        }
+      },
+      "error": "INVALID_SIGNATURE"
+    },
+    {
+      "name": "signature scheme other than ed25519",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ecdsa",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw"
+        }
+      },
+      "error": "INVALID_SIGNATURE"
+    },
+    {
+      "name": "unsigned __proto__ member beside a signed offer",
+      "note": "Given as JSON text. A verifier that builds a sorted object loses this member and accepts the offer.",
+      "offer_json": "{\"scheme\":\"fiberoffer-v1\",\"version\":1,\"network\":\"testnet\",\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\\n-----END PUBLIC KEY-----\",\"resolver_url\":\"https://offers.merchant.example\",\"description\":\"Coffee checkout\",\"assets\":[{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"}],\"amount_min\":\"100000000\",\"amount_max\":\"100000000\",\"single_use\":false,\"offer_id\":\"0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf\",\"signature\":{\"scheme\":\"ed25519\",\"value\":\"P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw\"},\"__proto__\":{\"single_use\":true}}",
+      "error": "FORBIDDEN_KEY"
+    }
+  ],
+  "invalid_encoded_offers": [
+    {
+      "name": "one character changed in the data",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvp3xqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgs2t9ec",
+      "decodes": false,
+      "error": "INVALID_OFFER_CHECKSUM",
+      "reason": "checksum"
+    },
+    {
+      "name": "one character changed in the checksum",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgs2t96c",
+      "decodes": false,
+      "error": "INVALID_OFFER_CHECKSUM",
+      "reason": "checksum"
+    },
+    {
+      "name": "truncated",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgs",
+      "decodes": false,
+      "error": "INVALID_OFFER_CHECKSUM",
+      "reason": "checksum"
+    },
+    {
+      "name": "mixed case",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyW3ZXYCRQVPSXQCRQVPZ9S3XZMT0W4H8GHMDD9HZYW3ZXYCRQVPSXQCRQVPZ9S3XZUMNV468XG36TDAJYCTNWDJHGHM509CX2G36YF3KKC3Z9S38X7TDVFHKCG36YFP5KS3Z04WJCGNYV4EKXUNFWP6XJMMWYGAZYSM0VENX2EFQVD5X2CMTDA6HGG3VYFHX2ARHDAEXKG36YF6X2UM5DEJHGG3VYFHX7ER9TA5KGG36YGCRYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93XZCNPVFSKYCTZV93ZYTPZDANXVETJTA5KGG36YGC8SENYV4JKGCMXXSEXZVFJXY6RGWFKXQUKZC3SV5URSEF5XUENJWFCV3JNGV338P3NSDRYXP3RJDEKXVUKZCEEX5CX2VPHXDNRVDESVDNZYTPZWP6KYMRFVD0KKETEYGAZYTFD95KJ6SJ9GAY5UGZS24PYCJ2RYP952KFD95KJ6T2UDEX5XMMHGFG4J3ZTXFT8WSTEG4Q52U2T2924YNM3W49NWAM0XEEYY4ZEXDCX6TECXYEKVKJFD35KVJ3JXDUKJ56KG9QKZ3JP84WXUTFD95KJ632WGSS9Q42ZF3Y5XGZTG4VJ6TFD95KJYTPZWFJHXMMVWEJHYHM4WFKZYW3ZDP68GURN8GHJ7MMXVEJHYUEWD4JHYCMGV9H8GTN90PSK6URVV53ZCGNNVD5X2MT9YGAZYENFVFJHYMMXVEJHYTTKXY3ZCGNND9NKUCT5W4EX2G360V38XCMGV4KK2G36YFJKGV34X5CNJG3VYFMXZMR4V53R5GJS89JNZ7Z9DSUXKKNCX3EKC5RTD9DX5ENPG9E5YDRC89JX75P3T995SH65V394QDJ8FP4KV635W3EYZEZ89434W6ZVF939YWP4FFUX25J9WVKHQKJ9XSUHGC26XDP8G6ZEDE0KJSNHYF7JCGNND9HXWMR9TA6HXEFZ8FNXZMRNV5KZYAN9WFEKJMMWYGARZLGS2T9EC",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "mixed_case"
+    },
+    {
+      "name": "a character outside the Bech32 alphabet",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyb3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgs2t9ec",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "character"
+    },
+    {
+      "name": "another prefix",
+      "encoded": "lnbc10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarzlgm0e2vy",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "prefix"
+    },
+    {
+      "name": "body with whitespace",
+      "encoded": "fbroffer10v9zqgnnvd5x2mt9ygazqgnxd93x2un0venx2u3dwccjytq2yq38vetjwd5k7m3z8gsrztq2yq3xuet5wahhy6ez8gszyar9wd6xuet5ygkq5gpzdehkge2ld9jzyw3qygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytq2yq38qatzd35kxhmtv4ujyw3qygkj6tfd94py236ffcs9q42zf3y5xgztg4vj6tfd95k4cmjdgdhhwsj3t9zykvjkwaqhj32pg4c5k5242f8hza2txamk7dnjgf29jvmsd5hnsvfnvedyjmrfve9ryvmed9f4vs2pv9ryz02udckj6tfd94z5u3pq2p25ynzfgvsyk32e95kj6tfdygkq5gpzwfjhxmmvwejhyhm4wfkzyw3qyf58garswvaz7tm0venx2unn9ekk2unrdpskuapwv4uxzmtsd3jjytq2yq3xgetnvdexjur5d9hkug36yq3yxmmxvejk2grrdpjkx6m0w46zytq2yq3xzumnv468xg36ypds5gpq0v9zqgpqyfshxum9w30hg7tsv53r5gpzvd4kyg3vpgszqgpzwduk6cn0ds3r5gpzgd95ygs2yqs86z3qt5kq5gpzv9kk7atww30k66twygazqg33xqcrqvpsxqcrqg3vpgszyctdda6kuazld4shsg36yq3rzvpsxqcrqvpsxq3zcz3qyfekjmn8d3j47atnv53r5grxv9k8xefvpgszymmxvejhyhmfvs3r5gpzxpuxver9v4jxxe35xfsnzv33xs6rjd3s89skyvr98qux2dphxvunjwryv56ryvfcvvurgepsvgunwd3n89skxwf4xpjnqdenvcmrwvrrvc3zcz3qyfekjemwv9682un9ygazq7c2yqszyumrdpjk6efz8gszyetyxg6n2vfeygkq5gpqyfmxzmr4v53r5gpz2quk2vtcg4krs6660q68xmzsdd5456nxv9qhxs350qukgm6sx9v5kjzl23jyk5pkgayxken2x368ystygukkx4mgf3yky53cx498se2jg4ej6uz6g56rjarptge5yargt9h9762zwu3q5grapf7s5qxd8v",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "not_canonical"
+    },
+    {
+      "name": "body with members in another order",
+      "encoded": "fbroffer10v38x6t8deshgatjv53r57ezwd3ksetdv53r5gn9vser2df38y3zcgnkv9k82efz8g39qwt9x9uy2mpcddd8sdrnd3gxk626dfnxzstngg68swtydagrzk2tfp04gezt2qmywjrtve4rgarjg9jywttr2a5ycjtz2gur2jncv4fy2uedwpdy2dpew3s45v6zw359jmjld9p8wgna9s3x7enxv4e976tyygazyvrcvejx2etyvdnrgvnpxyerzdp58ymrqwtpvgcx2wpcv56rwvee8yuxgef5xgcnscecx3jrqc3exumrxwtpvvun2vr9xqmnxe3kxucxxe3z9s38x6twvakx2hm4wdjjywnxv9k8xefvyfsk6mm4de697mtp0q3r5g33xqcrqvpsxqcrqg3vyfsk6mm4de697mtfdc3r5g33xqcrqvpsxqcrqg3vyfshxum9w3ejywjm0v3xzumnv4697arewpjjyw3zvd4kyg3vyfehjmtzdakzyw3zgd95ygnat5kzyer9wd3hy6tsw35k7m3z8g3yxmmxvejk2grrdpjkx6m0w46zytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnsw43xc6trta4k27fz8g3z6tfd95k5y328f98zq5z4gfxyjseqfdz4jtfd95kj6hrwf4pk7a6z29v5gjej2em5z729g9zhzj6324fy7ut4fvmhwmekwfp9gkfnwpkj7wp3xdn95jtvd9ny5v3n0954x4jpg9s5vsfat3hz6tfd95k52njyypg92sjvf9pjqj69tykj6tfd953zcgnwdajx2hmfvs3r5g3sxfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzygkzymn9w3mk7untygazyar9wd6xuet5ygkzyan9wfekjmmwygarztpzwd3ksetdv53r5gnxd93x2un0venx2u3dwccjylg24mm49",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "not_canonical"
+    },
+    {
+      "name": "body with a repeated member",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazysm0venx2efqvd5x2cmtda6hgg3vyfhx2arhdaexkg36yf6x2um5dejhgg3vyfhx7er9ta5kgg36ygcryctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93zytpzdanxvetjta5kgg36ygc8senyv4jkgcmxxsexzvfjxy6rgwfkxqukzc3sv5ursef5xuenjwfcv3jngv338p3nsdryxp3rjdekxvukzceex5cx2vphxdnrvdesvdnzytpzwp6kymrfvd0kketeygazytfd95kj6sj9gay5ugzs24pycj2ryp952kfd95kj6t2udex5xmmhgfg4j3ztxft8wsteg4q52u2t2924ynm3w49nwam0xeeyy4zexdcx6tecxyekvkjfd35kvj3jxdukj56kg9qkz3jp84wxutfd95kj632wgss9q42zf3y5xgztg4vj6tfd95kjytpzwfjhxmmvwejhyhm4wfkzyw3zdp68gurn8ghj7mmxvejhyuewd4jhycmgv9h8gtn90psk6urvv53zcgnnvd5x2mt9ygazyenfvfjhymmxvejhyttkxy3zcgnnd9nkuct5w4ex2g360v38xcmgv4kk2g36yfjkgv34x5cnjg3vyfmxzmr4v53r5gjs89jnz7z9dsuxkkncx3ekc5rtd9dx5enpg9e5ydrc89jx75p3t995sh65v394qdj8fp4kv635w3eyzez89434w6zvf939ywp4ffux25j9wvkhqkj9xsuhgc26xdp8g6zede0kjsnhyf7jcgnnd9hxwmr9ta6hxefz8fnxzmrnv5kzyan9wfekjmmwygarztpzwd5kuemvv40h2um9ygaxvctvwdjh6thv9yc",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "not_canonical"
+    },
+    {
+      "name": "body that is not JSON",
+      "encoded": "fbroffer1dehhggr2wdhkupksm3w",
+      "decodes": false,
+      "error": "INVALID_OFFER_ENCODING",
+      "reason": "json"
+    },
+    {
+      "name": "body of a validly encoded but tampered offer",
+      "encoded": "fbroffer10v3xzmt0w4h8ghmdv9uzyw3zxycrqvpsxqcrqvpz9s3xzmt0w4h8ghmdd9hzyw3zxycrqvpsxqcrqvpz9s3xzumnv468xg36tdajyctnwdjhghm509cx2g36yf3kkc3z9s38x7tdvfhkcg36yfp5ks3z04wjcgnyv4ekxunfwp6xjmmwygazy3njv4jjqcm0venx2efz9s3xuet5wahhy6ez8g38getnw3hx2apz9s3xummyv40kjepz8g3rqvnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyctzv93xzcnpvfskyg3vyfhkven9wf0kjepz8g3rq7rxv3jk2errvc6rycf3xgcngdpexccrjctzxpjnswr9xsmnxwfe8pjx2dpjxyuxxwp5vscxywfhxcenjctr8y6nqefsxuekvd3hxp3kvg3vyfc82cnvd93476m90y3r5g3d95kj6t2zg4r5jn3q2p25ynzfgvsyk32e95kj6tfdt3hy6sm0wap9zk2yfve9va6p09z5z3t3fdg425j0w965kdmhdum8ysj5tyehqmf08qcnxej6f9kxjej2xgehj62n2eq5zc2xgy74cm3d95kj6t29fezzq5z4gfxyjseqfdz4jtfd95kj6g3vyfex2um0d3mx2ujlw4excg36yf58garswvaz7tm0venx2unn9ekk2unrdpskuapwv4uxzmtsd3jjytpzwd3ksetdv53r5gnxd93x2un0venx2u3dwccjytpzwd5kwmnpw36hyefz8fajyumrdpjk6efz8g3x2epjx56nzwfz9s38vctvw4jjyw3z2quk2vtcg4krs6660q68xmzsdd5456nxv9qhxs350qukgm6sx9v5kjzl23jyk5pkgayxken2x368ystygukkx4mgf3yky53cx498se2jg4ej6uz6g56rjarptge5yargt9h9762zwu386tpzwd5kuemvv40h2um9ygaxvctvwdjjcgnkv4e8x6t0dc3r5vta6hxyy3",
+      "decodes": true,
+      "error": "OFFER_ID_MISMATCH"
+    }
+  ],
+  "resolution_requests": [
+    {
+      "name": "amount within the range",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1800000000,
+      "result": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      }
+    },
+    {
+      "name": "amount written loosely",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": 2500,
+        "asset": {
+          "asset_type": "CKB",
+          "symbol": "ckb"
+        }
+      },
+      "now": 1800000000,
+      "result": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      }
+    },
+    {
+      "name": "asset omitted: the offer's first asset",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "1000"
+      },
+      "now": 1800000000,
+      "result": {
+        "amount": "1000",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      }
+    },
+    {
+      "name": "the token the offer lists",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "5000",
+        "asset": {
+          "asset_type": "udt",
+          "symbol": "RUSD",
+          "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+        }
+      },
+      "now": 1800000000,
+      "result": {
+        "amount": "5000",
+        "asset": {
+          "asset_type": "udt",
+          "symbol": "RUSD",
+          "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+        }
+      }
+    },
+    {
+      "name": "below the minimum",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "999",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1800000000,
+      "error": "AMOUNT_TOO_LOW"
+    },
+    {
+      "name": "above the maximum",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "5001",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1800000000,
+      "error": "AMOUNT_TOO_HIGH"
+    },
+    {
+      "name": "an asset the offer does not list",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "udt",
+          "symbol": "RUSD",
+          "type_script_hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "now": 1800000000,
+      "error": "UNSUPPORTED_ASSET"
+    },
+    {
+      "name": "after the offer expired",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1900000001,
+      "error": "OFFER_EXPIRED"
+    },
+    {
+      "name": "at the moment of expiry",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1900000000,
+      "result": {
+        "amount": "2500",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      }
+    },
+    {
+      "name": "a fixed offer requires its exact amount",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Coffee checkout",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          }
+        ],
+        "amount_min": "100000000",
+        "amount_max": "100000000",
+        "single_use": false,
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "P9e1xEl8kZx4slPkiZjfaAsB4x9doP1YKH_TdKP6GHkfj4trAdG-cWhLIbR85JxeREs-pZE49taZ3BthYn_iBw"
+        }
+      },
+      "request": {
+        "amount": "100000001",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1800000000,
+      "error": "AMOUNT_MUST_MATCH_FIXED_AMOUNT"
+    },
+    {
+      "name": "a zero amount",
+      "offer": {
+        "scheme": "fiberoffer-v1",
+        "version": 1,
+        "network": "testnet",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEqKQUROquK7wo6rBTY3pm/813fZIlifJ23yiSVAAaFA=\n-----END PUBLIC KEY-----",
+        "resolver_url": "https://offers.merchant.example",
+        "description": "Ranged",
+        "assets": [
+          {
+            "asset_type": "ckb",
+            "symbol": "CKB"
+          },
+          {
+            "asset_type": "udt",
+            "symbol": "RUSD",
+            "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52"
+          }
+        ],
+        "amount_min": "1000",
+        "amount_max": "5000",
+        "expiry": 1900000000,
+        "single_use": false,
+        "offer_id": "0xe0e277393dddd4ac1df562cf2a2c1bf416a84bd829704629996c4308c23fa07c",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "0CTDmm09Jx9GrnXdMLPT-sP7U9IJPRwYXIjcnh7uGDg5NRxl82RrJEBCU45VSSbF9-mLACZ5sKC3H_AQCN0dCg"
+        }
+      },
+      "request": {
+        "amount": "0",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        }
+      },
+      "now": 1800000000,
+      "error": "INVALID_AMOUNT"
+    }
+  ],
+  "revocations": [
+    {
+      "name": "valid",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "key rotated",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+        }
+      },
+      "now": 1800000000,
+      "valid": true
+    },
+    {
+      "name": "checked 300 seconds later, the edge of the window",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "key rotated",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+        }
+      },
+      "now": 1800000300,
+      "valid": true
+    },
+    {
+      "name": "checked 301 seconds later",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "key rotated",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+        }
+      },
+      "now": 1800000301,
+      "valid": false,
+      "error": "REVOCATION_EXPIRED"
+    },
+    {
+      "name": "for another offer",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "key rotated",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+        }
+      },
+      "now": 1800000000,
+      "valid": false,
+      "error": "INVALID_REVOCATION"
+    },
+    {
+      "name": "reason changed after signing",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "no reason",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+        }
+      },
+      "now": 1800000000,
+      "valid": false,
+      "error": "INVALID_REVOCATION_SIGNATURE"
+    },
+    {
+      "name": "signed by another key",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "signature": {
+          "scheme": "ed25519",
+          "value": "tXxQoZktGlXytsk6vElqHIaMsm8Nl5kmABdIdD-TAI-lQqJtRhGKb2cx1rJMciS1L2M6Y1e_T86aVIWjbI6nCw"
+        }
+      },
+      "now": 1800000000,
+      "valid": false,
+      "error": "INVALID_REVOCATION_SIGNATURE"
+    },
+    {
+      "name": "extra member in the signature object",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "revocation": {
+        "scheme": "fiberoffer-revocation-v1",
+        "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+        "node_id": "02abababababababababababababababababababababababababababababababab",
+        "revoked_at": 1800000000,
+        "reason": "key rotated",
+        "signature": {
+          "scheme": "ed25519",
+          "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ",
+          "note": "x"
+        }
+      },
+      "now": 1800000000,
+      "valid": false,
+      "error": "INVALID_REVOCATION_SIGNATURE"
+    }
+  ],
+  "revocation_signing_payload": {
+    "revocation": {
+      "scheme": "fiberoffer-revocation-v1",
+      "offer_id": "0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf",
+      "node_id": "02abababababababababababababababababababababababababababababababab",
+      "revoked_at": 1800000000,
+      "reason": "key rotated",
+      "signature": {
+        "scheme": "ed25519",
+        "value": "G6iWicB5jyyEeWC2mPjoToOQ3zv_XW0-Xky_hh9dZTcnpwe0ekjVG1apKJ6hUBFkF64luXgOgUDiKHmZR7cjBQ"
+      }
+    },
+    "signing_payload": "{\"node_id\":\"02abababababababababababababababababababababababababababababababab\",\"offer_id\":\"0xfdeedcf42a121449609ab0e88e473998de4218c84d0b97639ac950e073f670cf\",\"reason\":\"key rotated\",\"revoked_at\":1800000000,\"scheme\":\"fiberoffer-revocation-v1\"}"
+  },
+  "recurrence_requests": [
+    {
+      "name": "first cycle",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 1,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "3y5E_Bocg6j38vIpPlcvzUK2gwmgl5_nuwg_KSoAsVpzkJocFgCIbjoN_E9PTfnEGmFbmo9mM7bqwL6lr-1yDA"
+      },
+      "valid": true,
+      "signing_payload": "{\"amount\":\"2000\",\"approval_id\":\"sub_b628aef0f0e90add208e8876d911c9a817f0dcf5\",\"asset\":{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"},\"offer_id\":\"0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b\",\"recurrence_cycle\":1,\"scheme\":\"fiberoffer-recurrence-v1\"}"
+    },
+    {
+      "name": "a later cycle with scheduled_for",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 2,
+        "scheduled_for": "2027-02-15T08:00:00.000Z",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "KuC7Ctvf0YUQepUo4QM9VCuUVK1BX4BYIMkXbDQEl7gemWhoAOj28v0maNM0K_cBpx6_WDPrdBn-TvePsI9SAg"
+      },
+      "valid": true,
+      "signing_payload": "{\"amount\":\"2000\",\"approval_id\":\"sub_b628aef0f0e90add208e8876d911c9a817f0dcf5\",\"asset\":{\"asset_type\":\"ckb\",\"symbol\":\"CKB\"},\"offer_id\":\"0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b\",\"recurrence_cycle\":2,\"scheduled_for\":\"2027-02-15T08:00:00.000Z\",\"scheme\":\"fiberoffer-recurrence-v1\"}"
+    },
+    {
+      "name": "cycle number changed after signing",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 2,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "3y5E_Bocg6j38vIpPlcvzUK2gwmgl5_nuwg_KSoAsVpzkJocFgCIbjoN_E9PTfnEGmFbmo9mM7bqwL6lr-1yDA"
+      },
+      "valid": false,
+      "error": "INVALID_SUBSCRIPTION_SIGNATURE"
+    },
+    {
+      "name": "another subscription's ID with this key",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 1,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_4d25125858aaffc9389ec492c9c218fe3fee7a38",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "3y5E_Bocg6j38vIpPlcvzUK2gwmgl5_nuwg_KSoAsVpzkJocFgCIbjoN_E9PTfnEGmFbmo9mM7bqwL6lr-1yDA"
+      },
+      "valid": false,
+      "error": "SUBSCRIPTION_KEY_MISMATCH"
+    },
+    {
+      "name": "signed by a key other than the one presented",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 1,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "5By5GSeBc1IhKpdl2GQtJe13TGamuvLSP-uBkMoRwc-ak31o5RC4rwnLr0gX9HLvw1RaRkcS1pR0cZ8o1MWsBg"
+      },
+      "valid": false,
+      "error": "INVALID_SUBSCRIPTION_SIGNATURE"
+    },
+    {
+      "name": "without the proof",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "recurrence_cycle": 1
+      },
+      "valid": false,
+      "error": "SUBSCRIPTION_PROOF_REQUIRED"
+    },
+    {
+      "name": "an amount other than the cycle amount",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2001",
+        "recurrence_cycle": 1,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "3y5E_Bocg6j38vIpPlcvzUK2gwmgl5_nuwg_KSoAsVpzkJocFgCIbjoN_E9PTfnEGmFbmo9mM7bqwL6lr-1yDA"
+      },
+      "valid": false,
+      "error": "AMOUNT_MUST_MATCH_FIXED_AMOUNT"
+    },
+    {
+      "name": "a cycle beyond the cap",
+      "offer_id": "0x99484ba40260a5bc314443e5824fad3c2e4718b4863b301b5c98e9d893e5be8b",
+      "request": {
+        "amount": "2000",
+        "recurrence_cycle": 13,
+        "asset": {
+          "asset_type": "ckb",
+          "symbol": "CKB"
+        },
+        "approval_id": "sub_b628aef0f0e90add208e8876d911c9a817f0dcf5",
+        "subscriber_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgOSLcOcabrp6/XdENYzXx3vm5FKCWYJa77f511JnqYg=\n-----END PUBLIC KEY-----\n",
+        "subscriber_signature": "3y5E_Bocg6j38vIpPlcvzUK2gwmgl5_nuwg_KSoAsVpzkJocFgCIbjoN_E9PTfnEGmFbmo9mM7bqwL6lr-1yDA"
+      },
+      "valid": false,
+      "error": "RECURRENCE_CYCLE_CAP_REACHED"
+    }
+  ]
+}

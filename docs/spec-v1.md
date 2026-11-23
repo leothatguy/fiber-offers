@@ -38,7 +38,7 @@ An offer has one spelling. A verifier refuses a validly signed offer whose field
 | --- | --- |
 | `node_id` | 66 lowercase hex characters |
 | `public_key` | The PEM of an Ed25519 SubjectPublicKeyInfo, base64 on one line, `\n` line ends, no trailing newline. Any other key type is refused (`INVALID_KEY_TYPE`) |
-| `resolver_url` | `https` origin and optional path, no trailing slash, no credentials, query or fragment. `http` only on the `dev` network or for a loopback address (`INSECURE_RESOLVER_URL` otherwise) |
+| `resolver_url` | `scheme "://" host [":" port] *("/" segment)`: scheme `https` (or `http`, see below); host a lowercase DNS name (IDNs in punycode), a dotted-quad IPv4 address, or a bracketed, compressed, lowercase IPv6 address; port without leading zeros and never the scheme's default; each segment one or more of `A-Z a-z 0-9 . _ ~ -`, never `.` or `..`. No trailing slash, credentials, query, fragment or percent-encoding. `http` only on the `dev` network or for a loopback address (`INSECURE_RESOLVER_URL` otherwise) |
 | `amount_min`, `amount_max`, recurrence amounts | Decimal strings, at least `1`, no leading zeros |
 | `expiry`, `cap_cycles`, `custom_seconds` | JSON integers |
 | `assets[].asset_type` / `symbol` | Lowercase type; symbol of 1–16 characters from `A-Z 0-9 . _ -`. A `ckb` asset is exactly `{ "asset_type": "ckb", "symbol": "CKB" }`. No asset is listed twice (a token is identified by its `type_script_hash`) |
@@ -46,6 +46,8 @@ An offer has one spelling. A verifier refuses a validly signed offer whose field
 | `signature` | Exactly `{ "scheme": "ed25519", "value": <86 base64url characters> }`, no padding, no other members |
 
 Cross-field rules: `amount_min` ≤ `amount_max`; `recurrence.amount` lies within them; an offer is not both `single_use` and recurring; `spending_cap_total` covers at least one cycle; `custom_seconds` appears only with the `custom_seconds` interval. An offer cannot be created with an `expiry` already in the past.
+
+Conformance vectors for all of the above, and a second implementation that checks them, are in [`test-vectors/`](test-vectors/README.md).
 
 Unknown top-level fields are refused (`UNKNOWN_OFFER_FIELD`): a signed field a wallet does not understand could change what it is agreeing to. Additions a reader may safely ignore go in `extensions` or in fields named `x_…`, which are signed like everything else. `metadata` and extension fields are plain JSON with whole numbers only (write decimals as strings), at most 8 levels deep, without the keys `__proto__`, `constructor` or `prototype`, and at most 2,048 bytes each.
 

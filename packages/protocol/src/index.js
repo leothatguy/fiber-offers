@@ -446,7 +446,9 @@ function dropUndefined(value) {
   return Object.fromEntries(Object.entries(value).filter(([, member]) => member !== undefined));
 }
 
-export function validateResolutionRequest(offer, request) {
+// `options.now` (unix seconds) is the time the offer's expiry is checked
+// against; it defaults to the current time.
+export function validateResolutionRequest(offer, request, options = {}) {
   assertValidOffer(offer, { requireSignature: true });
 
   const amount = requiredPositiveIntegerString(request?.amount, "amount");
@@ -476,7 +478,7 @@ export function validateResolutionRequest(offer, request) {
     throw new FiberOfferError("requested amount is above offer maximum", "AMOUNT_TOO_HIGH");
   }
 
-  if (offer.expiry !== undefined && Date.now() / 1000 > offer.expiry) {
+  if (offer.expiry !== undefined && (options.now ?? Date.now() / 1000) > offer.expiry) {
     throw new FiberOfferError("offer has expired", "OFFER_EXPIRED");
   }
 
@@ -734,8 +736,22 @@ function normalizeResolverUrl(value, network) {
   }
   const normalized = `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
   if (normalized.length > OFFER_LIMITS.resolver_url_length) throw refuse("the URL is too long");
+  // The result must fit a grammar any language can check without a full URL
+  // parser: a lowercase host name or IP literal, an optional non-default port,
+  // and path segments of unreserved characters. No percent-encoding, no empty
+  // segments.
+  if (!RESOLVER_URL_FORM.test(normalized)) {
+    throw refuse("only a host, an optional port and a plain path are allowed");
+  }
   return normalized;
 }
+
+const RESOLVER_URL_FORM = new RegExp(
+  "^https?://" +
+    "(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*|\\[[0-9a-f:.]+\\])" +
+    "(?::[1-9][0-9]{0,4})?" +
+    "(?:/[A-Za-z0-9._~-]+)*$"
+);
 
 function isLoopbackHost(hostname) {
   const host = hostname.toLowerCase();

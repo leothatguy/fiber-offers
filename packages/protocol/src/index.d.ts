@@ -243,6 +243,8 @@ export function verifyOfferRevocation(
 export function assertValidOffer(offer: unknown, options?: { requireSignature?: boolean }): true;
 export function validateResolutionRequest(
   offer: SignedFiberOffer,
-  request: ResolutionRequestInput
+  request: ResolutionRequestInput,
+  /** `now` is the unix time, in seconds, the offer's expiry is checked against. */
+  options?: { now?: number }
 ): ValidatedResolutionRequest;
 export function offerToPaymentLink(offer: SignedFiberOffer, baseUrl?: string): string;
