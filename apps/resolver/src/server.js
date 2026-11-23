@@ -1,7 +1,7 @@
 import { createServer as createHttpServer } from "node:http";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { analyzePaymentReadiness, FiberTopologyClient } from "../../../packages/sdk/src/index.js";
 import {
@@ -524,6 +524,7 @@ async function handleRequest(request, response, context) {
   request.resolverOrigin = resolveRequestOrigin(request, context);
   request.clientAddress = resolveClientAddress(request, context);
   setCorsHeaders(response);
+  setSecurityHeaders(response, request);
   if (request.method === "OPTIONS") {
     response.writeHead(204);
     response.end();
@@ -531,7 +532,7 @@ async function handleRequest(request, response, context) {
   }
 
   const url = new URL(request.url, requestOrigin(request));
-  if (request.method === "GET" && (await serveStatic(url.pathname, response, context.staticRoot))) {
+  if (request.method === "GET" && (await serveStatic(url.pathname, request, response, context.staticRoot))) {
     return;
   }
 
@@ -2584,7 +2585,15 @@ async function readJsonBody(request, maxBytes = maxJsonBytes) {
   }
 }
 
-async function serveStatic(pathname, response, staticRoot) {
+const STATIC_CONTENT_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml; charset=utf-8",
+  ".png": "image/png"
+};
+
+async function serveStatic(pathname, request, response, staticRoot) {
   let filePath;
   if (pathname === "/" || pathname === "/index.html" || /^\/pay\/0x[0-9a-f]{64}$/.test(pathname)) {
     filePath = join(staticRoot, "index.html");
@@ -2627,16 +2636,13 @@ async function serveStatic(pathname, response, staticRoot) {
   }
 
   const body = await readFile(filePath);
-  const type = filePath.endsWith(".js")
-    ? "text/javascript"
-    : filePath.endsWith(".css")
-      ? "text/css"
-      : filePath.endsWith(".svg")
-        ? "image/svg+xml"
-        : "text/html";
+  const type = STATIC_CONTENT_TYPES[extname(filePath)];
   response.writeHead(200, {
-    "content-type": `${type}; charset=utf-8`,
-    "cache-control": "no-store"
+    "content-type": type,
+    "cache-control": "no-store",
+    // A page loads its own scripts and styles; everything else keeps the
+    // stricter policy set for every response.
+    ...(type.startsWith("text/html") ? { "content-security-policy": pageContentSecurityPolicy(request) } : {})
   });
   response.end(body);
   return true;
@@ -2708,6 +2714,40 @@ function httpError(status, code, message, details = undefined) {
   error.details = details;
   error.expose = true;
   return error;
+}
+
+// Sent with every response, so they do not depend on a proxy adding them.
+function setSecurityHeaders(response, request) {
+  // Never guess a content type from the bytes.
+  response.setHeader("x-content-type-options", "nosniff");
+  // Resolution and receipt URLs are readable by whoever holds them, so they
+  // must not travel to other sites in a Referer header.
+  response.setHeader("referrer-policy", "no-referrer");
+  // The operator console must not be framed by another site.
+  response.setHeader("x-frame-options", "DENY");
+  // API responses (JSON, CSV, the QR image) load nothing and run nothing, even
+  // when opened directly in a browser. Pages replace this with their own policy.
+  response.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+  if (requestOrigin(request).startsWith("https://")) {
+    response.setHeader("strict-transport-security", "max-age=31536000");
+  }
+}
+
+// The pages use only their own scripts and styles, with no inline code. The
+// QR image and API calls use the resolver's public address, which can differ
+// from the address the page was opened on.
+function pageContentSecurityPolicy(request) {
+  const publicOrigin = new URL(requestOrigin(request)).origin;
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    `img-src 'self' data: ${publicOrigin}`,
+    `connect-src 'self' ${publicOrigin}`,
+    "form-action 'self'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'"
+  ].join("; ");
 }
 
 function setCorsHeaders(response) {

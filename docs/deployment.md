@@ -313,6 +313,22 @@ With Docker, point `FIBER_RPC_URL` at the host or service address reachable from
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.
 
+## Response Headers
+
+The resolver sets these on every response itself, so they do not depend on the
+proxy in front of it:
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `X-Content-Type-Options` | `nosniff` | A response is never treated as a type it did not declare |
+| `Referrer-Policy` | `no-referrer` | Resolution and receipt URLs are readable by whoever holds them, so they must not reach other sites |
+| `X-Frame-Options` | `DENY` | The operator console cannot be framed by another site |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` on API responses; pages allow only their own scripts, styles and images | Nothing inline and nothing from another origin runs |
+| `Strict-Transport-Security` | `max-age=31536000`, when the public URL is `https` | Browsers keep using HTTPS |
+
+The pages contain no inline script or style, and a test keeps it that way. To
+report a vulnerability, see [SECURITY.md](../SECURITY.md).
+
 ## Fiber RPC Access
 
 The resolver calls five methods on the merchant node: `node_info`,

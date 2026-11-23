@@ -282,6 +282,71 @@ test("the demo webhook inbox is bounded and keeps no request headers", async () 
   });
 });
 
+test("every response carries the security headers itself", async () => {
+  await withResolver({ demoMode: false }, async ({ baseUrl, sample }) => {
+    const apiPolicy = "default-src 'none'; frame-ancestors 'none'";
+    const responses = {
+      page: await fetch(`${baseUrl}/`),
+      docs: await fetch(`${baseUrl}/docs`),
+      script: await fetch(`${baseUrl}/app.js`),
+      json: await fetch(`${baseUrl}/offers/${sample.offerId}`),
+      qr: await fetch(`${baseUrl}/offers/${sample.offerId}/qr.svg`),
+      refused: await fetch(`${baseUrl}/diagnostics`),
+      missing: await fetch(`${baseUrl}/nothing-here`)
+    };
+
+    for (const [label, response] of Object.entries(responses)) {
+      assert.equal(response.headers.get("x-content-type-options"), "nosniff", label);
+      assert.equal(response.headers.get("referrer-policy"), "no-referrer", label);
+      assert.equal(response.headers.get("x-frame-options"), "DENY", label);
+      assert.equal(response.headers.get("cache-control"), "no-store", label);
+      // Plain HTTP here, so no HSTS.
+      assert.equal(response.headers.get("strict-transport-security"), null, label);
+    }
+
+    // API responses load and run nothing, even opened directly in a browser.
+    for (const label of ["script", "json", "qr", "refused", "missing"]) {
+      assert.equal(responses[label].headers.get("content-security-policy"), apiPolicy, label);
+    }
+    // Pages may load their own scripts and styles, and nothing inline.
+    for (const label of ["page", "docs"]) {
+      const policy = responses[label].headers.get("content-security-policy");
+      assert.match(policy, /default-src 'none'/, label);
+      assert.match(policy, /script-src 'self'(;|$)/, label);
+      assert.match(policy, /style-src 'self'(;|$)/, label);
+      assert.match(policy, /frame-ancestors 'none'/, label);
+      assert.doesNotMatch(policy, /unsafe-inline|unsafe-eval|\*/, label);
+    }
+
+    assert.equal(responses.page.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(responses.script.headers.get("content-type"), "text/javascript; charset=utf-8");
+    const diagram = await fetch(`${baseUrl}/docs/system-design.png`);
+    assert.equal(diagram.headers.get("content-type"), "image/png");
+    assert.deepEqual([...new Uint8Array(await diagram.arrayBuffer()).slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+  });
+
+  // Behind HTTPS the resolver asks browsers to keep using it.
+  await withResolver({ demoMode: false, publicOrigin: "https://offers.merchant.example" }, async ({ baseUrl }) => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.headers.get("strict-transport-security"), "max-age=31536000");
+    assert.match(page.headers.get("content-security-policy"), /img-src 'self' data: https:\/\/offers\.merchant\.example/);
+  });
+});
+
+test("the pages contain no inline script or style for the policy to block", async () => {
+  await withResolver({ demoMode: false }, async ({ baseUrl }) => {
+    const paths = ["/", "/docs", "/docs/concepts", "/docs/quickstart", "/docs/self-hosting", "/docs/api", "/docs/wallets", "/docs/merchants", "/docs/fiber", "/docs/sdk", "/docs/production"];
+    for (const path of paths) {
+      const html = await fetch(`${baseUrl}${path}`).then((response) => response.text());
+      assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i, `${path} has an inline script`);
+      assert.doesNotMatch(html, /<style[\s>]/i, `${path} has an inline style element`);
+      assert.doesNotMatch(html, /\sstyle=["']/i, `${path} has an inline style attribute`);
+      assert.doesNotMatch(html, /\son[a-z]+=["']/i, `${path} has an inline event handler`);
+      assert.doesNotMatch(html, /(src|href)=["']https?:\/\/[^"']+\.(js|css)/i, `${path} loads code from another origin`);
+    }
+  });
+});
+
 // A resolver with an API key, one registered offer and one invoice on it,
 // so every route can be addressed with IDs that exist.
 async function withResolver(options, callback) {
@@ -291,6 +356,7 @@ async function withResolver(options, callback) {
     apiKey: API_KEY,
     demoMode: options.demoMode,
     publicOperatorAccess: options.publicOperatorAccess,
+    publicOrigin: options.publicOrigin,
     topologyClient: options.topologyClient ?? false,
     workers: false,
     rateLimitMax: 0,
