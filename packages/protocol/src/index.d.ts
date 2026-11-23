@@ -4,6 +4,21 @@ export const OFFER_HRP: "fbroffer";
 export const REVOCATION_SCHEME: "fiberoffer-revocation-v1";
 export const SUPPORTED_ASSET_TYPES: Set<FiberAssetType>;
 export const SUPPORTED_NETWORKS: Set<FiberOfferNetwork>;
+/** Upper bounds the format places on an offer. Sizes are in bytes unless named otherwise. */
+export const OFFER_LIMITS: Readonly<{
+  /** Canonical JSON of the whole signed offer. */
+  offer_bytes: number;
+  /** Characters of the encoded `fbroffer1...` form. */
+  encoded_length: number;
+  description_bytes: number;
+  resolver_url_length: number;
+  assets: number;
+  symbol_length: number;
+  metadata_bytes: number;
+  /** `extensions` and all `x_...` fields together. */
+  extensions_bytes: number;
+  json_depth: number;
+}>;
 
 export type FiberOfferNetwork = "mainnet" | "testnet" | "dev";
 export type FiberAssetType = "ckb" | "udt" | "rgbpp";
@@ -176,16 +191,44 @@ export interface OfferKeyPair {
 }
 
 export function generateOfferKeyPair(): OfferKeyPair;
+/** A copy with every object's members sorted, for display. Hash and sign `canonicalStringify`, not this. */
 export function canonicalize<T>(value: T): T;
+/**
+ * The canonical JSON text (RFC 8785) that is hashed and signed. Throws
+ * `INVALID_CANONICAL_VALUE` for anything without a single JSON spelling.
+ */
 export function canonicalStringify(value: unknown): string;
 export function sha256Hex(value: string | Uint8Array | unknown): string;
 export function base64UrlEncode(value: string | Uint8Array): string;
 export function base64UrlDecode(value: string): Uint8Array;
+/** Lowercase Bech32m over the offer's canonical JSON. */
 export function encodeOffer(offer: SignedFiberOffer): string;
+/**
+ * Reads the lowercase or uppercase form. Throws `INVALID_OFFER_CHECKSUM` for a
+ * damaged string and `INVALID_OFFER_ENCODING` (with `details.reason`) for
+ * anything else that is not exactly an encoded offer.
+ */
 export function decodeOffer(encoded: string): SignedFiberOffer;
-export function buildUnsignedOffer(input: FiberOfferInput): UnsignedFiberOffer;
+/** Whether a string is written as an encoded offer, in either case. */
+export function isEncodedOffer(value: unknown): value is string;
+export interface BuildOfferOptions {
+  /** Unix seconds an `expiry` is checked against. Defaults to the current time. */
+  now?: number;
+}
+/** Brings loosely written input to canonical form and derives the offer ID. */
+export function buildUnsignedOffer(input: FiberOfferInput, options?: BuildOfferOptions): UnsignedFiberOffer;
+/** Throws `INVALID_KEY_TYPE` unless the key is Ed25519. */
 export function signOffer(unsignedOffer: UnsignedFiberOffer, privateKeyPem: string): SignedFiberOffer;
-export function createSignedOffer(input: FiberOfferInput, privateKeyPem: string): SignedFiberOffer;
+export function createSignedOffer(
+  input: FiberOfferInput,
+  privateKeyPem: string,
+  options?: BuildOfferOptions
+): SignedFiberOffer;
+/**
+ * Returns `{ ok: false, code }` when the ID or signature does not check out.
+ * Throws `FiberOfferError` when the offer is malformed or not in canonical
+ * form (`NON_CANONICAL_OFFER`, `UNKNOWN_OFFER_FIELD`, `INVALID_KEY_TYPE`, ...).
+ */
 export function verifyOffer(offer: SignedFiberOffer): OfferVerificationResult;
 export function createOfferRevocation(
   offer: SignedFiberOffer,

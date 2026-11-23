@@ -6,9 +6,11 @@ import {
   sign as cryptoSign,
   verify as cryptoVerify
 } from "node:crypto";
+import { decodeBech32m, encodeBech32m } from "./bech32m.js";
+import { canonicalize, canonicalStringify } from "./canonical.js";
 import { FiberOfferError } from "./errors.js";
 
-export { FiberOfferError };
+export { canonicalize, canonicalStringify, FiberOfferError };
 export { ckbHash, ckbScriptHash, normalizeCkbScript, parseCkbScript, serializeCkbScript } from "./ckb-script.js";
 
 export const OFFER_PREFIX = "fbroffer1";
@@ -18,8 +20,47 @@ export const REVOCATION_SCHEME = "fiberoffer-revocation-v1";
 export const RECURRENCE_REQUEST_SCHEME = "fiberoffer-recurrence-v1";
 export const SUPPORTED_ASSET_TYPES = new Set(["ckb", "udt", "rgbpp"]);
 export const SUPPORTED_NETWORKS = new Set(["mainnet", "testnet", "dev"]);
-const bech32Charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-const bech32mConstant = 0x2bc830a3;
+
+// Upper bounds on what an offer may carry. An offer is passed around as a
+// link or a QR code and stored by resolvers that did not create it, so its
+// size is bounded by the format, not left to each implementation.
+export const OFFER_LIMITS = Object.freeze({
+  // Canonical JSON of the whole signed offer, in bytes.
+  offer_bytes: 4096,
+  // The encoded form: prefix, payload, checksum.
+  encoded_length: OFFER_PREFIX.length + Math.ceil((4096 * 8) / 5) + 6,
+  description_bytes: 512,
+  resolver_url_length: 512,
+  assets: 16,
+  symbol_length: 16,
+  // Canonical JSON of `metadata`, and of all extension fields together.
+  metadata_bytes: 2048,
+  extensions_bytes: 2048,
+  // How deeply `metadata` and extension fields may nest.
+  json_depth: 8
+});
+
+// Keys that would change an object's behaviour if a consumer merged or copied
+// it carelessly. They are refused anywhere in an offer.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const KNOWN_OFFER_FIELDS = new Set([
+  "scheme",
+  "version",
+  "network",
+  "node_id",
+  "public_key",
+  "resolver_url",
+  "description",
+  "assets",
+  "amount_min",
+  "amount_max",
+  "recurrence",
+  "expiry",
+  "single_use",
+  "metadata",
+  "offer_id",
+  "signature"
+]);
 
 export function generateOfferKeyPair() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -27,28 +68,6 @@ export function generateOfferKeyPair() {
     privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
     publicKeyPem: publicKey.export({ type: "spki", format: "pem" })
   };
-}
-
-export function canonicalize(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => canonicalize(item));
-  }
-
-  if (value && typeof value === "object") {
-    return Object.keys(value)
-      .filter((key) => value[key] !== undefined)
-      .sort()
-      .reduce((result, key) => {
-        result[key] = canonicalize(value[key]);
-        return result;
-      }, {});
-  }
-
-  return value;
-}
-
-export function canonicalStringify(value) {
-  return JSON.stringify(canonicalize(value));
 }
 
 export function sha256Hex(value) {
@@ -70,64 +89,97 @@ export function base64UrlDecode(value) {
   return Buffer.from(padded.replaceAll("-", "+").replaceAll("_", "/"), "base64");
 }
 
+// The encoded form is Bech32m over the offer's canonical JSON, lowercase.
+// `encodeOffer(decodeOffer(text))` returns `text` (lowercased), because a
+// decoder accepts exactly one encoding of each offer.
 export function encodeOffer(offer) {
   assertValidOffer(offer, { requireSignature: true });
-  return bech32mEncode(OFFER_HRP, Buffer.from(canonicalStringify(offer)));
+  return encodeBech32m(OFFER_HRP, Buffer.from(canonicalStringify(offer)));
 }
 
+// Whether a string is written as an encoded offer, in either case. Says
+// nothing about whether it decodes.
+export function isEncodedOffer(value) {
+  return typeof value === "string" && value.toLowerCase().startsWith(OFFER_PREFIX);
+}
+
+// Accepts the all-lowercase or the all-uppercase form (as a QR code carries
+// it). A damaged string fails with INVALID_OFFER_CHECKSUM; anything else that
+// is not exactly an encoded offer fails with INVALID_OFFER_ENCODING and
+// `details.reason`.
 export function decodeOffer(encoded) {
-  if (typeof encoded !== "string" || !encoded.startsWith(OFFER_PREFIX)) {
-    throw new FiberOfferError("encoded offer must start with fbroffer1", "INVALID_OFFER_ENCODING");
+  if (!isEncodedOffer(encoded)) {
+    throw encodingError("encoded offer must start with fbroffer1", "prefix");
+  }
+  if (encoded.length > OFFER_LIMITS.encoded_length) {
+    throw encodingError(`encoded offer is longer than ${OFFER_LIMITS.encoded_length} characters`, "length");
   }
 
+  let decoded;
   try {
-    const bytes = decodeOfferBytes(encoded);
-    const parsed = JSON.parse(bytes.toString("utf8"));
-    assertValidOffer(parsed, { requireSignature: true });
-    return parsed;
+    decoded = decodeBech32m(encoded);
   } catch (error) {
-    if (error instanceof FiberOfferError) throw error;
-    throw new FiberOfferError("encoded offer body is not valid JSON", "INVALID_OFFER_ENCODING", {
-      cause: error.message
-    });
+    if (error.reason === "checksum") {
+      throw new FiberOfferError(
+        "encoded offer is damaged: its checksum does not match",
+        "INVALID_OFFER_CHECKSUM",
+        { reason: "checksum" }
+      );
+    }
+    throw encodingError(`encoded offer is not valid bech32m: ${error.message}`, error.reason ?? "bech32m");
   }
+  if (decoded.hrp !== OFFER_HRP) throw encodingError("encoded offer must start with fbroffer1", "prefix");
+
+  let text;
+  let parsed;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(decoded.bytes);
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw encodingError("encoded offer body is not valid JSON", "json", error.message);
+  }
+  assertValidOffer(parsed, { requireSignature: true });
+  // The body must be the canonical JSON itself: no whitespace, no reordered or
+  // repeated members. Otherwise one offer would have many encodings.
+  if (canonicalStringify(parsed) !== text) {
+    throw encodingError("encoded offer body is not in canonical form", "not_canonical");
+  }
+  return parsed;
 }
 
-export function buildUnsignedOffer(input) {
-  const offer = {
-    ...extensionFields(input),
-    scheme: OFFER_SCHEME,
-    version: 1,
-    network: input.network ?? "testnet",
-    node_id: requiredString(input.node_id, "node_id"),
-    public_key: requiredString(input.public_key, "public_key"),
-    resolver_url: normalizeUrl(input.resolver_url, "resolver_url"),
-    description: optionalString(input.description, "description"),
-    assets: normalizeAssets(input.assets),
-    amount_min: optionalPositiveIntegerString(input.amount_min, "amount_min"),
-    amount_max: optionalPositiveIntegerString(input.amount_max, "amount_max"),
-    recurrence: normalizeRecurrence(input.recurrence),
-    expiry: optionalPositiveInteger(input.expiry, "expiry"),
-    single_use: Boolean(input.single_use ?? false),
-    metadata: normalizeMetadata(input.metadata)
-  };
+function encodingError(message, reason, cause = undefined) {
+  return new FiberOfferError(message, "INVALID_OFFER_ENCODING", cause === undefined ? { reason } : { reason, cause });
+}
 
-  if (!SUPPORTED_NETWORKS.has(offer.network)) {
-    throw new FiberOfferError("network must be mainnet, testnet, or dev", "INVALID_NETWORK");
+// Builds the offer from loosely written input: values are brought to their
+// canonical form (lowercase node ID, uppercase symbol, amounts as decimal
+// strings, the resolver URL without a trailing slash) before the ID is taken.
+// `options.now` (unix seconds) is the time an `expiry` is checked against.
+export function buildUnsignedOffer(input, options = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new FiberOfferError("offer input must be an object", "INVALID_OFFER");
   }
+  const content = normalizeOfferContent({
+    ...input,
+    network: input.network ?? "testnet",
+    single_use: Boolean(input.single_use ?? false)
+  });
 
-  validateAmountBounds(offer);
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  if (content.expiry !== undefined && content.expiry <= now) {
+    throw new FiberOfferError("expiry must be in the future", "OFFER_EXPIRY_IN_PAST", { expiry: content.expiry, now });
+  }
+  assertOfferSize(content);
 
-  const withoutId = stripFields(offer, ["offer_id", "signature"]);
   return {
-    ...offer,
-    offer_id: `0x${sha256Hex(withoutId)}`
+    ...content,
+    offer_id: `0x${sha256Hex(content)}`
   };
 }
 
 export function signOffer(unsignedOffer, privateKeyPem) {
   assertValidOffer(unsignedOffer, { requireSignature: false });
-  const key = createPrivateKey(privateKeyPem);
+  const key = ed25519PrivateKey(privateKeyPem, "offer private key");
   const payload = Buffer.from(canonicalStringify(stripFields(unsignedOffer, ["signature"])));
   const signature = cryptoSign(null, payload, key);
   return {
@@ -139,8 +191,8 @@ export function signOffer(unsignedOffer, privateKeyPem) {
   };
 }
 
-export function createSignedOffer(input, privateKeyPem) {
-  const unsigned = buildUnsignedOffer(input);
+export function createSignedOffer(input, privateKeyPem, options = {}) {
+  const unsigned = buildUnsignedOffer(input, options);
   return signOffer(unsigned, privateKeyPem);
 }
 
@@ -157,7 +209,8 @@ export function verifyOffer(offer) {
   }
 
   try {
-    const key = createPublicKey(offer.public_key);
+    // assertValidOffer has already established that this is an Ed25519 key.
+    const key = ed25519PublicKey(offer.public_key, "public_key");
     const payload = Buffer.from(canonicalStringify(stripFields(offer, ["signature"])));
     const signature = base64UrlDecode(offer.signature.value);
     const ok = cryptoVerify(null, payload, key, signature);
@@ -182,7 +235,7 @@ export function createOfferRevocation(offer, privateKeyPem, input = {}) {
     revoked_at: normalizeUnixTimestamp(input.revoked_at ?? Math.floor(Date.now() / 1000), "revoked_at"),
     reason: optionalString(input.reason, "reason")
   };
-  const key = createPrivateKey(privateKeyPem);
+  const key = ed25519PrivateKey(privateKeyPem, "offer private key");
   return {
     ...revocation,
     signature: {
@@ -214,13 +267,17 @@ export function verifyOfferRevocation(offer, revocation, options = {}) {
     if (Math.abs(now - revokedAt) > maxAgeSeconds) {
       return { ok: false, code: "REVOCATION_EXPIRED", message: "revocation proof is outside the accepted time window" };
     }
-    if (revocation.signature?.scheme !== "ed25519" || typeof revocation.signature.value !== "string") {
-      return { ok: false, code: "INVALID_REVOCATION_SIGNATURE", message: "revocation signature is required" };
+    if (!isCanonicalSignature(revocation.signature)) {
+      return {
+        ok: false,
+        code: "INVALID_REVOCATION_SIGNATURE",
+        message: "revocation signature must be { scheme: \"ed25519\", value } with a base64url Ed25519 signature"
+      };
     }
     const ok = cryptoVerify(
       null,
       Buffer.from(canonicalStringify(payload)),
-      createPublicKey(offer.public_key),
+      ed25519PublicKey(offer.public_key, "public_key"),
       base64UrlDecode(revocation.signature.value)
     );
     return ok
@@ -231,8 +288,17 @@ export function verifyOfferRevocation(offer, revocation, options = {}) {
   }
 }
 
+// Checks an offer someone else produced. It must be well formed and already in
+// canonical form: exactly what buildUnsignedOffer would have produced for the
+// same terms. Looser spellings (an uppercase node ID, "0100" for an amount, a
+// trailing slash on the resolver URL, a null where a field is absent) are
+// refused, so one set of terms has one offer and one offer ID.
+//
+// Unknown top-level fields are refused. A signed field a wallet does not
+// understand could change what it is agreeing to; additions that a reader may
+// safely ignore go in `extensions` or in fields named `x_...`.
 export function assertValidOffer(offer, options = {}) {
-  if (!offer || typeof offer !== "object" || Array.isArray(offer)) {
+  if (!isPlainObject(offer)) {
     throw new FiberOfferError("offer must be an object", "INVALID_OFFER");
   }
 
@@ -244,23 +310,32 @@ export function assertValidOffer(offer, options = {}) {
     throw new FiberOfferError("offer version must be 1", "INVALID_VERSION");
   }
 
-  normalizeNodeId(offer.node_id);
-  requiredString(offer.public_key, "public_key");
-  normalizeUrl(offer.resolver_url, "resolver_url");
-  normalizeAssets(offer.assets);
-  optionalString(offer.description, "description");
-  optionalPositiveIntegerString(offer.amount_min, "amount_min");
-  optionalPositiveIntegerString(offer.amount_max, "amount_max");
-  optionalPositiveInteger(offer.expiry, "expiry");
-  normalizeRecurrence(offer.recurrence);
-  normalizeMetadata(offer.metadata);
-  validateAmountBounds(offer);
-
   if (typeof offer.single_use !== "boolean") {
     throw new FiberOfferError("single_use must be a boolean", "INVALID_SINGLE_USE");
   }
 
-  if (offer.offer_id !== undefined && !/^0x[0-9a-f]{64}$/.test(offer.offer_id)) {
+  const content = normalizeOfferContent(offer);
+  for (const field of Object.keys(offer)) {
+    if (field === "offer_id" || field === "signature" || offer[field] === undefined) continue;
+    if (FORBIDDEN_KEYS.has(field)) {
+      throw new FiberOfferError(`"${field}" is not allowed as a field name`, "FORBIDDEN_KEY", { field });
+    }
+    if (!KNOWN_OFFER_FIELDS.has(field) && !isExtensionField(field)) {
+      throw new FiberOfferError(
+        `"${field}" is not an offer field; put additions in "extensions" or a field named "x_..."`,
+        "UNKNOWN_OFFER_FIELD",
+        { field }
+      );
+    }
+    if (content[field] === undefined || canonicalStringify(content[field]) !== canonicalStringify(offer[field])) {
+      throw new FiberOfferError(`${field} is not in canonical form`, "NON_CANONICAL_OFFER", {
+        field,
+        ...(content[field] === undefined ? {} : { canonical: content[field] })
+      });
+    }
+  }
+
+  if (offer.offer_id !== undefined && !(typeof offer.offer_id === "string" && /^0x[0-9a-f]{64}$/.test(offer.offer_id))) {
     throw new FiberOfferError("offer_id must be a 0x-prefixed sha256 hex string", "INVALID_OFFER_ID");
   }
 
@@ -269,12 +344,106 @@ export function assertValidOffer(offer, options = {}) {
       throw new FiberOfferError("offer_id is required on signed offers", "INVALID_OFFER_ID");
     }
 
-    if (!offer.signature || offer.signature.scheme !== "ed25519" || typeof offer.signature.value !== "string") {
-      throw new FiberOfferError("offer signature is required", "INVALID_SIGNATURE");
+    if (!isCanonicalSignature(offer.signature)) {
+      throw new FiberOfferError(
+        "offer signature must be { scheme: \"ed25519\", value } with a base64url Ed25519 signature",
+        "INVALID_SIGNATURE"
+      );
     }
+  } else if (offer.signature !== undefined && !isCanonicalSignature(offer.signature)) {
+    throw new FiberOfferError("offer signature is malformed", "INVALID_SIGNATURE");
   }
 
+  assertOfferSize(offer);
   return true;
+}
+
+// The signed content of an offer in canonical form, from input that may be
+// written loosely. Every field is checked; anything the format does not define
+// is left out, apart from extension fields.
+function normalizeOfferContent(input) {
+  const network = input.network;
+  if (typeof network !== "string" || !SUPPORTED_NETWORKS.has(network)) {
+    throw new FiberOfferError("network must be mainnet, testnet, or dev", "INVALID_NETWORK");
+  }
+  if (typeof input.single_use !== "boolean") {
+    throw new FiberOfferError("single_use must be a boolean", "INVALID_SINGLE_USE");
+  }
+
+  const content = dropUndefined({
+    ...extensionFields(input),
+    scheme: OFFER_SCHEME,
+    version: 1,
+    network,
+    node_id: normalizeNodeId(input.node_id),
+    public_key: normalizePublicKey(input.public_key),
+    resolver_url: normalizeResolverUrl(input.resolver_url, network),
+    description: normalizeDescription(input.description),
+    assets: normalizeAssets(input.assets),
+    amount_min: optionalAmount(input.amount_min, "amount_min"),
+    amount_max: optionalAmount(input.amount_max, "amount_max"),
+    recurrence: normalizeRecurrence(input.recurrence),
+    expiry: optionalPositiveInteger(input.expiry, "expiry"),
+    single_use: input.single_use,
+    metadata: normalizeMetadata(input.metadata)
+  });
+
+  validateAmountBounds(content);
+  if (content.recurrence) {
+    if (content.single_use) {
+      throw new FiberOfferError(
+        "an offer cannot be both single_use and recurring",
+        "SINGLE_USE_RECURRENCE_CONFLICT"
+      );
+    }
+    const amount = BigInt(content.recurrence.amount);
+    if (
+      (content.amount_min !== undefined && amount < BigInt(content.amount_min)) ||
+      (content.amount_max !== undefined && amount > BigInt(content.amount_max))
+    ) {
+      throw new FiberOfferError(
+        "recurrence.amount must lie within amount_min and amount_max, or no cycle could ever be paid",
+        "RECURRENCE_AMOUNT_OUT_OF_BOUNDS"
+      );
+    }
+  }
+  return content;
+}
+
+function assertOfferSize(offer) {
+  const bytes = Buffer.byteLength(canonicalStringify(offer));
+  if (bytes > OFFER_LIMITS.offer_bytes) {
+    throw new FiberOfferError(`offer is larger than ${OFFER_LIMITS.offer_bytes} bytes`, "OFFER_TOO_LARGE", {
+      bytes,
+      limit: OFFER_LIMITS.offer_bytes
+    });
+  }
+}
+
+// Exactly { scheme: "ed25519", value } where value is the one base64url
+// spelling of a 64-byte signature. Extra members or an alternative spelling
+// would let an offer be altered without invalidating it.
+function isCanonicalSignature(signature) {
+  if (!isPlainObject(signature)) return false;
+  const keys = Object.keys(signature);
+  if (keys.length !== 2 || signature.scheme !== "ed25519") return false;
+  return isCanonicalBase64Url(signature.value, 64);
+}
+
+function isCanonicalBase64Url(value, byteLength) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
+  const bytes = base64UrlDecode(value);
+  return bytes.length === byteLength && base64UrlEncode(bytes) === value;
+}
+
+function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function dropUndefined(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, member]) => member !== undefined));
 }
 
 export function validateResolutionRequest(offer, request) {
@@ -370,10 +539,7 @@ export function subscriptionId(publicKeyPem) {
 // invoice request.
 export function signRecurrenceRequest(offer, request, subscriberPrivateKeyPem) {
   assertValidOffer(offer, { requireSignature: true });
-  const privateKey = createPrivateKey(subscriberPrivateKeyPem);
-  if (privateKey.asymmetricKeyType !== "ed25519") {
-    throw new FiberOfferError("subscriber key must be an Ed25519 key", "INVALID_KEY_TYPE");
-  }
+  const privateKey = ed25519PrivateKey(subscriberPrivateKeyPem, "subscriber key");
   const publicKeyPem = createPublicKey(privateKey).export({ type: "spki", format: "pem" });
   const validated = validateResolutionRequest(offer, request);
   const fields = {
@@ -431,7 +597,7 @@ export function verifyRecurrenceRequest(offer, request) {
       approval_id: request.approval_id
     });
     const valid =
-      typeof request.subscriber_signature === "string" &&
+      isCanonicalBase64Url(request.subscriber_signature, 64) &&
       cryptoVerify(null, payload, publicKey, base64UrlDecode(request.subscriber_signature));
     return valid
       ? { ok: true }
@@ -466,10 +632,31 @@ function ed25519PublicKey(publicKeyPem, field) {
     if (error instanceof FiberOfferError) throw error;
     throw new FiberOfferError(`${field} is not a valid public key`, "INVALID_PUBLIC_KEY");
   }
+  // The signature scheme is fixed. Node would otherwise verify with whatever
+  // kind of key it was handed (RSA, P-256, Ed448).
   if (key.asymmetricKeyType !== "ed25519") {
     throw new FiberOfferError(`${field} must be an Ed25519 key`, "INVALID_KEY_TYPE");
   }
   return key;
+}
+
+function ed25519PrivateKey(privateKeyPem, field) {
+  let key;
+  try {
+    key = createPrivateKey(privateKeyPem);
+  } catch {
+    throw new FiberOfferError(`${field} is not a valid private key`, "INVALID_PRIVATE_KEY");
+  }
+  if (key.asymmetricKeyType !== "ed25519") {
+    throw new FiberOfferError(`${field} must be an Ed25519 key`, "INVALID_KEY_TYPE");
+  }
+  return key;
+}
+
+// The one spelling of a public key in an offer: the PEM of its
+// SubjectPublicKeyInfo, with no surrounding whitespace.
+function normalizePublicKey(value) {
+  return ed25519PublicKey(value, "public_key").export({ type: "spki", format: "pem" }).trim();
 }
 
 export function offerToPaymentLink(offer, baseUrl = offer.resolver_url) {
@@ -483,11 +670,21 @@ function stripFields(value, fields) {
   return copy;
 }
 
+function isExtensionField(key) {
+  return key === "extensions" || key.startsWith("x_");
+}
+
+// Fields a reader may ignore: `extensions` and anything named `x_...`. They
+// are signed like everything else.
 function extensionFields(input) {
-  if (!input || typeof input !== "object") return {};
-  return Object.fromEntries(
-    Object.entries(input).filter(([key, value]) => (key === "extensions" || key.startsWith("x_")) && value !== undefined)
+  const fields = Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => isExtensionField(key) && value !== undefined && value !== null)
   );
+  if (fields.extensions !== undefined && !isPlainObject(fields.extensions)) {
+    throw new FiberOfferError("extensions must be an object", "INVALID_EXTENSIONS");
+  }
+  assertSignableJson(fields, "extensions", OFFER_LIMITS.extensions_bytes);
+  return fields;
 }
 
 function normalizeNodeId(value) {
@@ -506,116 +703,79 @@ function normalizeUnixTimestamp(value, field) {
   return normalized;
 }
 
-function decodeOfferBytes(encoded) {
+// The resolver's address: scheme, host, an optional port and path, and nothing
+// else. Credentials, a query or a fragment have no meaning here and would give
+// one resolver many spellings. A trailing slash is dropped.
+//
+// Plain http is accepted only where it cannot expose a payer: on the `dev`
+// network, or for a resolver on the same machine.
+function normalizeResolverUrl(value, network) {
+  const text = requiredString(value, "resolver_url");
+  const refuse = (cause) =>
+    new FiberOfferError("resolver_url must be a valid HTTP(S) URL", "INVALID_URL", { field: "resolver_url", cause });
+
+  let parsed;
   try {
-    const decoded = bech32mDecode(encoded);
-    if (decoded.hrp !== OFFER_HRP) throw new Error("unexpected offer human-readable prefix");
-    return decoded.bytes;
-  } catch (bech32Error) {
-    try {
-      return base64UrlDecode(encoded.slice(OFFER_PREFIX.length));
-    } catch (legacyError) {
-      throw new FiberOfferError("encoded offer is neither valid bech32m nor legacy base64url", "INVALID_OFFER_ENCODING", {
-        bech32: bech32Error.message,
-        legacy: legacyError.message
-      });
-    }
-  }
-}
-
-function bech32mEncode(hrp, bytes) {
-  const words = convertBits([...bytes], 8, 5, true);
-  const checksum = createBech32Checksum(hrp, words);
-  return `${hrp}1${[...words, ...checksum].map((word) => bech32Charset[word]).join("")}`;
-}
-
-function bech32mDecode(value) {
-  if (typeof value !== "string" || value.length < 8 || value !== value.toLowerCase()) {
-    throw new Error("bech32m offer must be a lowercase string");
-  }
-  const separator = value.lastIndexOf("1");
-  if (separator < 1 || separator + 7 > value.length) throw new Error("invalid bech32m separator or checksum length");
-  const hrp = value.slice(0, separator);
-  const words = [...value.slice(separator + 1)].map((character) => {
-    const index = bech32Charset.indexOf(character);
-    if (index === -1) throw new Error("invalid bech32m character");
-    return index;
-  });
-  if (bech32Polymod([...bech32HrpExpand(hrp), ...words]) !== bech32mConstant) {
-    throw new Error("invalid bech32m checksum");
-  }
-  return { hrp, bytes: Buffer.from(convertBits(words.slice(0, -6), 5, 8, false)) };
-}
-
-function createBech32Checksum(hrp, words) {
-  const values = [...bech32HrpExpand(hrp), ...words, 0, 0, 0, 0, 0, 0];
-  const polymod = bech32Polymod(values) ^ bech32mConstant;
-  return Array.from({ length: 6 }, (_, index) => (polymod >>> (5 * (5 - index))) & 31);
-}
-
-function bech32HrpExpand(hrp) {
-  return [...hrp].map((character) => character.charCodeAt(0) >>> 5).concat(0, [...hrp].map((character) => character.charCodeAt(0) & 31));
-}
-
-function bech32Polymod(values) {
-  const generators = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
-  let checksum = 1;
-  for (const value of values) {
-    const top = checksum >>> 25;
-    checksum = ((checksum & 0x1ffffff) << 5) ^ value;
-    for (let index = 0; index < generators.length; index += 1) {
-      if ((top >>> index) & 1) checksum ^= generators[index];
-    }
-  }
-  return checksum >>> 0;
-}
-
-function convertBits(values, fromBits, toBits, pad) {
-  let accumulator = 0;
-  let bitCount = 0;
-  const result = [];
-  const maxValue = (1 << toBits) - 1;
-  for (const value of values) {
-    if (value < 0 || value >>> fromBits !== 0) throw new Error("invalid value while converting bech32m bits");
-    accumulator = (accumulator << fromBits) | value;
-    bitCount += fromBits;
-    while (bitCount >= toBits) {
-      bitCount -= toBits;
-      result.push((accumulator >>> bitCount) & maxValue);
-    }
-  }
-  if (pad && bitCount > 0) result.push((accumulator << (toBits - bitCount)) & maxValue);
-  if (!pad && (bitCount >= fromBits || ((accumulator << (toBits - bitCount)) & maxValue) !== 0)) {
-    throw new Error("invalid bech32m padding");
-  }
-  return result;
-}
-
-function normalizeUrl(value, field) {
-  const text = requiredString(value, field);
-  try {
-    const parsed = new URL(text);
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-      throw new Error("protocol must be http or https");
-    }
-    return parsed.toString().replace(/\/$/, "");
+    parsed = new URL(text);
   } catch (error) {
-    throw new FiberOfferError(`${field} must be a valid HTTP(S) URL`, "INVALID_URL", {
-      field,
-      cause: error.message
-    });
+    throw refuse(error.message);
   }
+  if (!["http:", "https:"].includes(parsed.protocol)) throw refuse("protocol must be http or https");
+  if (parsed.username || parsed.password) throw refuse("credentials are not allowed");
+  if (parsed.search || parsed.hash || text.includes("?") || text.includes("#")) {
+    throw refuse("a query or fragment is not allowed");
+  }
+  if (parsed.protocol === "http:" && network !== "dev" && !isLoopbackHost(parsed.hostname)) {
+    throw new FiberOfferError(
+      `resolver_url must use https on ${network}; http is accepted only on the dev network or for a local address`,
+      "INSECURE_RESOLVER_URL",
+      { field: "resolver_url" }
+    );
+  }
+  const normalized = `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  if (normalized.length > OFFER_LIMITS.resolver_url_length) throw refuse("the URL is too long");
+  return normalized;
+}
+
+function isLoopbackHost(hostname) {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
+function normalizeDescription(value) {
+  const description = optionalString(value, "description");
+  if (description !== undefined && Buffer.byteLength(description) > OFFER_LIMITS.description_bytes) {
+    throw new FiberOfferError(
+      `description is longer than ${OFFER_LIMITS.description_bytes} bytes`,
+      "DESCRIPTION_TOO_LONG",
+      { limit: OFFER_LIMITS.description_bytes }
+    );
+  }
+  return description;
 }
 
 function normalizeAssets(assets) {
   if (!Array.isArray(assets) || assets.length === 0) {
     throw new FiberOfferError("assets must contain at least one asset", "INVALID_ASSETS");
   }
-  return assets.map((asset) => normalizeAsset(asset));
+  if (assets.length > OFFER_LIMITS.assets) {
+    throw new FiberOfferError(`an offer can list at most ${OFFER_LIMITS.assets} assets`, "TOO_MANY_ASSETS");
+  }
+  const normalized = assets.map((asset) => normalizeAsset(asset));
+  // A token is identified by its type script, not by the label beside it.
+  const seen = new Set();
+  for (const asset of normalized) {
+    const identity = `${asset.asset_type}:${asset.type_script_hash ?? ""}`;
+    if (seen.has(identity)) {
+      throw new FiberOfferError("assets must not list the same asset twice", "DUPLICATE_ASSET", { asset });
+    }
+    seen.add(identity);
+  }
+  return normalized;
 }
 
 function normalizeAsset(asset) {
-  if (!asset || typeof asset !== "object") {
+  if (!asset || typeof asset !== "object" || Array.isArray(asset)) {
     throw new FiberOfferError("asset must be an object", "INVALID_ASSET");
   }
 
@@ -624,18 +784,30 @@ function normalizeAsset(asset) {
     throw new FiberOfferError("asset_type must be ckb, udt, or rgbpp", "INVALID_ASSET_TYPE");
   }
 
-  const normalized = {
-    asset_type,
-    symbol: requiredString(asset.symbol, "asset.symbol").toUpperCase()
-  };
-
-  if (asset_type !== "ckb") {
-    normalized.type_script_hash = requiredHex(asset.type_script_hash, "asset.type_script_hash", 64);
-  } else if (asset.type_script_hash !== undefined) {
-    normalized.type_script_hash = requiredHex(asset.type_script_hash, "asset.type_script_hash", 64);
+  const symbol = requiredString(asset.symbol, "asset.symbol").toUpperCase();
+  if (symbol.length > OFFER_LIMITS.symbol_length || !/^[A-Z0-9][A-Z0-9._-]*$/.test(symbol)) {
+    throw new FiberOfferError(
+      `asset.symbol must be 1-${OFFER_LIMITS.symbol_length} letters, digits, ".", "_" or "-"`,
+      "INVALID_ASSET_SYMBOL"
+    );
   }
 
-  return normalized;
+  if (asset_type === "ckb") {
+    // CKB is the chain's own coin: it has one name and no type script.
+    if (symbol !== "CKB") {
+      throw new FiberOfferError("a ckb asset must have the symbol CKB", "INVALID_ASSET_SYMBOL");
+    }
+    if (asset.type_script_hash !== undefined && asset.type_script_hash !== null) {
+      throw new FiberOfferError("a ckb asset has no type_script_hash", "INVALID_ASSET");
+    }
+    return { asset_type, symbol };
+  }
+
+  return {
+    asset_type,
+    symbol,
+    type_script_hash: requiredHex(asset.type_script_hash, "asset.type_script_hash", 64)
+  };
 }
 
 function sameAsset(left, right) {
@@ -659,19 +831,29 @@ function normalizeRecurrence(recurrence) {
     throw new FiberOfferError("recurrence interval is unsupported", "INVALID_RECURRENCE_INTERVAL");
   }
 
-  const normalized = {
+  const normalized = dropUndefined({
     interval,
     amount: requiredPositiveIntegerString(recurrence.amount, "recurrence.amount"),
     cap_cycles: optionalPositiveInteger(recurrence.cap_cycles, "recurrence.cap_cycles"),
-    spending_cap_total: optionalPositiveIntegerString(
-      recurrence.spending_cap_total,
-      "recurrence.spending_cap_total"
-    ),
+    spending_cap_total: optionalAmount(recurrence.spending_cap_total, "recurrence.spending_cap_total"),
     custom_seconds: optionalPositiveInteger(recurrence.custom_seconds, "recurrence.custom_seconds")
-  };
+  });
 
   if (interval === "custom_seconds" && normalized.custom_seconds === undefined) {
     throw new FiberOfferError("custom recurrence requires custom_seconds", "INVALID_RECURRENCE");
+  }
+  // On any other interval the field would be signed but mean nothing.
+  if (interval !== "custom_seconds" && normalized.custom_seconds !== undefined) {
+    throw new FiberOfferError("custom_seconds applies only to the custom_seconds interval", "INVALID_RECURRENCE");
+  }
+  if (
+    normalized.spending_cap_total !== undefined &&
+    BigInt(normalized.spending_cap_total) < BigInt(normalized.amount)
+  ) {
+    throw new FiberOfferError(
+      "recurrence.spending_cap_total must cover at least one cycle",
+      "INVALID_RECURRENCE"
+    );
   }
 
   if (normalized.cap_cycles === undefined && normalized.spending_cap_total === undefined) {
@@ -683,10 +865,51 @@ function normalizeRecurrence(recurrence) {
 
 function normalizeMetadata(metadata) {
   if (metadata === undefined || metadata === null) return undefined;
-  if (typeof metadata !== "object" || Array.isArray(metadata)) {
+  if (!isPlainObject(metadata)) {
     throw new FiberOfferError("metadata must be an object", "INVALID_METADATA");
   }
+  assertSignableJson(metadata, "metadata", OFFER_LIMITS.metadata_bytes);
   return metadata;
+}
+
+// Free-form signed content (metadata, extension fields) must mean the same to
+// every implementation: plain JSON, no key that could alter an object, whole
+// numbers only (a fraction has more than one spelling across languages), and a
+// bounded depth and size.
+function assertSignableJson(value, field, maxBytes) {
+  const walk = (node, depth) => {
+    if (depth > OFFER_LIMITS.json_depth) {
+      throw new FiberOfferError(`${field} is nested too deeply`, "INVALID_SIGNED_JSON", { field });
+    }
+    if (typeof node === "number" && !Number.isSafeInteger(node)) {
+      throw new FiberOfferError(
+        `numbers in ${field} must be whole numbers; write amounts and decimals as strings`,
+        "INVALID_SIGNED_JSON",
+        { field }
+      );
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+    } else if (node && typeof node === "object") {
+      for (const key of Object.keys(node)) {
+        if (FORBIDDEN_KEYS.has(key)) {
+          throw new FiberOfferError(`"${key}" is not allowed as a key in ${field}`, "FORBIDDEN_KEY", { field, key });
+        }
+        walk(node[key], depth + 1);
+      }
+    }
+  };
+  walk(value, 0);
+
+  // Also refuses anything that is not JSON at all (functions, class instances).
+  const bytes = Buffer.byteLength(canonicalStringify(value));
+  if (bytes > maxBytes) {
+    throw new FiberOfferError(`${field} is larger than ${maxBytes} bytes`, "OFFER_FIELD_TOO_LARGE", {
+      field,
+      bytes,
+      limit: maxBytes
+    });
+  }
 }
 
 function validateAmountBounds(offer) {
@@ -717,6 +940,16 @@ function optionalString(value, field) {
 function requiredPositiveIntegerString(value, field) {
   const normalized = optionalPositiveIntegerString(value, field);
   if (normalized === undefined || BigInt(normalized) <= 0n) {
+    throw new FiberOfferError(`${field} must be a positive integer string`, "INVALID_AMOUNT", { field });
+  }
+  return normalized;
+}
+
+// An amount is absent or at least 1. Zero would be a second way of writing
+// "no minimum".
+function optionalAmount(value, field) {
+  const normalized = optionalPositiveIntegerString(value, field);
+  if (normalized !== undefined && BigInt(normalized) <= 0n) {
     throw new FiberOfferError(`${field} must be a positive integer string`, "INVALID_AMOUNT", { field });
   }
   return normalized;

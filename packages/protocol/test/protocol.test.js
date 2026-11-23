@@ -50,8 +50,10 @@ test("creates, verifies, encodes, and decodes a signed offer", () => {
   assert.match(encoded, /^fbroffer1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/);
   assert.equal(decodeOffer(encoded).offer_id, offer.offer_id);
 
+  // The pre-release base64url form is no longer read: a string that fails
+  // Bech32m is an error, not a second format to try.
   const legacy = `fbroffer1${base64UrlEncode(canonicalStringify(offer))}`;
-  assert.equal(decodeOffer(legacy).offer_id, offer.offer_id);
+  assert.throws(() => decodeOffer(legacy), { code: "INVALID_OFFER_ENCODING" });
 });
 
 test("preserves signed extension fields and validates node identifiers", () => {
