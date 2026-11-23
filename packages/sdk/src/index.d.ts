@@ -5,6 +5,7 @@ export {
   decodeOffer,
   encodeOffer,
   generateOfferKeyPair,
+  isEncodedOffer,
   normalizeCkbScript,
   offerToPaymentLink,
   parseCkbScript,

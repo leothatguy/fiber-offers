@@ -280,7 +280,7 @@ GET  /pay/:offer_id
 Working:
 
 - Ed25519 signed static offer format.
-- Bech32m offer encoding with legacy prototype decode compatibility.
+- Bech32m offer encoding, lowercase or uppercase, with one encoding per offer.
 - Live resolver-to-Fiber-node identity binding through `node_info`.
 - Signed offer revocation.
 - Canonical offer IDs.

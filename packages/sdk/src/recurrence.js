@@ -1,6 +1,7 @@
 import {
   decodeOffer,
   generateOfferKeyPair,
+  isEncodedOffer,
   signRecurrenceRequest,
   subscriptionId,
   verifyOffer
@@ -331,7 +332,7 @@ export class FiberRecurringPaymentScheduler {
 
   async #resolveOffer(offerOrEncoded) {
     if (typeof offerOrEncoded === "object") return assertOffer(offerOrEncoded.offer ?? offerOrEncoded);
-    if (typeof offerOrEncoded === "string" && offerOrEncoded.startsWith("fbroffer1")) {
+    if (isEncodedOffer(offerOrEncoded)) {
       return assertOffer(decodeOffer(offerOrEncoded));
     }
     if (!this.resolver) throw new Error("resolverClient is required when approving by offer_id");

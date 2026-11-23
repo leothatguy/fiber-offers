@@ -275,15 +275,51 @@ if (!result.ok) throw new Error(result.message);
 Send the proof to `DELETE /offers/:offer_id`. The resolver checks that it is
 recent, matches the offer and Fiber node ID, and is signed by the lifecycle key.
 
-## Canonicalization and extensions
+## Canonical form and extensions
 
-Object keys are sorted recursively before hashing or signing. Undefined object
-properties are omitted. Array order is preserved. Unknown `extensions` and
-`x_*` fields are retained and covered by the ID and signature, so changing them
-invalidates the offer.
+The bytes that are hashed and signed are the offer's canonical JSON (RFC 8785):
+members ordered by key, no whitespace, absent fields left out. Use
+`canonicalStringify`; do not sort an object and call `JSON.stringify`, which in
+JavaScript misorders number-like keys and loses a member named `__proto__`.
 
-Do not rebuild canonical signing logic in application code. Use the package on
-both creation and verification paths.
+`createSignedOffer` accepts loosely written input and brings it to canonical
+form before taking the ID: a lowercase `node_id`, the canonical PEM of the
+public key, an uppercase asset symbol, amounts as decimal strings, the resolver
+URL without a trailing slash. `verifyOffer` and `decodeOffer` do not: an offer
+from someone else must already be canonical, or it is refused with
+`NON_CANONICAL_OFFER`. One set of terms therefore has one offer ID.
+
+| Rule | Error code |
+| --- | --- |
+| Keys are Ed25519, for offers, revocations and subscriptions | `INVALID_KEY_TYPE`, `INVALID_PUBLIC_KEY`, `INVALID_PRIVATE_KEY` |
+| `resolver_url` is `https` (plain `http` only on `dev` or for a local address), with no credentials, query or fragment | `INSECURE_RESOLVER_URL`, `INVALID_URL` |
+| `recurrence.amount` lies within `amount_min` and `amount_max` | `RECURRENCE_AMOUNT_OUT_OF_BOUNDS` |
+| An offer is not both `single_use` and recurring | `SINGLE_USE_RECURRENCE_CONFLICT` |
+| `expiry` is in the future when the offer is created | `OFFER_EXPIRY_IN_PAST` |
+| No asset is listed twice; a `ckb` asset is `{ asset_type: "ckb", symbol: "CKB" }` | `DUPLICATE_ASSET`, `INVALID_ASSET_SYMBOL`, `INVALID_ASSET` |
+| The signature is exactly `{ scheme, value }` in canonical base64url | `INVALID_SIGNATURE` |
+| No unknown top-level fields | `UNKNOWN_OFFER_FIELD` |
+| No `__proto__`, `constructor` or `prototype` keys anywhere | `FORBIDDEN_KEY` |
+| `metadata` and extension fields are plain JSON with whole numbers only | `INVALID_SIGNED_JSON`, `INVALID_METADATA` |
+| Sizes stay within `OFFER_LIMITS` | `DESCRIPTION_TOO_LONG`, `TOO_MANY_ASSETS`, `OFFER_FIELD_TOO_LARGE`, `OFFER_TOO_LARGE` |
+
+`OFFER_LIMITS` is exported: 4,096 bytes for the whole offer, 512 for the
+description, 2,048 each for `metadata` and for extension fields together, 16
+assets.
+
+Additions that a reader may ignore go in `extensions` or in fields named
+`x_...`. They are covered by the ID and signature, so changing them invalidates
+the offer. Any other unknown field is refused, because a signed field a wallet
+does not understand could change what it is agreeing to.
+
+### Encoded form
+
+`encodeOffer` writes lowercase Bech32m. `decodeOffer` accepts lowercase or
+uppercase (the form a QR code carries, which is about five QR versions
+smaller), refuses mixed case, and refuses a body that is not the canonical JSON
+itself. A damaged string fails with `INVALID_OFFER_CHECKSUM`; anything else
+malformed fails with `INVALID_OFFER_ENCODING` and `details.reason`.
+`isEncodedOffer(text)` tells an encoded offer from an offer ID in either case.
 
 ## Error handling
 
@@ -303,8 +339,13 @@ try {
 ```
 
 Common codes include `INVALID_SIGNATURE`, `OFFER_ID_MISMATCH`,
+`NON_CANONICAL_OFFER`, `INVALID_OFFER_CHECKSUM`, `INVALID_OFFER_ENCODING`,
 `AMOUNT_MUST_MATCH_FIXED_AMOUNT`, `AMOUNT_TOO_LOW`, `AMOUNT_TOO_HIGH`,
 `UNSUPPORTED_ASSET`, and `OFFER_EXPIRED`.
+
+`verifyOffer` returns `{ ok: false, code }` for an offer whose ID or signature
+does not check out, and throws `FiberOfferError` for an offer that is not well
+formed or not canonical. Treat both as "do not pay".
 
 ## Security boundaries
 

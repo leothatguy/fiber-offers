@@ -5,6 +5,7 @@ import {
   decodeOffer,
   encodeOffer,
   generateOfferKeyPair,
+  isEncodedOffer,
   normalizeCkbScript,
   offerToPaymentLink,
   parseCkbScript,
@@ -55,6 +56,7 @@ export {
   createOfferRevocation,
   decodeOffer,
   encodeOffer,
+  isEncodedOffer,
   FIBER_CURRENCIES,
   fiberCurrencyForNetwork,
   fiberNodeNetwork,
@@ -183,9 +185,7 @@ export class FiberOffersClient {
   }
 
   async resolveOffer(offerOrEncoded) {
-    const decoded = typeof offerOrEncoded === "string" && offerOrEncoded.startsWith("fbroffer1")
-      ? decodeOffer(offerOrEncoded)
-      : offerOrEncoded;
+    const decoded = isEncodedOffer(offerOrEncoded) ? decodeOffer(offerOrEncoded) : offerOrEncoded;
     const offerId = typeof decoded === "string" ? decoded : decoded?.offer_id;
     if (!offerId) throw new Error("offer_id or encoded Fiber Offer is required");
     if (decoded && typeof decoded === "object") {

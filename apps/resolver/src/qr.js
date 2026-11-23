@@ -4,8 +4,11 @@ const validPayloads = new Set(["link", "offer"]);
 
 export async function renderOfferQrSvg(entry, origin, payloadType = "link") {
   const normalizedPayloadType = validPayloads.has(payloadType) ? payloadType : "link";
+  // An encoded offer is written in uppercase here: a QR code stores uppercase
+  // letters and digits in its compact alphanumeric mode, which makes the code
+  // noticeably smaller. Decoders accept either case.
   const payload =
-    normalizedPayloadType === "offer" ? entry.encoded_offer : `${origin}/pay/${entry.offer.offer_id}`;
+    normalizedPayloadType === "offer" ? entry.encoded_offer.toUpperCase() : `${origin}/pay/${entry.offer.offer_id}`;
 
   const svg = await QRCode.toString(payload, {
     type: "svg",

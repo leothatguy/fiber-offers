@@ -1,7 +1,7 @@
 import { fiberNodeError, normalizeFiberPaymentFailure } from "./failures.js";
 import { fiberPaymentStatus, waitForFiberPayment } from "./fiber-payment.js";
 import { verifyInvoiceForOffer } from "./invoice-verification.js";
-import { decodeOffer, validateResolutionRequest, verifyOffer } from "@fiber-offers/protocol";
+import { decodeOffer, isEncodedOffer, validateResolutionRequest, verifyOffer } from "@fiber-offers/protocol";
 
 // Runs a payment from a signed offer to a sent Fiber payment, treating the
 // resolver as untrusted: the offer's signature is checked, the resolver must be
@@ -250,7 +250,7 @@ export class FiberPaymentFlowClient {
   // way it arrives its signature is checked here. An offer's ID is the hash of
   // its contents, so an ID alone still pins down exactly one offer.
   async #signedOffer(offerOrId) {
-    if (typeof offerOrId === "string" && offerOrId.startsWith("fbroffer1")) {
+    if (isEncodedOffer(offerOrId)) {
       const offer = assertVerifiedOffer(decodeOffer(offerOrId));
       return { offerId: offer.offer_id, offer };
     }

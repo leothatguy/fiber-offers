@@ -12,7 +12,42 @@ An encoded offer uses:
 bech32m(hrp = "fbroffer", data = canonical-json-offer)
 ```
 
-Encoded offers therefore begin with `fbroffer1` and include a bech32m checksum. Decoders retain compatibility with the earlier `fbroffer1<base64url-json>` prototype format.
+Encoded offers therefore begin with `fbroffer1` and include a bech32m checksum.
+
+- An encoder writes lowercase. A decoder accepts all-lowercase or all-uppercase and refuses mixed case, as in BIP-173. The uppercase form is what an offer QR code carries, because uppercase letters and digits use the QR alphanumeric mode (a typical offer drops from QR version 27 to 22).
+- The data is the offer's canonical JSON, byte for byte. A decoder refuses a body that is valid JSON but not canonical (whitespace, reordered or repeated members), so an offer has exactly one encoding and `encode(decode(x))` returns `x`.
+- A string whose checksum does not match fails with `INVALID_OFFER_CHECKSUM`. Any other malformed string fails with `INVALID_OFFER_ENCODING` and a `reason` (`prefix`, `mixed_case`, `character`, `length`, `padding`, `json`, `not_canonical`). There is no fallback to another format: the base64url form used before the first release is not read.
+- An encoded offer is at most 6,569 characters (4,096 bytes of canonical JSON).
+
+### Canonical JSON
+
+The bytes that are hashed and signed are the value's canonical JSON, following RFC 8785 (JCS):
+
+- object members ordered by key, comparing UTF-16 code units (`"10"` sorts before `"2"`, and both before `"a"`);
+- no whitespace;
+- strings and numbers written as ECMAScript's `JSON.stringify` writes them;
+- absent optional fields are left out, never written as `null`.
+
+Implementations must build this text directly from sorted members. Building a sorted object and serializing that is wrong in JavaScript, where an object lists number-like keys first in numeric order and a member named `__proto__` is silently lost.
+
+### Canonical form of an offer
+
+An offer has one spelling. A verifier refuses a validly signed offer whose fields are not already in this form (`NON_CANONICAL_OFFER`), so the same terms cannot appear under two offer IDs:
+
+| Field | Canonical form |
+| --- | --- |
+| `node_id` | 66 lowercase hex characters |
+| `public_key` | The PEM of an Ed25519 SubjectPublicKeyInfo, base64 on one line, `\n` line ends, no trailing newline. Any other key type is refused (`INVALID_KEY_TYPE`) |
+| `resolver_url` | `https` origin and optional path, no trailing slash, no credentials, query or fragment. `http` only on the `dev` network or for a loopback address (`INSECURE_RESOLVER_URL` otherwise) |
+| `amount_min`, `amount_max`, recurrence amounts | Decimal strings, at least `1`, no leading zeros |
+| `expiry`, `cap_cycles`, `custom_seconds` | JSON integers |
+| `assets[].asset_type` / `symbol` | Lowercase type; symbol of 1–16 characters from `A-Z 0-9 . _ -`. A `ckb` asset is exactly `{ "asset_type": "ckb", "symbol": "CKB" }`. No asset is listed twice (a token is identified by its `type_script_hash`) |
+| `description` | Trimmed, at most 512 bytes |
+| `signature` | Exactly `{ "scheme": "ed25519", "value": <86 base64url characters> }`, no padding, no other members |
+
+Cross-field rules: `amount_min` ≤ `amount_max`; `recurrence.amount` lies within them; an offer is not both `single_use` and recurring; `spending_cap_total` covers at least one cycle; `custom_seconds` appears only with the `custom_seconds` interval. An offer cannot be created with an `expiry` already in the past.
+
+Unknown top-level fields are refused (`UNKNOWN_OFFER_FIELD`): a signed field a wallet does not understand could change what it is agreeing to. Additions a reader may safely ignore go in `extensions` or in fields named `x_…`, which are signed like everything else. `metadata` and extension fields are plain JSON with whole numbers only (write decimals as strings), at most 8 levels deep, without the keys `__proto__`, `constructor` or `prototype`, and at most 2,048 bytes each.
 
 ## Signed Offer Fields
 
@@ -23,7 +58,7 @@ Encoded offers therefore begin with `fbroffer1` and include a bech32m checksum. 
   "network": "testnet",
   "node_id": "02...",
   "public_key": "-----BEGIN PUBLIC KEY-----...",
-  "resolver_url": "http://localhost:8787",
+  "resolver_url": "https://offers.merchant.example",
   "description": "Coffee checkout",
   "assets": [{ "asset_type": "ckb", "symbol": "CKB" }],
   "amount_min": "1000",
@@ -46,7 +81,7 @@ Rules:
 - Supported asset types are `ckb`, `udt`, and `rgbpp`.
 - `udt` and `rgbpp` assets require `type_script_hash`.
 - Recurring offers must include `cap_cycles` or `spending_cap_total`.
-- Unknown `extensions` and `x_*` fields are included in the canonical ID and signature.
+- `extensions` and `x_*` fields are included in the canonical ID and signature. Any other unknown field makes the offer invalid.
 
 ## Identity And Ownership
 

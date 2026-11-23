@@ -1102,7 +1102,7 @@ test("background worker propagates paid invoices within the five-second target",
     },
     {
       invoiceAdapter,
-      publicOrigin: "http://resolver.worker.test",
+      publicOrigin: "https://resolver.worker.test",
       workers: {
         enabled: true,
         runOnStart: false,
