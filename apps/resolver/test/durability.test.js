@@ -256,11 +256,11 @@ test("shutdown gives up on a request that never finishes", async () => {
 test("shutdown waits for a background pass before closing the store", async () => {
   const events = [];
   const store = new InMemoryOfferStore();
-  const listOffers = store.listOffers.bind(store);
-  store.listOffers = async () => {
+  const claimOpenResolutions = store.claimOpenResolutions.bind(store);
+  store.claimOpenResolutions = async (...args) => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     events.push("pass finished");
-    return listOffers();
+    return claimOpenResolutions(...args);
   };
   store.close = async () => {
     events.push("store closed");

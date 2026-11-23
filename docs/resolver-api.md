@@ -217,6 +217,40 @@ as a failure. Only the status code of the answer is recorded. Where a webhook
 may be sent is restricted; see
 [Webhook Targets](deployment.md#webhook-targets).
 
+### Retries
+
+`GET /offers/:offer_id/webhook-events` shows each event with one delivery per
+subscribed webhook. A delivery is in one of four states:
+
+| `status` | Meaning |
+| --- | --- |
+| `pending` | Not attempted yet |
+| `delivered` | The endpoint answered `2xx` |
+| `failed` | The last attempt failed. It will be made again at `next_attempt_at` |
+| `dead` | Given up on. It is made again only when an operator asks |
+
+After a failure the resolver waits 30 seconds, then twice as long after each
+further failure (1, 2, 4, 8, 16, 32 minutes), never more than an hour, with up
+to a quarter added at random. After the eighth failed attempt, about an hour
+after the first, the delivery is `dead`. A delivery whose webhook was deleted
+or disabled goes straight to `dead`.
+
+`POST .../webhook-events/deliver` makes an offer's `pending` deliveries now.
+With `{ "retry_failed": true }` it also makes the `failed` and `dead` ones,
+whatever their schedule: that is how a merchant replays what was missed while
+an endpoint was down. `POST .../webhook-events/:event_id/deliver` does the same
+for one event. One call makes at most 50 deliveries and answers
+`"has_more": true` when more were waiting.
+
+Deliveries are at-least-once. Two workers never make the same delivery at the
+same time, but a worker that dies after sending and before recording the answer
+leaves the delivery to be made again. Use `x-fiber-offers-event-id` to ignore
+a repeat.
+
+An event is removed 30 days after it was created, once none of its deliveries
+is `pending` or `failed`. Resolutions are payment records and are never
+removed.
+
 ## Diagnostics
 
 ```text

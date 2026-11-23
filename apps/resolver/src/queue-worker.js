@@ -112,10 +112,10 @@ function jobOptions() {
 
 function summarizeJobResult(name, result) {
   if (name === "settlement-sync") {
-    return pick(result, ["offers", "checked", "changed", "skipped", "failed", "reason", "invoice_mode"]);
+    return pick(result, ["invoice_mode", "claimed", "checked", "changed", "expired", "skipped", "failed", "pruned_reservations", "has_more"]);
   }
   if (name === "webhook-delivery") {
-    return pick(result, ["offers", "attempted", "delivered", "failed"]);
+    return pick(result, ["attempted", "delivered", "failed", "dead", "pruned_events", "has_more"]);
   }
   return { ok: true };
 }

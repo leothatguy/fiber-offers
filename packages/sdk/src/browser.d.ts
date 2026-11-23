@@ -139,6 +139,7 @@ export type {
   WebhookDelivery,
   WebhookDeliveryOptions,
   WebhookDeliveryResult,
+  WebhookDeliveryStatus,
   WebhookEventListResponse,
   WebhookEventRecord,
   WebhookEventType,

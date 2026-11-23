@@ -494,14 +494,20 @@ FIBER_RPC_URL=http://127.0.0.1:8227 \
 npm run dev
 ```
 
-Useful controls:
+Useful controls, with their defaults:
 
 ```text
 RESOLVER_WORKERS_RUN_ON_START=true
 RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=3000
+RESOLVER_SETTLEMENT_SYNC_BATCH_SIZE=200
+RESOLVER_SETTLEMENT_SYNC_CONCURRENCY=8
 RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
+RESOLVER_WEBHOOK_BATCH_SIZE=50
+RESOLVER_WEBHOOK_CONCURRENCY=5
 RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
 RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000
+RESOLVER_WEBHOOK_RETRY_MAX_DELAY_MS=3600000
+RESOLVER_WEBHOOK_EVENT_RETENTION_DAYS=30
 RESOLVER_WEBHOOK_TIMEOUT_MS=10000
 RESOLVER_RATE_LIMIT_WINDOW_MS=60000
 RESOLVER_RATE_LIMIT_MAX=120
@@ -509,8 +515,45 @@ RESOLVER_RATE_LIMIT_MAX=120
 
 Worker status is exposed in `GET /diagnostics`.
 
-The interval-based workers are the local, no-Redis fallback. Do not enable them
-on horizontally scaled API replicas; use `npm run worker` instead.
+### What a pass does
+
+Neither pass reads every offer. Each asks the store for what is due, a bounded
+batch at a time, and goes on to the next batch while batches come back full and
+it has time left, which is 80% of its interval. A pass that runs out of time
+reports `has_more: true` and the next one carries on.
+
+- **The settlement pass** (every `RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS`) takes
+  the invoices that still await an outcome, the ones it asked about longest ago
+  first, `RESOLVER_SETTLEMENT_SYNC_BATCH_SIZE` at a time, and asks the node
+  about `RESOLVER_SETTLEMENT_SYNC_CONCURRENCY` of them at once. An invoice with
+  an outcome is never read again. With more invoices open than the node can
+  answer for within one interval, each is simply asked about less often.
+- **The delivery pass** (every `RESOLVER_WEBHOOK_RETRY_INTERVAL_MS`) takes the
+  webhook deliveries that are due, `RESOLVER_WEBHOOK_BATCH_SIZE` at a time, and
+  makes `RESOLVER_WEBHOOK_CONCURRENCY` at once. A failed delivery waits
+  `RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS`, then twice as long after each further
+  failure, up to `RESOLVER_WEBHOOK_RETRY_MAX_DELAY_MS`. After
+  `RESOLVER_WEBHOOK_MAX_ATTEMPTS` attempts it is marked `dead` and left for an
+  operator ([Retries](resolver-api.md#retries)). The pass also removes events
+  older than `RESOLVER_WEBHOOK_EVENT_RETENTION_DAYS` that have nothing left to
+  deliver; `0` keeps them for ever.
+
+With PostgreSQL, work is claimed: a worker takes rows with
+`FOR UPDATE SKIP LOCKED`, an invoice it has asked about is not due again for
+most of an interval, and a delivery is held under a lease until its answer is
+recorded. Two workers, or the passes of two replicas, therefore never ask about
+the same invoice twice in an interval or send the same delivery at once. If a
+worker dies, its deliveries become due again when the lease runs out.
+
+The interval-based workers inside the resolver are the no-Redis arrangement.
+With several API replicas, prefer `npm run worker`: one place to look for the
+passes' logs and status. Running the in-process workers on each replica is safe
+with PostgreSQL, for the reason above, but each replica then spends connections
+and time on passes.
+
+A new event waits for the next delivery pass, so a webhook can arrive up to
+`RESOLVER_WEBHOOK_RETRY_INTERVAL_MS` after the payment it reports. Lower the
+interval if that matters.
 
 ## Hosted Demo Notes
 

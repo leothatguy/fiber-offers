@@ -1608,7 +1608,7 @@ function webhookDeliverySummary(webhookId) {
     .filter((delivery) => delivery.webhook_id === webhookId);
   if (deliveries.length === 0) return "No deliveries";
   const delivered = deliveries.filter((delivery) => delivery.status === "delivered").length;
-  const failed = deliveries.filter((delivery) => delivery.status === "failed").length;
+  const failed = deliveries.filter((delivery) => delivery.status === "failed" || delivery.status === "dead").length;
   const pending = deliveries.filter((delivery) => delivery.status === "pending").length;
   return `${delivered} delivered · ${pending} pending · ${failed} failed`;
 }
@@ -1661,7 +1661,7 @@ function renderWebhookOutbox(events) {
   for (const event of events.slice().reverse().slice(0, 6)) {
     const deliveries = event.deliveries ?? [];
     const delivered = deliveries.filter((delivery) => delivery.status === "delivered").length;
-    const failed = deliveries.filter((delivery) => delivery.status === "failed").length;
+    const failed = deliveries.filter((delivery) => delivery.status === "failed" || delivery.status === "dead").length;
     const pending = deliveries.filter((delivery) => delivery.status === "pending").length;
     const detail =
       deliveries.length === 0

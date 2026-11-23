@@ -1362,14 +1362,24 @@ export interface BatchResolutionSyncResult {
   [key: string]: unknown;
 }
 
+/**
+ * Where a delivery stands. `failed` will be retried at `next_attempt_at`;
+ * `dead` was given up on after the last attempt and is sent again only when an
+ * operator asks (`deliverWebhookEvents` with `retryFailed`).
+ */
+export type WebhookDeliveryStatus = "pending" | "delivered" | "failed" | "dead";
+
 /** One webhook's delivery of one event. */
 export interface WebhookDelivery {
   webhook_id: string;
   event_id?: string;
   url?: string;
-  status: string;
+  status: WebhookDeliveryStatus;
   attempts: number;
   response_status?: number;
+  /** When a failed delivery is due again. */
+  next_attempt_at?: string;
+  last_attempt_at?: string;
   updated_at?: string;
   [key: string]: unknown;
 }
@@ -1393,7 +1403,12 @@ export interface WebhookDeliveryResult {
   offer_id: string;
   attempted: number;
   delivered: number;
+  /** Attempts that did not deliver: those to be retried and those given up on. */
   failed: number;
+  /** Of the failed ones, how many were given up on. */
+  dead: number;
+  /** More deliveries were waiting than one call takes; call again for the rest. */
+  has_more: boolean;
   /** The deliveries made by this call. */
   deliveries: WebhookDelivery[];
   /** From `testWebhook`: the test event that was sent. */

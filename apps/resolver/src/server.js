@@ -1082,8 +1082,9 @@ async function applyResolutionTransition(context, offerId, current, nextStatus, 
   return { applied: true, record, webhookEvent, previous_status: from };
 }
 
-async function syncResolutionFromInvoiceSource(context, offerId, resolutionId, origin) {
-  const current = await context.store.getResolution(offerId, resolutionId);
+// `known` is the resolution when the caller has just read it.
+async function syncResolutionFromInvoiceSource(context, offerId, resolutionId, origin, known = undefined) {
+  const current = known ?? (await context.store.getResolution(offerId, resolutionId));
   if (!current) throw httpError(404, "RESOLUTION_NOT_FOUND", "resolution_id was not found");
 
   const paymentHash = current.invoice?.payment_hash ?? current.payment_hash;
@@ -1149,8 +1150,7 @@ async function syncResolutionFromInvoiceSource(context, offerId, resolutionId, o
 // A live invoice is settled by asking the node, which is the authority on
 // whether it expired or was paid at the last moment. A mock invoice has no
 // node, so the clock decides.
-async function settleOverdueResolutions(context, offerId, origin, resolutions = undefined) {
-  const records = resolutions ?? (await context.store.getResolutions(offerId));
+async function settleOverdueResolutions(context, offerId, origin, records) {
   const now = Date.now();
   let expired = 0;
   for (const record of records) {
@@ -1184,11 +1184,11 @@ async function settleOpenResolutions(context, entry, origin, approvalId = undefi
   // A recurring offer is limited per subscription, so only the requesting
   // subscription's invoices matter, however many subscribers the offer has.
   const onlySubscription = entry.offer.recurrence && !entry.offer.single_use;
-  const open = (await context.store.getResolutions(offerId)).filter(
-    (record) =>
-      ["invoice_created", "invoice_received"].includes(record.status) &&
-      (!onlySubscription || record.recurrence?.approval_id === approvalId)
-  );
+  // Only the open ones are read, and of a subscription only its own, so the
+  // cost does not grow with the offer's history or its number of subscribers.
+  const open = (
+    await context.store.getOpenResolutions(offerId, onlySubscription && approvalId !== undefined ? { approvalId } : {})
+  ).filter((record) => !onlySubscription || record.recurrence?.approval_id === approvalId);
   if (open.length === 0) return;
 
   const overdue = [];
@@ -1589,72 +1589,116 @@ function publicWebhook(webhook, options = {}) {
 }
 
 // Delivery history as recorded. Response bodies were stored by earlier
-// versions; they are not returned.
+// versions; they are not returned. Nor is the worker's hold on a delivery.
 function publicWebhookEvent(event) {
   return {
     ...event,
-    deliveries: (event.deliveries ?? []).map(({ response_body: _body, ...delivery }) => delivery)
+    deliveries: (event.deliveries ?? []).map(({ response_body: _body, locked_until: _lease, ...delivery }) => delivery)
   };
 }
 
+// An operator's request to deliver one offer's events now, whatever their
+// schedule: those never attempted and, with `retryFailed`, those that failed
+// or were given up on. Deliveries a worker is making at this moment are left
+// to it.
 async function drainWebhookEvents(context, offerId, options = {}) {
-  const events = await context.store.listWebhookEvents(offerId);
-  const webhooks = await context.store.listWebhooks(offerId);
-  const webhookById = new Map(webhooks.map((webhook) => [webhook.id, webhook]));
-  const selectedEvents = options.eventId ? events.filter((event) => event.id === options.eventId) : events;
-
-  if (options.eventId && selectedEvents.length === 0) {
-    throw httpError(404, "WEBHOOK_EVENT_NOT_FOUND", "webhook event was not found");
-  }
-
-  const deliveries = [];
-  for (const event of selectedEvents) {
-    for (const delivery of event.deliveries) {
-      if (!shouldAttemptWebhookDelivery(delivery, options)) continue;
-
-      const webhook = webhookById.get(delivery.webhook_id);
-      if (!webhook || webhook.disabled) {
-        const updated = await context.store.updateWebhookDelivery(offerId, event.id, delivery.webhook_id, {
-          status: "failed",
-          error: { message: "webhook subscription is missing or disabled" }
-        });
-        deliveries.push(publicDeliveryResult(event.id, updated));
-        continue;
-      }
-
-      const result = await deliverWebhookEvent(event, webhook, delivery, {
-        timeoutMs: context.webhookDeliveryTimeoutMs,
-        allowPrivateTargets: context.allowPrivateWebhookTargets,
-        lookup: context.webhookLookup
-      });
-      const updated = await context.store.updateWebhookDelivery(offerId, event.id, delivery.webhook_id, result);
-      deliveries.push(publicDeliveryResult(event.id, updated));
+  if (options.eventId) {
+    const events = await context.store.listWebhookEvents(offerId);
+    if (!events.some((event) => event.id === options.eventId)) {
+      throw httpError(404, "WEBHOOK_EVENT_NOT_FOUND", "webhook event was not found");
     }
   }
 
+  const policy = context.backgroundWorkers.config;
+  const limit = policy.webhookBatchSize;
+  const claims = await context.store.claimPendingDeliveries(limit, {
+    offerId,
+    eventId: options.eventId,
+    statuses: options.retryFailed ? ["pending", "failed", "dead"] : ["pending"],
+    ignoreSchedule: true,
+    leaseMs: webhookLeaseMs(context, policy)
+  });
+  const deliveries = await mapWithConcurrency(claims, policy.webhookConcurrency, (claim) =>
+    attemptWebhookDelivery(context, claim, policy)
+  );
+
   return {
     offer_id: offerId,
-    attempted: deliveries.length,
-    delivered: deliveries.filter((delivery) => delivery.status === "delivered").length,
-    failed: deliveries.filter((delivery) => delivery.status === "failed").length,
+    ...webhookDeliveryCounts(deliveries),
+    // More were due than one call takes; call again for the rest.
+    has_more: claims.length === limit,
     deliveries
   };
 }
 
-function shouldAttemptWebhookDelivery(delivery, options = {}) {
-  if (delivery.status === "delivered") return false;
-  if (delivery.status === "failed" && !options.retryFailed) return false;
-
-  if (delivery.status === "failed" && options.maxAttempts !== undefined && (delivery.attempts ?? 0) >= options.maxAttempts) {
-    return false;
+// Makes one attempt at one claimed delivery and records the outcome, which
+// also releases the claim. A failure is retried later, each wait twice the
+// last; after `webhookMaxAttempts` attempts the delivery is marked dead and
+// left for an operator.
+async function attemptWebhookDelivery(context, claim, policy) {
+  const { offer_id: offerId, event, delivery, webhook } = claim;
+  let outcome;
+  if (!webhook || webhook.disabled) {
+    // There is nobody to deliver to, and retrying will not change that.
+    outcome = { status: "dead", error: { message: "webhook subscription is missing or disabled" } };
+  } else {
+    outcome = await deliverWebhookEvent(event, webhook, delivery, {
+      timeoutMs: context.webhookDeliveryTimeoutMs,
+      allowPrivateTargets: context.allowPrivateWebhookTargets,
+      lookup: context.webhookLookup
+    });
+    if (outcome.status === "failed") {
+      const attempts = (delivery.attempts ?? 0) + 1;
+      if (attempts >= policy.webhookMaxAttempts) outcome = { ...outcome, status: "dead" };
+      else outcome = { ...outcome, next_attempt_at: new Date(Date.now() + webhookRetryDelayMs(attempts, policy)).toISOString() };
+    }
   }
+  const updated = await context.store.updateWebhookDelivery(offerId, event.id, delivery.webhook_id, outcome);
+  return publicDeliveryResult(event.id, updated);
+}
 
-  if (delivery.status === "failed" && options.minRetryAgeMs !== undefined && delivery.last_attempt_at) {
-    const lastAttemptAt = Date.parse(delivery.last_attempt_at);
-    if (Number.isFinite(lastAttemptAt) && Date.now() - lastAttemptAt < options.minRetryAgeMs) return false;
-  }
+// How long to wait after the given number of failed attempts: the base delay,
+// doubled for each attempt after the first, up to a ceiling. Up to a quarter is
+// added at random so that deliveries which failed together do not all come
+// back at the same instant.
+export function webhookRetryDelayMs(attempts, policy, random = Math.random) {
+  const doubled = policy.webhookRetryMinAgeMs * 2 ** Math.min(attempts - 1, 30);
+  const delay = Math.min(doubled, policy.webhookRetryMaxDelayMs);
+  return Math.round(delay * (1 + random() * 0.25));
+}
 
-  return true;
+// A claim must outlast the slowest way through a batch: every delivery ahead
+// of it in its lane timing out.
+function webhookLeaseMs(context, policy) {
+  const lanes = Math.max(1, policy.webhookConcurrency);
+  return context.webhookDeliveryTimeoutMs * Math.ceil(policy.webhookBatchSize / lanes) + 30000;
+}
+
+function webhookDeliveryCounts(deliveries) {
+  const count = (status) => deliveries.filter((delivery) => delivery.status === status).length;
+  return {
+    attempted: deliveries.length,
+    delivered: count("delivered"),
+    // Not delivered by this attempt: to be retried, or given up on.
+    failed: count("failed") + count("dead"),
+    dead: count("dead")
+  };
+}
+
+// Runs `task` over `items`, at most `concurrency` at a time, and returns the
+// results in the order of the items.
+async function mapWithConcurrency(items, concurrency, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await task(items[index]);
+    }
+  });
+  await Promise.all(lanes);
+  return results;
 }
 
 function publicDeliveryResult(eventId, delivery) {
@@ -1666,6 +1710,7 @@ function publicDeliveryResult(eventId, delivery) {
     attempts: delivery.attempts,
     response_status: delivery.response_status,
     error: delivery.error,
+    next_attempt_at: delivery.next_attempt_at,
     updated_at: delivery.updated_at
   };
 }
@@ -1986,6 +2031,9 @@ function createBackgroundWorkers(context, options = {}) {
 
   const workers = {
     enabled: config.enabled,
+    // The batch sizes and the retry policy, also used by an operator's
+    // request to deliver now.
+    config,
     start() {
       if (state.running) return;
       state.running = true;
@@ -2031,70 +2079,154 @@ function createBackgroundWorkers(context, options = {}) {
       };
     },
     async runSettlementSyncPass() {
-      return runTask(state.settlement_sync, () => syncOpenResolutionsForAllOffers(context));
+      return runTask(state.settlement_sync, () => runSettlementPass(context, config));
     },
     async runWebhookDeliveryPass() {
-      return runTask(state.webhook_delivery, () =>
-        drainWebhookEventsForAllOffers(context, {
-          retryFailed: true,
-          maxAttempts: config.webhookMaxAttempts,
-          minRetryAgeMs: config.webhookRetryMinAgeMs
-        })
-      );
+      return runTask(state.webhook_delivery, () => runWebhookPass(context, config));
     }
   };
 
   return workers;
 }
 
-async function syncOpenResolutionsForAllOffers(context) {
-  if (context.invoiceAdapter.mode === "mock" || typeof context.invoiceAdapter.syncInvoice !== "function") {
-    // There is no node to ask, but invoices still run out: record that.
-    let expired = 0;
-    for (const entry of await context.store.listOffers()) {
-      const origin = context.publicOrigin ?? entry.offer.resolver_url;
-      expired += await settleOverdueResolutions(context, entry.offer.offer_id, origin);
+// How many per-item results a pass keeps for diagnostics.
+const PASS_RESULTS_KEPT = 50;
+
+// One settlement pass: takes the invoices that still await an outcome, the ones
+// asked about longest ago first, a bounded batch at a time, and finds out what
+// became of each. It goes on to the next batch while batches come back full and
+// the pass has time left, so its cost follows what is open, never the number of
+// offers or resolutions stored, and it ends before the next pass is due.
+// Another worker running at the same time gets different batches.
+async function runSettlementPass(context, config) {
+  const prunedReservations = await context.store.pruneStaleReservations();
+  const origins = new Map();
+  const originFor = async (offerId) => {
+    if (context.publicOrigin) return context.publicOrigin;
+    if (!origins.has(offerId)) origins.set(offerId, (await context.store.getOffer(offerId))?.offer.resolver_url);
+    return origins.get(offerId);
+  };
+
+  const deadline = Date.now() + passBudgetMs(config.settlementSyncIntervalMs);
+  const totals = { claimed: 0, checked: 0, changed: 0, expired: 0, skipped: 0, failed: 0 };
+  const kept = [];
+  let full;
+  do {
+    const claimed = await context.store.claimOpenResolutions(config.settlementBatchSize, {
+      // Leaves alone what this or another worker asked about within the interval.
+      staleMs: Math.floor(config.settlementSyncIntervalMs * 0.9)
+    });
+    const results = await mapWithConcurrency(claimed, config.settlementConcurrency, async (record) =>
+      settleClaimedResolution(context, record, await originFor(record.offer_id))
+    );
+    const count = (test) => results.filter(test).length;
+    totals.claimed += claimed.length;
+    // Asked of the node.
+    totals.checked += count((result) => result.invoice_source !== undefined || result.failed);
+    totals.changed += count((result) => result.changed);
+    totals.expired += count((result) => result.changed && result.next_status === "invoice_expired");
+    // Nothing to ask and nothing to record yet.
+    totals.skipped += count((result) => result.skipped);
+    totals.failed += count((result) => result.failed);
+    for (const result of results) {
+      if (kept.length < PASS_RESULTS_KEPT && (result.changed || result.failed || result.skipped)) kept.push(result);
     }
-    return {
-      skipped: true,
-      reason: "invoice_sync_unsupported",
-      invoice_mode: context.invoiceAdapter.mode,
-      expired
-    };
-  }
-
-  const offers = await context.store.listOffers();
-  const results = [];
-
-  for (const entry of offers) {
-    const origin = context.publicOrigin ?? entry.offer.resolver_url;
-    results.push(await syncOfferResolutions(context, entry.offer.offer_id, origin, { includeTerminal: false }));
-  }
+    full = claimed.length === config.settlementBatchSize;
+  } while (full && Date.now() < deadline);
 
   return {
-    offers: offers.length,
-    checked: results.reduce((total, result) => total + result.checked, 0),
-    changed: results.reduce((total, result) => total + result.changed, 0),
-    skipped: results.reduce((total, result) => total + result.skipped, 0),
-    failed: results.reduce((total, result) => total + result.failed, 0),
-    results
+    invoice_mode: context.invoiceAdapter.mode,
+    ...totals,
+    pruned_reservations: prunedReservations,
+    // The pass ran out of time with invoices still waiting; the next one goes on.
+    has_more: full,
+    results: kept
   };
 }
 
-async function drainWebhookEventsForAllOffers(context, options = {}) {
-  const offers = await context.store.listOffers();
-  const results = [];
+// How long a pass may keep taking batches: most of its interval, so that it
+// has ended when the next one starts. With no interval, one batch.
+function passBudgetMs(intervalMs) {
+  return Math.floor(intervalMs * 0.8);
+}
 
-  for (const entry of offers) {
-    results.push(await drainWebhookEvents(context, entry.offer.offer_id, options));
+async function settleClaimedResolution(context, record, origin) {
+  const offerId = record.offer_id;
+  if (canSyncFromInvoiceSource(context, record)) {
+    try {
+      const { resolution: _resolution, ...synced } = await syncResolutionFromInvoiceSource(context, offerId, record.id, origin, record);
+      return synced;
+    } catch (error) {
+      return {
+        offer_id: offerId,
+        resolution_id: record.id,
+        failed: true,
+        status: record.status,
+        error: { code: error.code ?? "INVOICE_SYNC_FAILED", message: error.message, details: error.details }
+      };
+    }
   }
 
+  // There is no node to ask about this one: a mock invoice, one issued in
+  // another mode, or one without a payment hash. Its lifetime still runs out.
+  const expiresAt = Date.parse(record.invoice?.expires_at ?? "");
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    const result = await applyResolutionTransition(context, offerId, record, "invoice_expired", origin, {
+      source: "resolver",
+      note: "invoice lifetime elapsed",
+      expired_at: record.invoice.expires_at
+    });
+    if (result.applied) {
+      return { offer_id: offerId, resolution_id: record.id, changed: true, previous_status: record.status, next_status: "invoice_expired" };
+    }
+  }
   return {
-    offers: offers.length,
-    attempted: results.reduce((total, result) => total + result.attempted, 0),
-    delivered: results.reduce((total, result) => total + result.delivered, 0),
-    failed: results.reduce((total, result) => total + result.failed, 0),
-    results
+    offer_id: offerId,
+    resolution_id: record.id,
+    skipped: true,
+    status: record.status,
+    reason: !record.invoice?.payment_hash
+      ? "missing_payment_hash"
+      : context.invoiceAdapter.mode === "mock" || typeof context.invoiceAdapter.syncInvoice !== "function"
+        ? "invoice_sync_unsupported"
+        : "invoice_source_mismatch"
+  };
+}
+
+// One delivery pass: takes the deliveries that are due, a bounded batch at a
+// time while batches come back full and the pass has time left, and attempts
+// each; then removes events past their retention. Another worker running at
+// the same time gets different deliveries.
+async function runWebhookPass(context, config) {
+  const deadline = Date.now() + passBudgetMs(config.webhookDeliveryIntervalMs);
+  const totals = { attempted: 0, delivered: 0, failed: 0, dead: 0 };
+  const kept = [];
+  let full;
+  do {
+    const claims = await context.store.claimPendingDeliveries(config.webhookBatchSize, {
+      leaseMs: webhookLeaseMs(context, config)
+    });
+    const deliveries = await mapWithConcurrency(claims, config.webhookConcurrency, (claim) =>
+      attemptWebhookDelivery(context, claim, config)
+    );
+    for (const [key, value] of Object.entries(webhookDeliveryCounts(deliveries))) totals[key] += value;
+    kept.push(...deliveries.slice(0, PASS_RESULTS_KEPT - kept.length));
+    full = claims.length === config.webhookBatchSize;
+  } while (full && Date.now() < deadline);
+
+  const prunedEvents =
+    config.webhookEventRetentionMs > 0
+      ? await context.store.pruneWebhookEvents({
+          before: new Date(Date.now() - config.webhookEventRetentionMs).toISOString(),
+          limit: 500
+        })
+      : 0;
+
+  return {
+    ...totals,
+    pruned_events: prunedEvents,
+    has_more: full,
+    deliveries: kept
   };
 }
 
@@ -2105,7 +2237,13 @@ function backgroundWorkerOptionsFromEnv(env) {
     settlementSyncIntervalMs: positiveInteger(env.RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS, 3000),
     webhookDeliveryIntervalMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_INTERVAL_MS, 30000),
     webhookMaxAttempts: positiveInteger(env.RESOLVER_WEBHOOK_MAX_ATTEMPTS, 8),
-    webhookRetryMinAgeMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS, 30000)
+    webhookRetryMinAgeMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS, 30000),
+    webhookRetryMaxDelayMs: positiveInteger(env.RESOLVER_WEBHOOK_RETRY_MAX_DELAY_MS, 3600000),
+    webhookBatchSize: positiveInteger(env.RESOLVER_WEBHOOK_BATCH_SIZE, 50),
+    webhookConcurrency: positiveInteger(env.RESOLVER_WEBHOOK_CONCURRENCY, 5),
+    webhookEventRetentionMs: positiveInteger(env.RESOLVER_WEBHOOK_EVENT_RETENTION_DAYS, 30) * 86400000,
+    settlementBatchSize: positiveInteger(env.RESOLVER_SETTLEMENT_SYNC_BATCH_SIZE, 200),
+    settlementConcurrency: positiveInteger(env.RESOLVER_SETTLEMENT_SYNC_CONCURRENCY, 8)
   };
 }
 
@@ -2115,8 +2253,19 @@ function normalizeBackgroundWorkerOptions(options = {}) {
     runOnStart: Boolean(options.runOnStart),
     settlementSyncIntervalMs: positiveInteger(options.settlementSyncIntervalMs, 30000),
     webhookDeliveryIntervalMs: positiveInteger(options.webhookDeliveryIntervalMs, 30000),
-    webhookMaxAttempts: positiveInteger(options.webhookMaxAttempts, 8),
-    webhookRetryMinAgeMs: positiveInteger(options.webhookRetryMinAgeMs, 30000)
+    // Attempts before a delivery is given up on.
+    webhookMaxAttempts: Math.max(1, positiveInteger(options.webhookMaxAttempts, 8)),
+    // The wait after the first failure; each later wait is twice the last.
+    webhookRetryMinAgeMs: positiveInteger(options.webhookRetryMinAgeMs, 30000),
+    webhookRetryMaxDelayMs: positiveInteger(options.webhookRetryMaxDelayMs, 3600000),
+    // How many deliveries one pass takes, and how many it makes at a time.
+    webhookBatchSize: Math.max(1, positiveInteger(options.webhookBatchSize, 50)),
+    webhookConcurrency: Math.max(1, positiveInteger(options.webhookConcurrency, 5)),
+    // Events with nothing left to deliver are removed after this long. 0 keeps them.
+    webhookEventRetentionMs: positiveInteger(options.webhookEventRetentionMs, 30 * 86400000),
+    // How many open invoices one pass asks about, and how many at a time.
+    settlementBatchSize: Math.max(1, positiveInteger(options.settlementBatchSize, 200)),
+    settlementConcurrency: Math.max(1, positiveInteger(options.settlementConcurrency, 8))
   };
 }
 

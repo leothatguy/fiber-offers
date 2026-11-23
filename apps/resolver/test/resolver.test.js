@@ -1151,9 +1151,11 @@ test("background worker skips historical mock invoices in live mode", async () =
 
       const pass = await server.backgroundWorkers.runSettlementSyncPass();
 
+      assert.equal(pass.claimed, 1);
+      assert.equal(pass.checked, 0);
       assert.equal(pass.failed, 0);
       assert.equal(pass.skipped, 1);
-      assert.equal(pass.results[0].results[0].reason, "invoice_source_mismatch");
+      assert.equal(pass.results[0].reason, "invoice_source_mismatch");
       assert.equal(syncCalls, 0);
     },
     { invoiceAdapter }
@@ -1408,9 +1410,9 @@ test("background worker delivers pending webhook events", async () => {
       const pass = await server.backgroundWorkers.runWebhookDeliveryPass();
       const events = await getJson(`${baseUrl}/offers/${created.body.offer_id}/webhook-events`);
 
-      assert.equal(pass.offers, 1);
       assert.equal(pass.attempted, 1);
       assert.equal(pass.delivered, 1);
+      assert.equal(pass.failed, 0);
       assert.equal(receiver.requests.length, 1);
       assert.equal(receiver.requests[0].headers["x-fiber-offers-event-type"], "invoice.created");
       assert.equal(events.body.events[0].deliveries[0].status, "delivered");

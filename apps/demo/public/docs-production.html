@@ -44,8 +44,10 @@ RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS=3000
 RESOLVER_WEBHOOK_RETRY_INTERVAL_MS=30000
 RESOLVER_WEBHOOK_MAX_ATTEMPTS=8
 RESOLVER_WEBHOOK_RETRY_MIN_AGE_MS=30000
+RESOLVER_WEBHOOK_RETRY_MAX_DELAY_MS=3600000
+RESOLVER_WEBHOOK_EVENT_RETENTION_DAYS=30
 RESOLVER_WEBHOOK_TIMEOUT_MS=10000</code></pre>
-            <p>Monitor the worker state reported by <code>GET /diagnostics</code>. The delivery timeout defaults to 10 seconds, and failed webhook events retain their delivery history so operators can inspect and retry them without losing context.</p>
+            <p>Monitor the worker state reported by <code>GET /diagnostics</code>. The delivery timeout defaults to 10 seconds. A failed delivery is retried after 30 seconds, then after twice as long each time, and is marked <code>dead</code> after the eighth attempt; an operator can send failed and dead deliveries again at any time. Events with nothing left to deliver are removed after 30 days.</p>
           </section>
 
           <section id="auth-boundaries">
