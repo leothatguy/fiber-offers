@@ -1019,6 +1019,33 @@ test("fetches reconciliation CSV through the configured resolver", async () => {
   assert.equal(client.reconciliationCsvUrl(offerId), `http://resolver.test/offers/${offerId}/reconciliation.csv`);
 });
 
+test("a refused CSV request fails with the resolver's error code, like any other request", async () => {
+  const offerId = "0x" + "5".repeat(64);
+  const refusing = new FiberOffersClient({
+    resolverUrl: "http://resolver.test",
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "valid API key is required" } }), { status: 401 })
+  });
+  const broken = new FiberOffersClient({
+    resolverUrl: "http://resolver.test",
+    fetchImpl: async () => new Response("<html>Bad Gateway</html>", { status: 502 })
+  });
+
+  await assert.rejects(refusing.getReconciliationCsv(offerId), (error) => {
+    assert.equal(error.status, 401);
+    assert.equal(error.code, "UNAUTHORIZED");
+    assert.equal(error.message, "valid API key is required");
+    return true;
+  });
+  // Not the resolver's JSON: the status and text are still reported.
+  await assert.rejects(broken.getReconciliationCsv(offerId), (error) => {
+    assert.equal(error.status, 502);
+    assert.equal(error.code, undefined);
+    assert.match(error.message, /Bad Gateway/);
+    return true;
+  });
+});
+
 test("creates webhook subscriptions through the configured resolver", async () => {
   const offerId = "0x" + "6".repeat(64);
   const calls = [];

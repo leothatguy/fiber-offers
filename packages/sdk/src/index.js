@@ -507,15 +507,7 @@ export class FiberOffersClient {
       error.retryable = response.status >= 500;
       throw error;
     }
-    if (!response.ok) {
-      const error = new Error(body?.error?.message ?? `Fiber Offers request failed with ${response.status}`);
-      error.status = response.status;
-      error.code = body?.error?.code;
-      error.details = body?.error?.details;
-      // The resolver says whether repeating the request can help (502/503).
-      if (typeof body?.error?.details?.retryable === "boolean") error.retryable = body.error.details.retryable;
-      throw error;
-    }
+    if (!response.ok) throw resolverError(response, body);
 
     return body;
   }
@@ -533,9 +525,14 @@ export class FiberOffersClient {
     });
 
     if (!response.ok) {
-      const error = new Error(text || `Fiber Offers request failed with ${response.status}`);
-      error.status = response.status;
-      throw error;
+      // The resolver reports errors as JSON whatever the route returns on success.
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = undefined;
+      }
+      throw resolverError(response, body, text);
     }
 
     return text;
@@ -558,6 +555,18 @@ export class FiberOffersClient {
       throw failure;
     }
   }
+}
+
+// The error for a response the resolver refused, in one shape for every method:
+// `status`, `code`, `details`, and `retryable` when the resolver says so.
+function resolverError(response, body, text = undefined) {
+  const error = new Error(body?.error?.message ?? (text || `Fiber Offers request failed with ${response.status}`));
+  error.status = response.status;
+  error.code = body?.error?.code;
+  error.details = body?.error?.details;
+  // The resolver says whether repeating the request can help (502/503).
+  if (typeof body?.error?.details?.retryable === "boolean") error.retryable = body.error.details.retryable;
+  return error;
 }
 
 // Checks an offer a resolver returned: validly signed, self-consistent, and,
