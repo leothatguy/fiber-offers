@@ -8,7 +8,8 @@ merchant. None of it is required of another resolver.
 
 For the list of routes and which need the API key, see the
 [quick reference](api-quick-reference.md). For configuration, see
-[Deployment](deployment.md).
+[Deployment](deployment.md). The wallet-facing routes are also described as
+OpenAPI, with a JSON Schema for each body, in [`schemas/`](schemas/README.md).
 
 ## Readiness check
 
@@ -118,6 +119,13 @@ A resolution as returned:
 
 `recurrence` is present for a cycle of a recurring offer. The raw request sent
 to the node and its raw answer are stored and are not returned.
+
+`status_history` lists every status the resolution has had. Its first entry is
+`invoice_pending`: the resolver's own reservation, made before it asks the node
+for an invoice so that two requests cannot both be issued one. A request that
+is still at that point is the only thing an operator's list shows as
+`invoice_pending`; a payer never sees a resolution in that state, because the
+resolution ID is handed out with the invoice.
 
 **Invoice lifetime.** The resolver asks the node for an invoice that lasts
 `FIBER_INVOICE_TTL_SECONDS` (default 900), shortened so it never outlives the

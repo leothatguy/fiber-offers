@@ -59,7 +59,9 @@ export function classifyInvoiceFailure(error) {
     };
   }
 
-  const causeCode = error?.code ?? "FIBER_RPC_UNAVAILABLE";
+  // Always a string in the response: a network error has a name (ECONNREFUSED)
+  // and a JSON-RPC error a number (-32602), and a client reads one member.
+  const causeCode = String(error?.code ?? "FIBER_RPC_UNAVAILABLE");
 
   switch (error?.kind) {
     case "timeout":

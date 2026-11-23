@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/revocation-response.schema.json",
+  "title": "Revocation response",
+  "description": "What DELETE /offers/{offer_id} returns when it accepts a revocation (docs/spec-v1.md, sections 7.4 and 12).",
+  "type": "object",
+  "properties": {
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "revoked": { "const": true },
+    "revoked_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "required": ["offer_id", "revoked"]
+}

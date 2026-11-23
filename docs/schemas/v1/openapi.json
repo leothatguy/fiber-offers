@@ -1,0 +1,284 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Fiber Offers resolver: the routes every wallet needs",
+    "version": "1.0.0-draft",
+    "summary": "The HTTP interface a payer's wallet needs from every Fiber Offers v1 resolver.",
+    "description": "Machine-readable form of sections 6, 7, 8 and 11.2 of the Fiber Offers v1 specification (docs/spec-v1.md), which remains the normative text. All paths are relative to the offer's own `resolver_url`.\n\nNo route here takes a credential. A resolver allows cross-origin requests to all of them and never requires cookies. Nothing a resolver returns is trusted by the payer: the offer is verified against its own signature, and the invoice is read by the payer's own node and checked against the signed offer (specification, section 9).\n\nA resolver may return more members than the schemas require, and may offer more routes. The reference resolver's other routes, which are the merchant's, are described in docs/resolver-api.md.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "{resolver_url}",
+      "description": "The resolver_url of the offer being paid.",
+      "variables": {
+        "resolver_url": {
+          "default": "https://offers.merchant.example"
+        }
+      }
+    }
+  ],
+  "security": [],
+  "tags": [
+    { "name": "offers", "description": "Fetching and revoking offers." },
+    { "name": "payment", "description": "Obtaining an invoice and following it." },
+    { "name": "subscriptions", "description": "Recurring offers." }
+  ],
+  "paths": {
+    "/offers/{offer_id}": {
+      "parameters": [{ "$ref": "#/components/parameters/OfferId" }],
+      "get": {
+        "operationId": "getOffer",
+        "tags": ["offers"],
+        "summary": "Fetch an offer",
+        "description": "Specification 7.1. The wallet verifies the offer and checks that its ID is the one requested.",
+        "responses": {
+          "200": {
+            "description": "The offer.",
+            "content": {
+              "application/json": { "schema": { "$ref": "offer-response.schema.json" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      },
+      "delete": {
+        "operationId": "revokeOffer",
+        "tags": ["offers"],
+        "summary": "Revoke an offer",
+        "description": "Specification 7.4 and 12. Needs no credential: the revocation is signed by the offer key. Refused with INVALID_REVOCATION, REVOCATION_EXPIRED or INVALID_REVOCATION_SIGNATURE (400), and with OFFER_REVOKED (409) when the offer is already revoked.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revocation": { "$ref": "revocation.schema.json" }
+                },
+                "required": ["revocation"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The offer is revoked. Invoice requests for it are refused from now on.",
+            "content": {
+              "application/json": { "schema": { "$ref": "revocation-response.schema.json" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/offers/{offer_id}/invoice": {
+      "parameters": [{ "$ref": "#/components/parameters/OfferId" }],
+      "post": {
+        "operationId": "requestInvoice",
+        "tags": ["payment"],
+        "summary": "Request an invoice",
+        "description": "Specification 7.2. Each success creates a resolution. A wallet should send an idempotency key and reuse it when retrying after a lost response. The statuses and codes are those of specification section 13.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "invoice-request.schema.json" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new invoice.",
+            "content": {
+              "application/json": { "schema": { "$ref": "invoice-response.schema.json" } }
+            }
+          },
+          "200": {
+            "description": "The response to an earlier request with the same idempotency key and terms. No second invoice was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "invoice-response.schema.json" },
+                    { "type": "object", "required": ["idempotent_replay"] }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "410": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "422": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/offers/{offer_id}/resolutions/{resolution_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/OfferId" },
+        { "$ref": "#/components/parameters/ResolutionId" }
+      ],
+      "get": {
+        "operationId": "getResolution",
+        "tags": ["payment"],
+        "summary": "Read a resolution",
+        "description": "Specification 7.3. Anyone holding the resolution ID can read it. A resolver offers anonymous callers no way to list an offer's resolutions.",
+        "responses": {
+          "200": {
+            "description": "The resolution.",
+            "content": {
+              "application/json": { "schema": { "$ref": "resolution.schema.json" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/offers/{offer_id}/recurrence-status": {
+      "parameters": [{ "$ref": "#/components/parameters/OfferId" }],
+      "get": {
+        "operationId": "getSubscriptionStatus",
+        "tags": ["subscriptions"],
+        "summary": "Where one subscription stands",
+        "description": "Specification 7.5 and 11.2. The subscription ID is derived from a key only the payer holds, so the route needs no credential. Without `approval_id` this path is not part of the wallet interface.",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "query",
+            "required": true,
+            "description": "The subscription ID.",
+            "schema": { "$ref": "common.schema.json#/$defs/subscriptionId" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscription's status.",
+            "content": {
+              "application/json": { "schema": { "$ref": "subscription-status.schema.json" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/offers/{offer_id}/check": {
+      "parameters": [{ "$ref": "#/components/parameters/OfferId" }],
+      "post": {
+        "operationId": "checkReadiness",
+        "tags": ["payment"],
+        "summary": "Whether an invoice would be issued",
+        "description": "Specification 8. Optional: a resolver may not offer it. It applies the same rules as the invoice route and creates nothing.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "invoice-request.schema.json" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The verdict. A request that would be refused is still answered 200, with ready false and the code the invoice route would return.",
+            "content": {
+              "application/json": { "schema": { "$ref": "readiness.schema.json" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/.well-known/fiberoffer/{user}": {
+      "parameters": [
+        {
+          "name": "user",
+          "in": "path",
+          "required": true,
+          "description": "The part of a Fiber Address before the @, in lowercase.",
+          "schema": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" }
+        }
+      ],
+      "get": {
+        "operationId": "resolveFiberAddress",
+        "tags": ["offers"],
+        "summary": "Resolve a Fiber Address",
+        "description": "Specification 6. Served on the address's own domain, which need not be the offer's resolver. The link between an address and an offer is not signed. A name that is not written as a Fiber Address user is refused with INVALID_USERNAME (400); one that is bound to no offer, with FIBER_ADDRESS_NOT_FOUND (404).",
+        "responses": {
+          "200": {
+            "description": "The offer the address leads to.",
+            "content": {
+              "application/json": { "schema": { "$ref": "fiber-address-response.schema.json" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "OfferId": {
+        "name": "offer_id",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "common.schema.json#/$defs/offerId" }
+      },
+      "ResolutionId": {
+        "name": "resolution_id",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "common.schema.json#/$defs/resolutionId" }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "The same key as `idempotency_key` in the body. When both are sent they must be equal.",
+        "schema": { "$ref": "common.schema.json#/$defs/idempotencyKey" }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "The request was refused. `error.code` is one of the codes of specification section 13.",
+        "content": {
+          "application/json": { "schema": { "$ref": "error.schema.json" } }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests: code RATE_LIMITED, with the same number of seconds in the header and in `error.details.retry_after_seconds`.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before trying again.",
+            "schema": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "content": {
+          "application/json": { "schema": { "$ref": "error.schema.json" } }
+        }
+      }
+    }
+  }
+}

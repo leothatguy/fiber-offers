@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/recurrence-proof.schema.json",
+  "title": "What a subscriber signs for one cycle",
+  "description": "Never sent. A cycle request's subscriber_signature is an Ed25519 signature over the UTF-8 canonical JSON of this object, built from the request and the offer (docs/spec-v1.md, section 11.1). Naming the offer means a signature cannot be replayed against another offer.",
+  "type": "object",
+  "properties": {
+    "scheme": { "const": "fiberoffer-recurrence-v1" },
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "approval_id": { "$ref": "common.schema.json#/$defs/subscriptionId" },
+    "recurrence_cycle": { "$ref": "common.schema.json#/$defs/safeInteger" },
+    "amount": { "$ref": "common.schema.json#/$defs/amount" },
+    "asset": { "$ref": "common.schema.json#/$defs/asset" },
+    "scheduled_for": { "type": "string", "minLength": 1 }
+  },
+  "required": ["scheme", "offer_id", "approval_id", "recurrence_cycle", "amount", "asset"],
+  "additionalProperties": false
+}

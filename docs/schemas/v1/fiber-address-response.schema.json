@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/fiber-address-response.schema.json",
+  "title": "Fiber Address response",
+  "description": "What GET /.well-known/fiberoffer/{user} returns: the offer response with the name it was asked for (docs/spec-v1.md, section 6). The wallet checks that username is the name it asked for and verifies the offer.",
+  "type": "object",
+  "allOf": [{ "$ref": "offer-response.schema.json" }],
+  "properties": {
+    "username": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "address": {
+      "description": "username@host, as the resolver sees its own host.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}@.+$"
+    }
+  },
+  "required": ["username", "address"]
+}

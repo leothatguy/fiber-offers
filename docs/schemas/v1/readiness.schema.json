@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/readiness.schema.json",
+  "title": "Readiness",
+  "description": "What the optional POST /offers/{offer_id}/check returns: whether an invoice would be issued for this request, without issuing one (docs/spec-v1.md, section 8; docs/resolver-api.md).",
+  "type": "object",
+  "properties": {
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "ready": {
+      "description": "Whether an invoice request with this body would succeed now.",
+      "type": "boolean"
+    },
+    "code": {
+      "description": "When not ready: the error code the invoice route would return.",
+      "$ref": "error.schema.json#/$defs/code"
+    },
+    "summary": { "type": "string" },
+    "amount": { "type": "string" },
+    "asset": { "$ref": "common.schema.json#/$defs/asset" },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["pass", "warn", "fail"] },
+          "message": { "type": "string" },
+          "code": { "$ref": "error.schema.json#/$defs/code" }
+        },
+        "required": ["id", "status", "message"]
+      }
+    }
+  },
+  "required": ["offer_id", "ready", "checks"],
+  "if": {
+    "type": "object",
+    "properties": { "ready": { "const": false } },
+    "required": ["ready"]
+  },
+  "then": { "type": "object", "required": ["code"] }
+}

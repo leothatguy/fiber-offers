@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/common.schema.json",
+  "title": "Fiber Offers v1: shared definitions",
+  "description": "Values that appear in more than one Fiber Offers v1 object. Normative text: docs/spec-v1.md.",
+  "$defs": {
+    "amount": {
+      "description": "A count of the asset's smallest unit (shannons for CKB), as a decimal string: at least 1, no sign, no leading zero, no fraction. Never a JSON number. Spec 2.4.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "offerId": {
+      "description": "0x and the lowercase hex SHA-256 of the offer's canonical content. Spec 4.1.",
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "nodeId": {
+      "description": "A Fiber node's compressed secp256k1 public key in lowercase hex.",
+      "type": "string",
+      "pattern": "^0[23][0-9a-f]{64}$"
+    },
+    "hash32": {
+      "description": "0x and 64 lowercase hex characters.",
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "ed25519PublicKeyPem": {
+      "description": "The one spelling of an offer key: the PEM of an Ed25519 SubjectPublicKeyInfo, the 44-byte DER on one line, line feeds only, nothing after the END line. The fixed first 16 characters are the DER prefix that says 'Ed25519', so no other key type matches.",
+      "type": "string",
+      "pattern": "^-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=\\n-----END PUBLIC KEY-----$"
+    },
+    "publicKeyPem": {
+      "description": "An Ed25519 public key as PEM, in any line-ending and with or without a final line break. Used where the key is not itself part of a signed, canonical object.",
+      "type": "string",
+      "pattern": "^-----BEGIN PUBLIC KEY-----\\r?\\n[A-Za-z0-9+/=\\r\\n]+-----END PUBLIC KEY-----[\\r\\n]*$"
+    },
+    "signatureValue": {
+      "description": "A 64-byte Ed25519 signature in base64url without padding: 86 characters, the last carrying four zero bits. Spec 4.2.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+    },
+    "signature": {
+      "description": "Exactly these two members. Spec 4.2.",
+      "type": "object",
+      "properties": {
+        "scheme": { "const": "ed25519" },
+        "value": { "$ref": "#/$defs/signatureValue" }
+      },
+      "required": ["scheme", "value"],
+      "additionalProperties": false
+    },
+    "assetSymbol": {
+      "description": "A display label. It does not identify a token.",
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9._-]{0,15}$"
+    },
+    "asset": {
+      "description": "Spec 2.3. CKB has one name and no type script; a token is identified by the hash of its CKB type script.",
+      "type": "object",
+      "oneOf": [
+        {
+          "title": "CKB",
+          "type": "object",
+          "properties": {
+            "asset_type": { "const": "ckb" },
+            "symbol": { "const": "CKB" }
+          },
+          "required": ["asset_type", "symbol"],
+          "additionalProperties": false
+        },
+        {
+          "title": "A token (UDT or RGB++)",
+          "type": "object",
+          "properties": {
+            "asset_type": { "enum": ["udt", "rgbpp"] },
+            "symbol": { "$ref": "#/$defs/assetSymbol" },
+            "type_script_hash": { "$ref": "#/$defs/hash32" }
+          },
+          "required": ["asset_type", "symbol", "type_script_hash"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "safeInteger": {
+      "description": "A positive JSON integer no larger than 2^53 - 1.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "subscriptionId": {
+      "description": "sub_ and the first 40 hex characters of the SHA-256 of the subscriber key's DER SubjectPublicKeyInfo. Spec 11.1.",
+      "type": "string",
+      "pattern": "^sub_[0-9a-f]{40}$"
+    },
+    "resolutionId": {
+      "description": "Identifies one payment attempt. Unguessable: it is the only thing protecting the reads addressed by it. Spec 7.2.",
+      "type": "string",
+      "pattern": "^res_[a-z0-9-]+$"
+    },
+    "resolutionStatus": {
+      "description": "Spec 10.",
+      "enum": [
+        "invoice_created",
+        "invoice_received",
+        "invoice_paid",
+        "invoice_expired",
+        "invoice_failed",
+        "invoice_cancelled"
+      ]
+    },
+    "timestamp": {
+      "description": "An ISO 8601 date and time in UTC, as ECMAScript's Date.prototype.toISOString writes it.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "idempotencyKey": {
+      "description": "Spec 7.2.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    }
+  }
+}

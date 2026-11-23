@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/invoice-request.schema.json",
+  "title": "Invoice request",
+  "description": "The body of POST /offers/{offer_id}/invoice and of POST /offers/{offer_id}/check, as a wallet writes it (docs/spec-v1.md, sections 7.2 and 11.1). A cycle of a recurring offer carries all four subscription members; a request on any other offer carries none of them. The reference resolver also accepts an amount written as a number and an asset in another letter case; a wallet should not rely on that.",
+  "type": "object",
+  "properties": {
+    "amount": { "$ref": "common.schema.json#/$defs/amount" },
+    "asset": {
+      "description": "One of the offer's assets. Defaults to the first.",
+      "$ref": "common.schema.json#/$defs/asset"
+    },
+    "idempotency_key": {
+      "description": "May instead be sent as the Idempotency-Key header.",
+      "$ref": "common.schema.json#/$defs/idempotencyKey"
+    },
+    "recurrence_cycle": {
+      "description": "The cycle number, from 1.",
+      "$ref": "common.schema.json#/$defs/safeInteger"
+    },
+    "approval_id": { "$ref": "common.schema.json#/$defs/subscriptionId" },
+    "subscriber_public_key": { "$ref": "common.schema.json#/$defs/publicKeyPem" },
+    "subscriber_signature": {
+      "description": "By the subscription key, over the canonical JSON of the object in recurrence-proof.schema.json.",
+      "$ref": "common.schema.json#/$defs/signatureValue"
+    },
+    "scheduled_for": {
+      "description": "When the payer's schedule called for this cycle. Part of what the subscriber signs when present.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["amount"],
+  "dependentRequired": {
+    "recurrence_cycle": ["approval_id", "subscriber_public_key", "subscriber_signature"],
+    "approval_id": ["recurrence_cycle", "subscriber_public_key", "subscriber_signature"],
+    "subscriber_public_key": ["recurrence_cycle", "approval_id", "subscriber_signature"],
+    "subscriber_signature": ["recurrence_cycle", "approval_id", "subscriber_public_key"]
+  }
+}

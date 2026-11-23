@@ -988,7 +988,7 @@ function optionalPositiveInteger(value, field) {
   }
   const number = Number(text);
   if (!Number.isSafeInteger(number)) {
-    throw new FiberOfferError(`${field} is too large for this MVP`, "INTEGER_TOO_LARGE", { field });
+    throw new FiberOfferError(`${field} must be at most 2^53 - 1`, "INTEGER_TOO_LARGE", { field });
   }
   return number;
 }

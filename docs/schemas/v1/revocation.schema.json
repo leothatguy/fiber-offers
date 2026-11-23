@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/revocation.schema.json",
+  "title": "Fiber Offer v1 revocation",
+  "description": "A statement by the offer key that an offer should no longer be paid (docs/spec-v1.md, section 12). The signature is over the canonical JSON of this object without its signature member. A resolver also checks that offer_id and node_id are the offer's and that revoked_at is within 300 seconds of its clock.",
+  "type": "object",
+  "properties": {
+    "scheme": { "const": "fiberoffer-revocation-v1" },
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "node_id": { "$ref": "common.schema.json#/$defs/nodeId" },
+    "revoked_at": {
+      "description": "Unix seconds.",
+      "$ref": "common.schema.json#/$defs/safeInteger"
+    },
+    "reason": { "type": "string" },
+    "signature": { "$ref": "common.schema.json#/$defs/signature" }
+  },
+  "required": ["scheme", "offer_id", "node_id", "revoked_at", "signature"]
+}

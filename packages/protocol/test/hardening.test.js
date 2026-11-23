@@ -476,3 +476,21 @@ test("an encoded offer's body must be the canonical JSON itself", async () => {
   assert.throws(() => decodeOffer(wrap("not json")), (error) => error.details.reason === "json");
   assert.throws(() => decodeOffer(encodeBech32m("fbroffer", Buffer.from([0xff, 0xfe]))), (error) => error.details.reason === "json");
 });
+
+test("every error code this package can raise is listed in the specification", async () => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const source = new URL("../src/", import.meta.url);
+  const specification = await readFile(new URL("../../../docs/spec-v1.md", import.meta.url), "utf8");
+  const listed = new Set(specification.match(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g));
+
+  const raised = new Set();
+  for (const name of (await readdir(source)).filter((file) => file.endsWith(".js"))) {
+    const text = await readFile(new URL(name, source), "utf8");
+    for (const match of text.matchAll(/"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)"/g)) raised.add(match[1]);
+  }
+  // The code of an error raised without one. The package raises none.
+  raised.delete("FIBER_OFFER_ERROR");
+
+  assert.ok(raised.size > 40, `only ${raised.size} codes were found in the source`);
+  assert.deepEqual([...raised].filter((code) => !listed.has(code)).sort(), []);
+});

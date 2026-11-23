@@ -1792,7 +1792,7 @@ test("tells payers whether an invoice failure is worth retrying", async () => {
     assert.equal(rejected.status, 502);
     assert.equal(rejected.body.error.code, "FIBER_INVOICE_REJECTED");
     assert.equal(rejected.body.error.details.retryable, false);
-    assert.equal(rejected.body.error.details.cause_code, -32602);
+    assert.equal(rejected.body.error.details.cause_code, "-32602");
     // The node's own message stays in the server log, not the public response.
     assert.doesNotMatch(JSON.stringify(rejected.body), /unknown currency/);
 

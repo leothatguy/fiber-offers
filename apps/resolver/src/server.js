@@ -701,7 +701,13 @@ async function bindFiberAddress({ request, response, context, origin }) {
 }
 
 async function lookupFiberAddress({ request, response, context, params, origin }) {
-  const username = decodeURIComponent(params.username);
+  let username;
+  try {
+    username = decodeURIComponent(params.username);
+  } catch {
+    // A stray "%" in the path is a malformed name, not a fault of the resolver.
+    throw httpError(400, "INVALID_USERNAME", "username is not valid percent-encoding");
+  }
   const result = await context.store.getByUsername(username);
   if (!result) throw httpError(404, "FIBER_ADDRESS_NOT_FOUND", "Fiber Address was not found");
 

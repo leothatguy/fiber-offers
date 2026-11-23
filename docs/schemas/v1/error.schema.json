@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/error.schema.json",
+  "title": "Error response",
+  "description": "The body of every 4xx and 5xx response (docs/spec-v1.md, sections 7 and 13).",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": { "$ref": "#/$defs/code" },
+        "message": {
+          "description": "For a person. Not stable; act on code.",
+          "type": "string"
+        },
+        "details": {
+          "type": "object",
+          "properties": {
+            "retryable": {
+              "description": "Whether sending the same request again can succeed.",
+              "type": "boolean"
+            },
+            "retry_after_seconds": {
+              "description": "With RATE_LIMITED: the same number as the Retry-After header.",
+              "type": "number",
+              "minimum": 0
+            },
+            "next_cycle": {
+              "description": "With INVALID_RECURRENCE_CYCLE: the cycle to request.",
+              "$ref": "common.schema.json#/$defs/safeInteger"
+            },
+            "outstanding_until": {
+              "description": "With OFFER_INVOICE_OUTSTANDING: when the open invoice lapses.",
+              "$ref": "common.schema.json#/$defs/timestamp"
+            },
+            "cause_code": {
+              "description": "The code of the failure underneath. With OFFER_INVALID: why the stored offer does not verify. With a 502 or 503 from the merchant node: the node's or the network's own error code, a JSON-RPC number included, written as a string.",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": ["code", "message"]
+    }
+  },
+  "required": ["error"],
+  "$defs": {
+    "code": {
+      "description": "One of the codes of spec section 13. Upper-case words joined by underscores.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$"
+    }
+  }
+}

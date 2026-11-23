@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/resolution.schema.json",
+  "title": "Resolution",
+  "description": "One payment attempt, as GET /offers/{offer_id}/resolutions/{resolution_id} returns it (docs/spec-v1.md, sections 7.3 and 10). A resolver may add members.",
+  "type": "object",
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/resolutionId" },
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "status": { "$ref": "common.schema.json#/$defs/resolutionStatus" },
+    "amount": { "$ref": "common.schema.json#/$defs/amount" },
+    "asset": { "$ref": "common.schema.json#/$defs/asset" },
+    "payment_hash": { "$ref": "common.schema.json#/$defs/hash32" },
+    "invoice": {
+      "type": "object",
+      "properties": {
+        "invoice": { "type": "string", "minLength": 1 },
+        "payment_hash": { "$ref": "common.schema.json#/$defs/hash32" },
+        "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+      },
+      "required": ["invoice", "expires_at"]
+    },
+    "recurrence": { "$ref": "#/$defs/cycle" },
+    "settled_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "status_history": {
+      "description": "Reference resolver: each status the resolution has had, oldest first. The first entry is invoice_pending, the resolver's own reservation while it asks the node for the invoice; a resolution is never returned in that state.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "anyOf": [{ "const": "invoice_pending" }, { "$ref": "common.schema.json#/$defs/resolutionStatus" }]
+          },
+          "at": { "$ref": "common.schema.json#/$defs/timestamp" },
+          "source": { "type": "string" }
+        },
+        "required": ["status", "at"]
+      }
+    }
+  },
+  "required": ["id", "offer_id", "status", "amount", "asset", "payment_hash", "invoice"],
+  "$defs": {
+    "cycle": {
+      "description": "Present when the resolution is one cycle of a subscription. Spec 11.",
+      "type": "object",
+      "properties": {
+        "cycle": { "$ref": "common.schema.json#/$defs/safeInteger" },
+        "approval_id": { "$ref": "common.schema.json#/$defs/subscriptionId" },
+        "interval": { "enum": ["daily", "weekly", "monthly", "custom_seconds"] },
+        "scheduled_for": { "type": "string" }
+      },
+      "required": ["cycle", "approval_id"]
+    }
+  }
+}

@@ -28,9 +28,10 @@ docs/
   deployment.md
   protocol.md
   resolver-api.md
+  schemas/       JSON Schemas and an OpenAPI description of the wallet-facing routes
   sdk.md
   spec-v1.md
-  test-vectors/
+  test-vectors/  Conformance vectors and a second implementation
 SECURITY.md
 ```
 
@@ -327,6 +328,7 @@ Not production-ready yet:
 - Managed production secrets, backups, metrics, TLS, and alerting.
 
 See [docs/spec-v1.md](docs/spec-v1.md) for the specification, [docs/test-vectors](docs/test-vectors/README.md) for
-conformance vectors and a second implementation, and [docs/resolver-api.md](docs/resolver-api.md) for what the
-reference resolver offers a merchant.
+conformance vectors and a second implementation, [docs/schemas](docs/schemas/README.md) for JSON Schemas and an
+OpenAPI description, and [docs/resolver-api.md](docs/resolver-api.md) for what the reference resolver offers a
+merchant.
 See [docs/live-fiber-testing.md](docs/live-fiber-testing.md) for the live Fiber node path.

@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/offer.schema.json",
+  "title": "Fiber Offer v1 (signed)",
+  "description": "The shape of a signed fiberoffer-v1 offer in canonical form (docs/spec-v1.md, section 2). An offer that does not match this schema is not a valid offer. One that matches is not thereby valid: its offer_id and signature must still be recomputed and checked (spec 4.3), and the rules listed in README.md under 'What the schemas do not check' still apply.",
+  "type": "object",
+  "properties": {
+    "scheme": { "const": "fiberoffer-v1" },
+    "version": { "const": 1 },
+    "network": { "enum": ["mainnet", "testnet", "dev"] },
+    "node_id": { "$ref": "common.schema.json#/$defs/nodeId" },
+    "public_key": { "$ref": "common.schema.json#/$defs/ed25519PublicKeyPem" },
+    "resolver_url": { "$ref": "#/$defs/resolverUrl" },
+    "description": {
+      "description": "At most 512 UTF-8 bytes, which this schema can only bound as 512 characters. No leading or trailing white space; the pattern lists the white space characters themselves (ECMAScript WhiteSpace and LineTerminator), because \\s does not mean the same in every regular expression engine.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\t\n\u000b\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff](?:[\\s\\S]*[^\t\n\u000b\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff])?$"
+    },
+    "assets": {
+      "description": "No asset is listed twice: two entries with the same asset_type and type_script_hash are the same asset whatever their symbols, which is stricter than uniqueItems.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/asset" }
+    },
+    "amount_min": { "$ref": "common.schema.json#/$defs/amount" },
+    "amount_max": { "$ref": "common.schema.json#/$defs/amount" },
+    "recurrence": { "$ref": "#/$defs/recurrence" },
+    "expiry": {
+      "description": "Unix seconds. Invoice requests are refused once the current time is greater than it.",
+      "$ref": "common.schema.json#/$defs/safeInteger"
+    },
+    "single_use": { "type": "boolean" },
+    "metadata": { "$ref": "#/$defs/freeFormObject" },
+    "extensions": { "$ref": "#/$defs/freeFormObject" },
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "signature": { "$ref": "common.schema.json#/$defs/signature" }
+  },
+  "patternProperties": {
+    "^x_": {
+      "description": "An extension field: any signable JSON value except null.",
+      "allOf": [{ "$ref": "#/$defs/signableJson" }, { "not": { "type": "null" } }]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "scheme",
+    "version",
+    "network",
+    "node_id",
+    "public_key",
+    "resolver_url",
+    "assets",
+    "single_use",
+    "offer_id",
+    "signature"
+  ],
+  "allOf": [
+    {
+      "description": "An offer is not both single-use and recurring.",
+      "if": { "type": "object", "required": ["recurrence"] },
+      "then": { "type": "object", "properties": { "single_use": { "const": false } } }
+    },
+    {
+      "description": "Plain http only on the dev network, or for a loopback address.",
+      "if": {
+        "type": "object",
+        "properties": { "network": { "enum": ["mainnet", "testnet"] } },
+        "required": ["network"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "resolver_url": {
+            "type": "string",
+            "pattern": "^(?:https://|http://(?:(?:[a-z0-9-]+\\.)*localhost|127(?:\\.[0-9]{1,3}){3}|\\[::1\\])(?::[0-9]+)?(?:/|$))"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "resolverUrl": {
+      "description": "Scheme, host, an optional non-default port and plain path segments; no trailing slash, credentials, query, fragment or percent-encoding. Spec 2.2. The pattern is the grammar. What it does not say: that an IPv4 address is a dotted quad of numbers up to 255, that an IPv6 literal is a real address in RFC 5952 form, and that a host whose last label is a number is an IPv4 address.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^https?://(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*|\\[[0-9a-f:.]+\\])(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:/[A-Za-z0-9._~-]+)*$",
+      "allOf": [
+        {
+          "description": "The port is never the scheme's default.",
+          "not": { "type": "string", "pattern": "^(?:https://(?:[^/\\[\\]:]+|\\[[^\\]]*\\]):443|http://(?:[^/\\[\\]:]+|\\[[^\\]]*\\]):80)(?:/|$)" }
+        },
+        {
+          "description": "No path segment is . or ..",
+          "not": { "type": "string", "pattern": "/\\.\\.?(?:/|$)" }
+        }
+      ]
+    },
+    "recurrence": {
+      "description": "Spec 11. amount lies within amount_min and amount_max, and spending_cap_total is at least amount; neither comparison can be written here.",
+      "type": "object",
+      "properties": {
+        "interval": { "enum": ["daily", "weekly", "monthly", "custom_seconds"] },
+        "amount": { "$ref": "common.schema.json#/$defs/amount" },
+        "cap_cycles": { "$ref": "common.schema.json#/$defs/safeInteger" },
+        "spending_cap_total": { "$ref": "common.schema.json#/$defs/amount" },
+        "custom_seconds": { "$ref": "common.schema.json#/$defs/safeInteger" }
+      },
+      "required": ["interval", "amount"],
+      "additionalProperties": false,
+      "anyOf": [
+        { "type": "object", "required": ["cap_cycles"] },
+        { "type": "object", "required": ["spending_cap_total"] }
+      ],
+      "if": {
+        "type": "object",
+        "properties": { "interval": { "const": "custom_seconds" } },
+        "required": ["interval"]
+      },
+      "then": { "type": "object", "required": ["custom_seconds"] },
+      "else": { "type": "object", "properties": { "custom_seconds": false } }
+    },
+    "freeFormObject": {
+      "description": "metadata and extensions: a JSON object of content this format does not define. Signed with the rest. Spec 2.5.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/allowedKey" },
+      "additionalProperties": { "$ref": "#/$defs/signableJson" }
+    },
+    "signableJson": {
+      "description": "JSON with one spelling in every language: whole numbers only, and no key that could alter an object. At most 8 levels deep, which this schema does not check.",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "boolean" },
+        { "type": "null" },
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        { "type": "array", "items": { "$ref": "#/$defs/signableJson" } },
+        {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/allowedKey" },
+          "additionalProperties": { "$ref": "#/$defs/signableJson" }
+        }
+      ]
+    },
+    "allowedKey": {
+      "type": "string",
+      "not": { "enum": ["__proto__", "constructor", "prototype"] }
+    }
+  }
+}

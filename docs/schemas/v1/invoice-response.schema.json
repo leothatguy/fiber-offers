@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/invoice-response.schema.json",
+  "title": "Invoice response",
+  "description": "What POST /offers/{offer_id}/invoice returns: 201 for a new invoice, 200 with idempotent_replay for a repeated request (docs/spec-v1.md, section 7.2). A resolver may add members. None of this is to be trusted: the payer reads the invoice with its own node and checks it against the signed offer (spec 9).",
+  "type": "object",
+  "properties": {
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "resolution_id": { "$ref": "common.schema.json#/$defs/resolutionId" },
+    "status": { "$ref": "common.schema.json#/$defs/resolutionStatus" },
+    "amount": { "$ref": "common.schema.json#/$defs/amount" },
+    "asset": { "$ref": "common.schema.json#/$defs/asset" },
+    "invoice": {
+      "description": "The Fiber invoice string, from the merchant node.",
+      "type": "string",
+      "minLength": 1
+    },
+    "payment_hash": { "$ref": "common.schema.json#/$defs/hash32" },
+    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "idempotency_key": { "$ref": "common.schema.json#/$defs/idempotencyKey" },
+    "idempotent_replay": {
+      "description": "Present and true when this is the response to an earlier request with the same key.",
+      "const": true
+    },
+    "recurrence": { "$ref": "resolution.schema.json#/$defs/cycle" }
+  },
+  "required": ["offer_id", "resolution_id", "status", "amount", "asset", "invoice", "payment_hash", "expires_at"]
+}

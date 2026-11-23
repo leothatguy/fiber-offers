@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/subscription-status.schema.json",
+  "title": "Subscription status",
+  "description": "Where one subscription stands, as GET /offers/{offer_id}/recurrence-status?approval_id=... returns it (docs/spec-v1.md, section 11.2). On an offer that is not recurring, enabled is false and nothing else is promised.",
+  "type": "object",
+  "properties": {
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "enabled": {
+      "description": "Whether the offer is recurring.",
+      "type": "boolean"
+    },
+    "revoked": { "type": "boolean" },
+    "terms": { "$ref": "offer.schema.json#/$defs/recurrence" },
+    "approval_id": { "$ref": "common.schema.json#/$defs/subscriptionId" },
+    "cycles_paid": { "type": "integer", "minimum": 0 },
+    "paid_total": {
+      "description": "A decimal string; 0 before the first paid cycle.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "next_cycle": {
+      "description": "The cycle to request next. Absent once a cap is reached.",
+      "$ref": "common.schema.json#/$defs/safeInteger"
+    },
+    "cap_reached": { "type": "boolean" },
+    "outstanding": {
+      "description": "The open cycle, if any.",
+      "type": "object",
+      "properties": {
+        "cycle": { "$ref": "common.schema.json#/$defs/safeInteger" },
+        "resolution_id": { "$ref": "common.schema.json#/$defs/resolutionId" },
+        "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+      },
+      "required": ["cycle", "resolution_id"]
+    },
+    "cycle_cap_remaining": { "type": "integer", "minimum": 0 },
+    "spending_cap_remaining": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" }
+  },
+  "required": ["offer_id", "enabled"],
+  "if": {
+    "type": "object",
+    "properties": { "enabled": { "const": true } },
+    "required": ["enabled"]
+  },
+  "then": {
+    "type": "object",
+    "required": ["approval_id", "cycles_paid", "paid_total", "cap_reached"],
+    "anyOf": [
+      { "type": "object", "required": ["next_cycle"], "properties": { "cap_reached": { "const": false } } },
+      { "type": "object", "properties": { "cap_reached": { "const": true }, "next_cycle": false } }
+    ]
+  }
+}

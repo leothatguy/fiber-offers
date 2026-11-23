@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/leothatguy/fiber-offers/main/docs/schemas/v1/offer-response.schema.json",
+  "title": "Offer response",
+  "description": "What GET /offers/{offer_id} returns (docs/spec-v1.md, section 7.1). A resolver may add members. A wallet verifies the offer itself and checks that its ID is the one requested; nothing else in this response is signed.",
+  "type": "object",
+  "properties": {
+    "offer_id": { "$ref": "common.schema.json#/$defs/offerId" },
+    "offer": { "$ref": "offer.schema.json" },
+    "encoded_offer": {
+      "description": "The offer as one lowercase Bech32m string. Spec 5.",
+      "type": "string",
+      "pattern": "^fbroffer1[02-9ac-hj-np-z]+$",
+      "maxLength": 6569
+    },
+    "payment_link": { "type": "string" },
+    "disabled": {
+      "description": "Reference resolver: true once the offer is revoked or switched off.",
+      "type": "boolean"
+    },
+    "revoked_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "valid": {
+      "description": "Reference resolver: whether the stored offer passes verification under the rules this resolver runs.",
+      "type": "boolean"
+    }
+  },
+  "required": ["offer_id", "offer", "encoded_offer"]
+}

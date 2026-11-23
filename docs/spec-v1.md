@@ -2,7 +2,7 @@
 
 **Status:** draft for review · **Format:** `fiberoffer-v1` · **Reference implementation:** `@fiber-offers/protocol`, `@fiber-offers/sdk`, and the resolver in this repository
 
-A Fiber invoice can be paid once and expires. A Fiber Offer is a signed, reusable statement of payment terms that a payer turns into a fresh invoice each time they pay. This document specifies the offer, how it is encoded, how a payer obtains and checks an invoice for it, and what a resolver must do. It is written so that a wallet or a resolver can be built from it alone; [conformance vectors](test-vectors/README.md) and a second, independent implementation are published with it.
+A Fiber invoice can be paid once and expires. A Fiber Offer is a signed, reusable statement of payment terms that a payer turns into a fresh invoice each time they pay. This document specifies the offer, how it is encoded, how a payer obtains and checks an invoice for it, and what a resolver must do. It is written so that a wallet or a resolver can be built from it alone; [conformance vectors](test-vectors/README.md), a second, independent implementation, and [machine-readable schemas](schemas/README.md) of every object and route are published with it.
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY are to be read as in RFC 2119.
 
@@ -55,7 +55,7 @@ Each field has exactly one valid spelling, its *canonical form*. A verifier MUST
 | `node_id` | yes | The merchant node's compressed secp256k1 public key: 66 lowercase hex characters beginning `02` or `03` |
 | `public_key` | yes | The offer key: the PEM of an Ed25519 SubjectPublicKeyInfo. `-----BEGIN PUBLIC KEY-----`, a line feed, the 60 base64 characters of the 44-byte DER on one line, a line feed, `-----END PUBLIC KEY-----`, and nothing after it. No other key type is valid |
 | `resolver_url` | yes | See 2.2 |
-| `description` | no | A non-empty string of at most 512 UTF-8 bytes with no leading or trailing white space (ECMAScript *WhiteSpace* or *LineTerminator*) |
+| `description` | no | A non-empty string of at most 512 UTF-8 bytes that neither begins nor ends with white space. White space is U+0009 to U+000D, U+0020, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF (ECMAScript *WhiteSpace* and *LineTerminator*) |
 | `assets` | yes | 1 to 16 assets, none listed twice. See 2.3 |
 | `amount_min`, `amount_max` | no | Amounts (2.4). When both are present, `amount_min` ≤ `amount_max` |
 | `recurrence` | no | See section 11 |
@@ -80,7 +80,7 @@ segment      = 1*( ALPHA / DIGIT / "-" / "." / "_" / "~" )
 ```
 
 - `dns-name` is lowercase labels of letters, digits and hyphens, joined by dots; an internationalized name is written in its `xn--` form. `ipv4` is a dotted quad. `ipv6` is the lowercase, compressed form of RFC 5952. A host whose last label is a number is an `ipv4`.
-- `port` has no leading zero and is never the scheme's default (443, 80).
+- `port` is a number from 1 to 65535 with no leading zero, and is never the scheme's default (443, 80).
 - A segment is never `.` or `..`. There is no trailing slash, user information, query, fragment or percent-encoding.
 - The whole string is at most 512 characters.
 - `http` is valid only when `network` is `dev`, or the host is a loopback address (`localhost`, a name ending `.localhost`, `127.0.0.0/8`, `[::1]`). Otherwise the scheme MUST be `https`.
@@ -227,7 +227,7 @@ General rules:
   { "error": { "code": "AMOUNT_TOO_LOW", "message": "requested amount is below offer minimum", "details": {} } }
   ```
 
-  `code` is one of section 13. `details.retryable`, when present, says whether sending the same request again can succeed.
+  `code` is one of section 13. `details.retryable`, when present, says whether sending the same request again can succeed. `details.cause_code`, when present, is the code of the failure underneath, always as a string.
 - A resolver that limits request rates answers `429` with code `RATE_LIMITED`, a `Retry-After` header and the same number in `details.retry_after_seconds`.
 
 ### 7.1 Fetch an offer
@@ -291,7 +291,7 @@ Anyone holding the `resolution_id` can read it. A resolver MUST NOT offer anonym
 
 ### 7.4 Revoke an offer
 
-`DELETE /offers/{offer_id}` with a revocation (section 12) in the body, as `{ "revocation": { … } }`. It needs no other credential: the revocation is signed by the offer key.
+`DELETE /offers/{offer_id}` with a revocation (section 12) in the body, as `{ "revocation": { … } }`. It needs no other credential: the revocation is signed by the offer key. On success the resolver answers `200` with at least `{ "offer_id": "0x…", "revoked": true }`.
 
 ### 7.5 Subscription status
 
@@ -407,7 +407,7 @@ Within one subscription:
 - One cycle can be outstanding at a time (`409 RECURRENCE_CYCLE_OUTSTANDING`).
 - Once `cap_cycles` cycles are paid, or the next cycle would take the total past `spending_cap_total`, further requests are `409 RECURRENCE_CYCLE_CAP_REACHED` or `409 RECURRENCE_SPENDING_CAP_REACHED`.
 
-`GET /offers/{offer_id}/recurrence-status?approval_id=…` returns where a subscription stands: `cycles_paid`, `paid_total`, `next_cycle` (absent once a cap is reached), `cap_reached`, `outstanding` (the open cycle, if any), `cycle_cap_remaining` and `spending_cap_remaining`. Before answering, the resolver brings that subscription's open invoice up to date with the node. The ID is derived from a key only the payer holds, so the route needs no credential.
+`GET /offers/{offer_id}/recurrence-status?approval_id=…` returns where a subscription stands: `enabled` (true), `approval_id`, `cycles_paid`, `paid_total`, `next_cycle` (absent once a cap is reached), `cap_reached`, `outstanding` (the open cycle, if any), `cycle_cap_remaining` and `spending_cap_remaining`. On an offer that is not recurring the answer is `enabled: false` and nothing more is promised. Before answering, the resolver brings that subscription's open invoice up to date with the node. The ID is derived from a key only the payer holds, so the route needs no credential.
 
 A wallet can check, from the signed offer alone and before contacting anyone, that a cycle has the right amount and that its number fits the caps. How many cycles a subscription has paid is the resolver's to track.
 
@@ -451,23 +451,25 @@ A resolver reports the first matching failure. Statuses are those of the referen
 | --- | --- |
 | `INVALID_OFFER_CHECKSUM` | The encoded string is damaged |
 | `INVALID_OFFER_ENCODING` | Not an encoded offer. `details.reason`: `prefix`, `mixed_case`, `character`, `length`, `padding`, `json`, `not_canonical` |
+| `INVALID_OFFER`, `MISSING_FIELD`, `INVALID_FIELD`, `INVALID_HEX` | The offer is not an object, or a member is absent or of the wrong kind. `details.field` |
 | `NON_CANONICAL_OFFER` | A field is not in canonical form. `details.field` |
 | `UNKNOWN_OFFER_FIELD`, `FORBIDDEN_KEY` | A field the format does not allow |
 | `INVALID_SCHEME`, `INVALID_VERSION`, `INVALID_NETWORK`, `INVALID_NODE_ID`, `INVALID_URL`, `INSECURE_RESOLVER_URL`, `INVALID_SINGLE_USE`, `INVALID_OFFER_ID` | That field is missing or malformed |
 | `INVALID_PUBLIC_KEY`, `INVALID_KEY_TYPE` | The key is unreadable, or not Ed25519 |
 | `INVALID_ASSETS`, `INVALID_ASSET`, `INVALID_ASSET_TYPE`, `INVALID_ASSET_SYMBOL`, `DUPLICATE_ASSET`, `TOO_MANY_ASSETS` | The asset list |
-| `INVALID_AMOUNT`, `INVALID_INTEGER`, `INVALID_AMOUNT_BOUNDS` | An amount or integer |
+| `INVALID_AMOUNT`, `INVALID_INTEGER`, `INTEGER_TOO_LARGE`, `INVALID_AMOUNT_BOUNDS` | An amount or integer |
 | `INVALID_RECURRENCE`, `INVALID_RECURRENCE_INTERVAL`, `RECURRENCE_CAP_REQUIRED`, `RECURRENCE_AMOUNT_OUT_OF_BOUNDS`, `SINGLE_USE_RECURRENCE_CONFLICT` | The recurrence terms |
-| `INVALID_METADATA`, `INVALID_EXTENSIONS`, `INVALID_SIGNED_JSON` | Free-form content |
+| `INVALID_METADATA`, `INVALID_EXTENSIONS`, `INVALID_SIGNED_JSON`, `INVALID_CANONICAL_VALUE` | Free-form content, or text that is not well-formed Unicode |
 | `DESCRIPTION_TOO_LONG`, `OFFER_FIELD_TOO_LARGE`, `OFFER_TOO_LARGE` | A size limit |
-| `OFFER_ID_MISMATCH`, `INVALID_SIGNATURE` | The ID or signature does not check out |
-| `OFFER_EXPIRY_IN_PAST` | A producer was asked for an offer that has already expired |
+| `OFFER_ID_MISMATCH`, `INVALID_SIGNATURE`, `SIGNATURE_VERIFICATION_FAILED` | The ID or signature does not check out, or the signature could not be checked at all |
+| `OFFER_EXPIRY_IN_PAST`, `INVALID_PRIVATE_KEY` | A producer was asked for an offer that has already expired, or given a key it cannot sign with |
+| `INVALID_CKB_SCRIPT` | A type script given to be hashed is malformed |
 
 **An invoice request**
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| `400` | `INVALID_AMOUNT`, `INVALID_JSON`, `INVALID_IDEMPOTENCY_KEY`, `IDEMPOTENCY_KEY_MISMATCH` | The request is malformed |
+| `400` | `INVALID_AMOUNT`, `INVALID_INTEGER`, `INVALID_JSON`, `INVALID_IDEMPOTENCY_KEY`, `IDEMPOTENCY_KEY_MISMATCH` | The request is malformed |
 | `400` | `SUBSCRIPTION_PROOF_REQUIRED`, `RECURRENCE_AMOUNT_MISMATCH`, `RECURRENCE_NOT_CONFIGURED` | Section 11 |
 | `403` | `SUBSCRIPTION_KEY_MISMATCH`, `INVALID_SUBSCRIPTION_SIGNATURE` | Section 11 |
 | `404` | `OFFER_NOT_FOUND`, `RESOLUTION_NOT_FOUND`, `FIBER_ADDRESS_NOT_FOUND` | No such object |
@@ -485,7 +487,9 @@ A resolver reports the first matching failure. Statuses are those of the referen
 
 **Registering an offer with a resolver:** `403 OFFER_NODE_MISMATCH` (the offer names another node), `422 OFFER_NETWORK_MISMATCH`, `422 ASSET_SCRIPT_NOT_CONFIGURED`, `401 UNAUTHORIZED`.
 
-**A revocation:** `400 INVALID_REVOCATION`, `400 REVOCATION_EXPIRED`, `400 INVALID_REVOCATION_SIGNATURE`.
+**A revocation:** `400 INVALID_REVOCATION`, `400 REVOCATION_EXPIRED`, `400 INVALID_REVOCATION_SIGNATURE`, and `409 OFFER_REVOKED` when the offer is already revoked.
+
+**Resolving a Fiber Address:** `400 INVALID_USERNAME` for a name that is not written as section 6 requires, `404 FIBER_ADDRESS_NOT_FOUND` for one that leads to no offer.
 
 **What a payer's own checks report** (section 9; these are the reference SDK's): `RESOLVER_MISMATCH`, `INVOICE_PAYEE_MISSING`, `INVOICE_PAYEE_MISMATCH`, `INVOICE_AMOUNT_MISSING`, `INVOICE_AMOUNT_MISMATCH`, `INVOICE_CURRENCY_MISMATCH`, `INVOICE_ASSET_MISMATCH`, `INVOICE_EXPIRED`, `INVOICE_BINDING_MISSING`, `INVOICE_OFFER_MISMATCH`, `INVOICE_RESOLUTION_MISMATCH`, `INVOICE_PAYMENT_HASH_MISMATCH`, `INVOICE_UNPARSEABLE`.
 
@@ -565,3 +569,5 @@ A resolver reports the first matching failure. Statuses are those of the referen
 An implementation conforms to this document when it reproduces every output in [`test-vectors/v1.json`](test-vectors/README.md) and refuses every invalid case there. The file fixes canonical JSON, type script hashes, twelve valid offers with every intermediate value, and the offers, encodings, requests, revocations and cycle requests that must be refused.
 
 `test-vectors/verify.py` is a second implementation, in Python, written from this document and sharing no code with the reference implementation. It passes every vector.
+
+[`schemas/`](schemas/README.md) holds a JSON Schema for each object in this document and an OpenAPI description of the routes of sections 6 to 8. They are tested against the vectors, against the reference implementation and against the running reference resolver. Where a schema and this document disagree, this document is right and the schema has a defect.
