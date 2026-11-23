@@ -83,8 +83,9 @@ With PostgreSQL as the store, after Phase B of the remediation plan:
 | One recurring offer (cap 2), two subscriptions | Each paid its own two cycles and then reached its own cap |
 | A cycle request naming another subscription, signed with a different key | `403 SUBSCRIPTION_KEY_MISMATCH` |
 
-These were run by hand from a scratch script. Turning them into the repeatable
-`npm run fiber:e2e-check` with a saved transcript is plan items `F2` and `F3`.
+These were first run by hand. They are now cases of the repeatable
+`npm run fiber:e2e-check` (section 8), whose last recorded run is saved as
+[`evidence/live-fiber-run.json`](evidence/live-fiber-run.json).
 
 ## 1. Probe The Fiber Node
 
@@ -350,6 +351,21 @@ FIBER_E2E_TRAMPOLINE_HOPS=<comma-separated-pubkeys>
 ```
 
 A full run makes nine payments of `FIBER_E2E_AMOUNT` and takes about a minute.
+
+### What the live run does not cover yet
+
+- **Settling a token payment.** A token invoice is minted and the payer node
+  verifies it, but no token moves: the payer node has no token channel.
+- **A payment that ends `Failed` on the node.** This setup has no way to force
+  one. The retry case covers a failure in transit, not a failed payment.
+- **A node whose RPC requires a token.** Access with a Biscuit token was
+  checked once by hand ([Fiber RPC Access](deployment.md#fiber-rpc-access)); it
+  is not a case of the repeatable run.
+- **A payer the project does not operate.** Both nodes run on one machine with
+  a direct channel between them, so multi-hop routing through the public
+  network is not exercised.
+- **Continuous integration.** The run needs funded nodes, so it is a command
+  run by hand, with its transcript committed.
 
 The command prints channel, peer, direct-channel, common-counterparty, and `failure` diagnostics if the route or payment fails. `ROUTE_OUTBOUND_LIQUIDITY_UNUSABLE` usually means Fiber could not find an online route from the payer to the merchant invoice, even if the payer has non-zero local channel balances. Check `route_context.payer_offline_channel_counterparties`, `route_context.offline_common_counterparties`, pending TLCs, and whether there is a direct ready channel.
 

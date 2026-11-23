@@ -62,17 +62,85 @@ Package documentation is available directly on GitHub:
 
 ## Quick Start
 
-Requires Node.js 20.19 or newer. Start the interface in explicit mock mode when
-evaluating the repository without a Fiber node:
+Requires Node.js 20.19 or newer.
 
 ```bash
 npm install
 npm test
+```
+
+There are two ways to run the resolver, and they differ in where invoices come
+from. **Mock mode shows the interface and proves nothing about Fiber.** The
+live path uses real Fiber nodes on the CKB testnet, and it is the one the
+project's claims rest on.
+
+| | Mock invoices | Real Fiber nodes |
+| --- | --- | --- |
+| Where an invoice comes from | The resolver makes one up. No node is involved and it cannot be paid | A Fiber node mints it; a second node verifies and pays it |
+| What you need | Nothing | x86_64 Linux for the bundled node manager, or your own `fnn`. Testnet CKB from the faucet to send payments |
+| What it is for | Looking at the interface and the API | Everything you intend to rely on |
+
+### Without a Fiber node (mock invoices)
+
+```bash
 npm run smoke
 npm run dev:mock
 ```
 
-Open `http://localhost:8787`.
+Open `http://localhost:8787`. `GET /health` reports `"invoice_mode": "mock"`
+for as long as the resolver runs this way.
+
+### With real Fiber nodes (testnet)
+
+```bash
+npm run fiber:local -- init     # downloads fnn v0.10.1, checks its SHA-256, creates a merchant and a payer node
+npm run fiber:local -- start
+npm run fiber:local -- status   # each node's identity, channels and funding address
+npm run dev:fiber:pair          # the resolver on the merchant node, with the payer node for route checks
+```
+
+Open `http://localhost:8787`. Invoices are now minted by the merchant node,
+and that works before either node holds any funds. To send payments, fund both
+nodes from the [Nervos faucet](https://faucet.nervos.org), open a channel
+between them ([section 7 of the live testing guide](docs/live-fiber-testing.md#7-inspect-payer-to-merchant-topology)),
+and run the end-to-end check:
+
+```bash
+npm run fiber:e2e-check
+```
+
+It starts a resolver against the merchant node and drives it only through the
+public SDK with the payer node: thirteen cases, among them a reusable offer
+paid twice, a single-use offer, two subscribers on one recurring offer, expiry
+on the node, signed revocation, a resolver that substitutes another invoice,
+and two replicas racing for one single-use offer. Nothing in it is mocked. The
+transcript of the last recorded run, with the commit, the node versions, every
+invoice and payment hash and what each node reported, is
+[`docs/evidence/live-fiber-run.json`](docs/evidence/live-fiber-run.json). See
+[Live Fiber Testing](docs/live-fiber-testing.md) for each step and for what is
+not covered yet.
+
+The local nodes keep their keys unencrypted beside them. They are test nodes:
+never fund them with mainnet assets.
+
+### What the tests cover
+
+`npm test` runs the unit and integration suite. Most of it uses mock invoices,
+because it has to run without a node. It also checks the format against the
+[conformance vectors](docs/test-vectors/README.md) and a second implementation
+in Python, the published [schemas](docs/schemas/README.md) against the running
+resolver, and the TypeScript declarations against the code. Tests that need
+PostgreSQL, Redis or Python's `cryptography` package are skipped when those are
+missing:
+
+```bash
+TEST_DATABASE_URL=postgresql://... TEST_REDIS_URL=redis://... npm test
+```
+
+The [CI workflow](.github/workflows/ci.yml) runs the suite on each supported
+Node line with all of them present and fails if any test is skipped. It also
+builds the Docker image and uses the whole Compose stack from outside. The live
+check above is not part of it: it needs funded nodes.
 
 `dev:mock`, `dev:fiber:local`, `dev:fiber:pair` and `stack:up` start the
 resolver in demo mode (`RESOLVER_DEMO_MODE=true`), which lets the console create
@@ -309,7 +377,7 @@ Working:
 - Fresh invoice resolution from the same static offer.
 - Settlement status tracking for invoice resolutions.
 - Live Fiber invoice status sync from `get_invoice`.
-- Opt-in background Fiber settlement polling.
+- Background Fiber settlement polling, on by default.
 - Merchant reconciliation exports and receipt records.
 - Webhook subscriptions, signed delivery, retry limits, background delivery worker, and inspectable event outbox.
 - Optional AES-256-GCM webhook-secret encryption and production private-target blocking.
