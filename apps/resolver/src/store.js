@@ -69,6 +69,25 @@ export class InMemoryOfferStore {
     return clone(Object.values(this.state.offers));
   }
 
+  // One page of offers in order of creation: { items, next_cursor }. Options:
+  // `limit`, `cursor` (the next_cursor of the page before) and `order`
+  // ("asc" or "desc"). next_cursor is absent on the last page.
+  async listOffersPage(options = {}) {
+    await this.load();
+    return pageOf(Object.values(this.state.offers), (entry) => [entry.created_at, entry.offer.offer_id], options);
+  }
+
+  // The Fiber Address name of each of the given offers that has one.
+  async getUsernamesForOffers(offerIds) {
+    await this.load();
+    const wanted = new Set(offerIds);
+    const names = new Map();
+    for (const [username, binding] of Object.entries(this.state.usernames)) {
+      if (wanted.has(binding.offer_id) && !names.has(binding.offer_id)) names.set(binding.offer_id, username);
+    }
+    return names;
+  }
+
   async getUsernameForOffer(offerId) {
     await this.load();
     const entry = Object.entries(this.state.usernames).find(([, binding]) => binding.offer_id === offerId);
@@ -244,6 +263,54 @@ export class InMemoryOfferStore {
     await this.load();
     const record = this.state.resolutions[offerId]?.find((resolution) => resolution.idempotency_key === idempotencyKey);
     return record ? clone(record) : undefined;
+  }
+
+  // One page of an offer's resolutions in order of creation; see listOffersPage.
+  async listResolutionsPage(offerId, options = {}) {
+    await this.load();
+    return pageOf(this.state.resolutions[offerId] ?? [], (record) => [record.created_at, record.id], options);
+  }
+
+  // The resolution that issued this invoice string for this offer, if any.
+  async findResolutionByInvoice(offerId, invoice) {
+    await this.load();
+    const record = this.state.resolutions[offerId]?.find(
+      (resolution) => resolution.invoice && (resolution.invoice.invoice === invoice || resolution.invoice.payment_request === invoice)
+    );
+    return record ? clone(record) : undefined;
+  }
+
+  // The resolutions that still count against an offer: all that did not end
+  // unpaid. With `approvalId`, those of that subscription only.
+  async getCountedResolutions(offerId, options = {}) {
+    await this.load();
+    const records = (this.state.resolutions[offerId] ?? []).filter(
+      (record) =>
+        !RELEASED_RESOLUTION_STATUSES.has(record.status) &&
+        (options.approvalId === undefined || record.recurrence?.approval_id === options.approvalId)
+    );
+    return clone(records);
+  }
+
+  // What reconciliation totals are made of: one row per status and asset, with
+  // the number of resolutions and the sum of their amounts.
+  async resolutionTotals(offerId) {
+    await this.load();
+    const groups = new Map();
+    for (const record of this.state.resolutions[offerId] ?? []) {
+      const key = JSON.stringify([record.status, record.asset?.asset_type, record.asset?.symbol]);
+      const group = groups.get(key) ?? {
+        status: record.status,
+        asset_type: record.asset?.asset_type,
+        asset_symbol: record.asset?.symbol,
+        count: 0,
+        amount_total: 0n
+      };
+      group.count += 1;
+      group.amount_total += BigInt(record.amount ?? "0");
+      groups.set(key, group);
+    }
+    return [...groups.values()].map((group) => ({ ...group, amount_total: group.amount_total.toString() }));
   }
 
   // An offer's invoices that still await an outcome, optionally those of one
@@ -475,6 +542,19 @@ export class InMemoryOfferStore {
   async listWebhookEvents(offerId) {
     await this.load();
     return clone(this.state.webhook_events[offerId] ?? []);
+  }
+
+  // One page of an offer's events, each with its deliveries, in order of
+  // creation; see listOffersPage.
+  async listWebhookEventsPage(offerId, options = {}) {
+    await this.load();
+    return pageOf(this.state.webhook_events[offerId] ?? [], (event) => [event.created_at, event.id], options);
+  }
+
+  async getWebhookEvent(offerId, eventId) {
+    await this.load();
+    const event = this.state.webhook_events[offerId]?.find((candidate) => candidate.id === eventId);
+    return event ? clone(event) : undefined;
   }
 
   // Up to `limit` deliveries to attempt now, the one due longest first, each
@@ -742,6 +822,50 @@ async function decryptStoredSecrets(state, cipher) {
 
 // An invoice that was issued and whose outcome is not known yet.
 const OPEN_RESOLUTION_STATUSES = new Set(["invoice_created", "invoice_received"]);
+// An invoice that ended unpaid. It never took anything from the offer.
+const RELEASED_RESOLUTION_STATUSES = new Set(["invoice_expired", "invoice_failed", "invoice_cancelled"]);
+
+// A cursor names the last item of a page by its creation time and ID. It is
+// opaque to callers: base64url of a small JSON array.
+// The creation time in a cursor, as either store writes it. Anything else,
+// such as a word PostgreSQL would read as a date, was not issued here.
+const CURSOR_TIME = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}(:?\d{2})?)$/;
+
+export function encodeCursor(key) {
+  return Buffer.from(JSON.stringify(key)).toString("base64url");
+}
+
+export function decodeCursor(cursor) {
+  if (cursor === undefined || cursor === null || cursor === "") return undefined;
+  try {
+    const key = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+    if (Array.isArray(key) && key.length === 2 && key.every((part) => typeof part === "string") && CURSOR_TIME.test(key[0])) {
+      return key;
+    }
+  } catch {
+    // Reported below.
+  }
+  throw storeError("cursor is not one this resolver issued", "INVALID_CURSOR", 400);
+}
+
+// One page of `items` ordered by `keyOf(item)`, a [created_at, id] pair.
+function pageOf(items, keyOf, options = {}) {
+  const descending = options.order === "desc";
+  const limit = options.limit ?? 100;
+  const after = decodeCursor(options.cursor);
+  const compare = (left, right) => left[0].localeCompare(right[0]) || left[1].localeCompare(right[1]);
+  const ordered = items
+    .map((item) => ({ item, key: keyOf(item) }))
+    .sort((left, right) => (descending ? compare(right.key, left.key) : compare(left.key, right.key)));
+  const rest = after
+    ? ordered.filter(({ key }) => (descending ? compare(key, after) < 0 : compare(key, after) > 0))
+    : ordered;
+  const page = rest.slice(0, limit);
+  return {
+    items: clone(page.map(({ item }) => item)),
+    ...(rest.length > limit ? { next_cursor: encodeCursor(page[page.length - 1].key) } : {})
+  };
+}
 
 export function normalizeUsername(username) {
   if (typeof username !== "string" || username.trim() === "") {

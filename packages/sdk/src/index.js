@@ -215,8 +215,16 @@ export class FiberOffersClient {
     return verifiedOfferResponse(resolved, offerId);
   }
 
-  async listOffers() {
-    return this.#request("/offers");
+  // One page: { offers, next_cursor }. Options: `limit`, `cursor` (the
+  // next_cursor of the page before) and `order` ("desc", the default, is
+  // newest first). next_cursor is absent on the last page.
+  async listOffers(options = {}) {
+    return this.#request(`/offers${pageQuery(options)}`);
+  }
+
+  // Every offer, following next_cursor to the end, or up to `maxItems`.
+  async listAllOffers(options = {}) {
+    return this.#everyPage((page) => this.listOffers(page), "offers", options);
   }
 
   async diagnostics() {
@@ -240,11 +248,19 @@ export class FiberOffersClient {
     });
   }
 
-  async getResolutions(offerOrId) {
+  // One page of an offer's resolutions: { resolutions, next_cursor }. Oldest
+  // first unless `order` is "desc". Options as for listOffers.
+  async getResolutions(offerOrId, options = {}) {
     const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId.offer_id;
     if (!offerId) throw new Error("offer_id is required to list resolutions");
 
-    return this.#request(`/offers/${offerId}/resolutions`);
+    return this.#request(`/offers/${offerId}/resolutions${pageQuery(options)}`);
+  }
+
+  // Every resolution of an offer, following next_cursor to the end, or up to
+  // `maxItems`.
+  async getAllResolutions(offerOrId, options = {}) {
+    return this.#everyPage((page) => this.getResolutions(offerOrId, page), "resolutions", options);
   }
 
   // With `approvalId` (a subscription ID): where that subscription stands.
@@ -278,11 +294,14 @@ export class FiberOffersClient {
     return this.#request(`/offers/${offerId}/resolutions/${resolutionId}/receipt.json`);
   }
 
-  async getReconciliation(offerOrId) {
+  // Totals over the offer's whole history, and one page of its rows
+  // (`rows`, `next_cursor`). Options as for listOffers. The CSV export
+  // (getReconciliationCsv) always has every row.
+  async getReconciliation(offerOrId, options = {}) {
     const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId.offer_id;
     if (!offerId) throw new Error("offer_id is required to get reconciliation");
 
-    return this.#request(`/offers/${offerId}/reconciliation.json`);
+    return this.#request(`/offers/${offerId}/reconciliation.json${pageQuery(options)}`);
   }
 
   async getReconciliationCsv(offerOrId) {
@@ -350,11 +369,19 @@ export class FiberOffersClient {
     });
   }
 
-  async getWebhookEvents(offerOrId) {
+  // One page of an offer's webhook events: { events, next_cursor }. Oldest
+  // first unless `order` is "desc". Options as for listOffers.
+  async getWebhookEvents(offerOrId, options = {}) {
     const offerId = typeof offerOrId === "string" ? offerOrId : offerOrId.offer_id;
     if (!offerId) throw new Error("offer_id is required to list webhook events");
 
-    return this.#request(`/offers/${offerId}/webhook-events`);
+    return this.#request(`/offers/${offerId}/webhook-events${pageQuery(options)}`);
+  }
+
+  // Every webhook event of an offer, following next_cursor to the end, or up
+  // to `maxItems`.
+  async getAllWebhookEvents(offerOrId, options = {}) {
+    return this.#everyPage((page) => this.getWebhookEvents(offerOrId, page), "events", options);
   }
 
   async deliverWebhookEvents(offerOrId, options = {}) {
@@ -479,6 +506,20 @@ export class FiberOffersClient {
     });
   }
 
+  // Reads a list to its end, one page per request. Options: `order`,
+  // `pageSize` (the `limit` of each request) and `maxItems`, to stop early.
+  async #everyPage(readPage, member, options = {}) {
+    const maxItems = options.maxItems ?? Infinity;
+    const items = [];
+    let cursor;
+    do {
+      const page = await readPage({ limit: options.pageSize, order: options.order, cursor });
+      items.push(...page[member]);
+      cursor = page.next_cursor;
+    } while (cursor && items.length < maxItems);
+    return items.length > maxItems ? items.slice(0, maxItems) : items;
+  }
+
   async #request(path, options = {}) {
     const baseUrl = trimTrailingSlash(options.baseUrl ?? this.resolverUrl);
     if (!baseUrl) throw new Error("resolverUrl is required");
@@ -555,6 +596,16 @@ export class FiberOffersClient {
       throw failure;
     }
   }
+}
+
+// The query string of a list request, from the options that were given.
+function pageQuery(options = {}) {
+  const query = new URLSearchParams();
+  for (const name of ["limit", "cursor", "order"]) {
+    if (options[name] !== undefined && options[name] !== null) query.set(name, String(options[name]));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : "";
 }
 
 // The error for a response the resolver refused, in one shape for every method:

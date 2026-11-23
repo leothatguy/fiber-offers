@@ -56,6 +56,12 @@ DELETE /offers/:offer_id              signed by the offer's key
 POST /demo/offers                     key, demo
 ```
 
+`GET /offers`, `GET /offers/:offer_id/resolutions`,
+`GET /offers/:offer_id/webhook-events` and
+`GET /offers/:offer_id/reconciliation.json` return one page at a time:
+`?limit=` (1 to 500, default 100), `?order=asc|desc` and `?cursor=` with the
+`next_cursor` of the page before. See [Lists](resolver-api.md#lists).
+
 ## Payment UX
 
 ```text

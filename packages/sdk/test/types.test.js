@@ -272,7 +272,12 @@ async function resolverClientSamples() {
     await call("updateResolutionStatus", "marked paid", offer, invoice.resolution_id, { status: "invoice_paid", source: "backoffice" });
     await call("getResolution", "a paid invoice", offer, invoice.resolution_id);
     await call("getResolutions", "of the offer", offer);
+    await call("getResolutions", "one page, newest first", offer, { limit: 1, order: "desc" });
+    await call("getAllResolutions", "read to the end", offer, { pageSize: 1 });
     await call("getWebhookEvents", "of the offer", offer);
+    await call("getAllWebhookEvents", "read to the end", offer, { pageSize: 1 });
+    await call("listOffers", "one page", { limit: 1 });
+    await call("listAllOffers", "read to the end", { pageSize: 1 });
     const events = await client.getWebhookEvents(offer);
     await call("deliverWebhookEvents", "the outbox", offer, { retryFailed: true });
     await call("deliverWebhookEvent", "one event", offer, events.events[0].id, { retryFailed: true });

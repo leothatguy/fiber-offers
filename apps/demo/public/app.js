@@ -840,15 +840,14 @@ async function refreshOperatorData() {
   }
 
   const [resolutions, events, webhooks] = await Promise.all([
-    api(`/offers/${state.offerResponse.offer_id}/resolutions`),
-    api(`/offers/${state.offerResponse.offer_id}/webhook-events`),
+    // The most recent page of each. The lists are paged, newest first here.
+    api(`/offers/${state.offerResponse.offer_id}/resolutions?order=desc&limit=100`),
+    api(`/offers/${state.offerResponse.offer_id}/webhook-events?order=desc&limit=100`),
     api(`/offers/${state.offerResponse.offer_id}/webhooks`)
   ]);
-  state.resolutions = resolutions.resolutions
-    .slice()
-    .reverse()
-    .map((record) => resolutionFromRecord(record));
-  state.webhookEvents = events.events ?? [];
+  state.resolutions = resolutions.resolutions.map((record) => resolutionFromRecord(record));
+  // The rest of this page reads events oldest first.
+  state.webhookEvents = (events.events ?? []).slice().reverse();
   state.webhooks = webhooks.webhooks ?? [];
   renderLog();
   renderWebhookSubscriptions();

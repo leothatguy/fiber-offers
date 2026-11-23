@@ -296,6 +296,24 @@ const csv = await merchant.getReconciliationCsv(offerId);
 credentials. The rest list or change the merchant's payments and need the API
 key.
 
+Lists come a page at a time, 100 items unless you ask otherwise:
+
+```js
+// The 20 most recent payments.
+const page = await merchant.getResolutions(offerId, { limit: 20, order: "desc" });
+// The 20 before those, if there are any.
+if (page.next_cursor) {
+  await merchant.getResolutions(offerId, { limit: 20, order: "desc", cursor: page.next_cursor });
+}
+// Or everything, read a page at a time.
+const all = await merchant.getAllResolutions(offerId);
+```
+
+`listOffers`, `getWebhookEvents` and `getReconciliation` take the same options,
+and `listAllOffers` and `getAllWebhookEvents` read to the end. The totals of
+`getReconciliation` always cover the whole history; `getReconciliationCsv`
+returns every row.
+
 Useful methods include:
 
 - `getResolutions` and `getResolution`;
@@ -461,14 +479,14 @@ without it the resolver answers `401 UNAUTHORIZED`.
 | --- | --- | --- |
 | Offers | `getOffer`, `resolveOffer`, `offerQrUrl` | No |
 | Offers | `revokeOffer` | No: the revocation is signed with the offer's own key |
-| Offers | `registerOffer`, `listOffers` | Yes |
+| Offers | `registerOffer`, `listOffers`, `listAllOffers` | Yes |
 | Creation | `createOffer` (signs locally, calls no resolver) | No |
 | Creation | `createAndRegisterOffer`, `createAndRegisterOfferFromNode` | Yes |
 | Payment | `checkPayment`, `requestInvoice`, `resolveAndRequestInvoice` | No |
 | Fiber Address | `resolveFiberAddress` | No |
 | Fiber Address | `bindFiberAddress` | Yes |
 | One payment | `getResolution`, `getReceipt` (addressed by the resolution ID) | No |
-| Payment history | `getResolutions`, `getReconciliation`, `getReconciliationCsv` | Yes |
+| Payment history | `getResolutions`, `getAllResolutions`, `getReconciliation`, `getReconciliationCsv` | Yes |
 | Settlement | `syncResolution`, `syncResolutions`, `updateResolutionStatus` | Yes |
 | Recurrence | `getRecurrenceStatus(offer, subscriptionId)` | No: the subscription ID is known only to its payer |
 | Recurrence | `getRecurrenceStatus(offer)` (summary across subscribers) | Yes |

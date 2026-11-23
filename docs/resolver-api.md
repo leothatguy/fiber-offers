@@ -11,6 +11,45 @@ For the list of routes and which need the API key, see the
 [Deployment](deployment.md). The wallet-facing routes are also described as
 OpenAPI, with a JSON Schema for each body, in [`schemas/`](schemas/README.md).
 
+## Lists
+
+Four routes return lists, and all need the API key:
+
+```text
+GET /offers
+GET /offers/:offer_id/resolutions
+GET /offers/:offer_id/webhook-events
+GET /offers/:offer_id/reconciliation.json
+```
+
+Each answers one page at a time. Three query parameters choose the page:
+
+| Parameter | Meaning |
+| --- | --- |
+| `limit` | How many items, 1 to 500. 100 when absent |
+| `order` | `asc` or `desc`, by time of creation. Offers default to `desc` (newest first); resolutions, events and reconciliation rows to `asc` |
+| `cursor` | The `next_cursor` of the page before |
+
+```json
+{
+  "offer_id": "0x...",
+  "resolutions": [ ],
+  "next_cursor": "WyIyMDI3LTAxLTE1VDA4OjAzOjEwLjAwMFoiLCJyZXNfLi4uIl0"
+}
+```
+
+`next_cursor` is present when another page follows, and absent on the last
+page. Treat it as opaque and send it back unchanged, with the same `order`. A
+cursor names the last item of its page, so something created while a list is
+being read never shifts the pages: reading newest first, it is simply not
+seen; reading oldest first, it turns up at the end. A `limit`, `order` or
+`cursor` the resolver cannot use is refused with `400` and `INVALID_LIMIT`,
+`INVALID_ORDER` or `INVALID_CURSOR`.
+
+The SDK's `listOffers`, `getResolutions`, `getWebhookEvents` and
+`getReconciliation` take `{ limit, cursor, order }`; `listAllOffers`,
+`getAllResolutions` and `getAllWebhookEvents` follow the cursors to the end.
+
 ## Readiness check
 
 ```text
@@ -147,10 +186,12 @@ A receipt is the resolver's record of one payment attempt, readable by whoever
 holds the resolution ID. It is not signed: proof of payment is the node-signed
 invoice and its preimage, as the specification explains.
 
-The reconciliation report covers every resolution of an offer, with totals by
-status and by asset. The CSV has one row per resolution: ID, status, amount,
-asset, payment hash, settlement reference, and the resolution and receipt
-URLs.
+The reconciliation report has totals by status and by asset over every
+resolution of the offer, and the resolutions themselves as `rows`, one
+[page](#lists) at a time; the totals are the same on every page. The CSV is the
+whole history in one download, sent as it is read: one row per resolution with
+its ID, status, amount, asset, payment hash, settlement reference, and the
+resolution and receipt URLs.
 
 ## Webhooks
 

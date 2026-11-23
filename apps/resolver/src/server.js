@@ -354,11 +354,12 @@ const ROUTES = [
     "GET",
     "/offers/:offerId/resolutions",
     { access: "operator", offer: true },
-    async ({ response, context, params, origin }) => {
-      const resolutions = await context.store.getResolutions(params.offerId);
+    async ({ response, context, params, origin, url }) => {
+      const page = await context.store.listResolutionsPage(params.offerId, pageOptions(url, "asc"));
       sendJson(response, 200, {
         offer_id: params.offerId,
-        resolutions: resolutions.map((resolution) => publicResolution(resolution, origin, params.offerId))
+        resolutions: page.items.map((resolution) => publicResolution(resolution, origin, params.offerId)),
+        ...nextCursor(page)
       });
     }
   ),
@@ -366,13 +367,13 @@ const ROUTES = [
     "GET",
     "/offers/:offerId/reconciliation.:format",
     { access: "operator", offer: true },
-    async ({ response, context, params, origin }) => {
-      const report = await createReconciliationReport(context.store, params.offerId, origin);
+    async ({ response, context, params, origin, url }) => {
       if (params.format === "csv") {
-        sendCsv(response, 200, reconciliationCsv(report), `fiber-offers-${params.offerId.slice(2, 10)}.csv`);
+        // The export is the whole history, read and sent a page at a time.
+        await sendReconciliationCsv(response, context.store, params.offerId, origin);
         return;
       }
-      sendJson(response, 200, report);
+      sendJson(response, 200, await createReconciliationReport(context.store, params.offerId, origin, pageOptions(url, "asc")));
     }
   ),
   route(
@@ -473,10 +474,12 @@ const ROUTES = [
     "GET",
     "/offers/:offerId/webhook-events",
     { access: "operator", offer: true },
-    async ({ response, context, params }) => {
+    async ({ response, context, params, url }) => {
+      const page = await context.store.listWebhookEventsPage(params.offerId, pageOptions(url, "asc"));
       sendJson(response, 200, {
         offer_id: params.offerId,
-        events: (await context.store.listWebhookEvents(params.offerId)).map(publicWebhookEvent)
+        events: page.items.map(publicWebhookEvent),
+        ...nextCursor(page)
       });
     }
   ),
@@ -656,17 +659,40 @@ async function receiveDemoWebhook({ request, response, context }) {
   response.end();
 }
 
-async function listOffers({ response, context, origin }) {
-  const entries = await context.store.listOffers();
-  const offers = await Promise.all(
-    entries
-      .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)))
-      .map(async (entry) => {
-        const username = await context.store.getUsernameForOffer(entry.offer.offer_id);
-        return offerListItem(entry, origin, username);
-      })
-  );
-  sendJson(response, 200, { offers });
+async function listOffers({ response, context, origin, url }) {
+  const page = await context.store.listOffersPage(pageOptions(url, "desc"));
+  const names = await context.store.getUsernamesForOffers(page.items.map((entry) => entry.offer.offer_id));
+  sendJson(response, 200, {
+    offers: page.items.map((entry) => offerListItem(entry, origin, names.get(entry.offer.offer_id))),
+    ...nextCursor(page)
+  });
+}
+
+// What a list route reads from its query: `limit` (1 to 500, 100 when absent),
+// `cursor` (the next_cursor of the page before) and `order` ("asc" or "desc",
+// by time of creation).
+const PAGE_LIMIT_DEFAULT = 100;
+const PAGE_LIMIT_MAX = 500;
+
+function pageOptions(url, defaultOrder) {
+  const limitText = url.searchParams.get("limit");
+  let limit = PAGE_LIMIT_DEFAULT;
+  if (limitText !== null) {
+    if (!/^[1-9][0-9]{0,2}$/.test(limitText) || Number(limitText) > PAGE_LIMIT_MAX) {
+      throw httpError(400, "INVALID_LIMIT", `limit must be an integer from 1 to ${PAGE_LIMIT_MAX}`);
+    }
+    limit = Number(limitText);
+  }
+  const order = url.searchParams.get("order") ?? defaultOrder;
+  if (order !== "asc" && order !== "desc") {
+    throw httpError(400, "INVALID_ORDER", 'order must be "asc" or "desc"');
+  }
+  return { limit, order, cursor: url.searchParams.get("cursor") ?? undefined };
+}
+
+// next_cursor is present only when another page follows.
+function nextCursor(page) {
+  return page.next_cursor ? { next_cursor: page.next_cursor } : {};
 }
 
 async function registerOffer({ request, response, context, origin }) {
@@ -1325,15 +1351,27 @@ async function checkOfferReadiness(entry, body, context, origin, options = {}) {
       warnCheck("settlement", "Earlier invoices could not be brought up to date with the Fiber node", error.code)
     );
   }
-  const priorResolutions = await context.store.getResolutions(entry.offer.offer_id);
+  // Only what the rules need is read, never the offer's whole history: a plain
+  // reusable offer is not limited by earlier invoices at all, a single-use
+  // offer by those that did not end unpaid, a recurring one by those of the
+  // requesting subscription.
+  const offerId = entry.offer.offer_id;
+  const onlySubscription = entry.offer.recurrence && !entry.offer.single_use && body?.approval_id !== undefined;
+  const priorResolutions =
+    entry.offer.single_use || entry.offer.recurrence
+      ? await context.store.getCountedResolutions(offerId, onlySubscription ? { approvalId: body.approval_id } : {})
+      : [];
   const suppliedInvoice = invoiceFromReadinessBody(body);
   // The check may be about an invoice this offer already issued (the post-invoice
   // check) or an idempotent retry of an earlier request. Neither is a new use of
   // the offer, so that resolution must not be counted against itself.
-  const underCheck = resolutionUnderCheck(priorResolutions, {
-    invoice: suppliedInvoice,
-    idempotencyKey: options.idempotencyKey
-  });
+  const underCheck = resolutionUnderCheck(
+    [
+      typeof suppliedInvoice === "string" ? await context.store.findResolutionByInvoice(offerId, suppliedInvoice) : undefined,
+      options.idempotencyKey ? await context.store.findResolutionByIdempotencyKey(offerId, options.idempotencyKey) : undefined
+    ].filter(Boolean),
+    { invoice: suppliedInvoice, idempotencyKey: options.idempotencyKey }
+  );
   const current = underCheck?.resolution;
 
   if (suppliedInvoice) {
@@ -1602,11 +1640,8 @@ function publicWebhookEvent(event) {
 // or were given up on. Deliveries a worker is making at this moment are left
 // to it.
 async function drainWebhookEvents(context, offerId, options = {}) {
-  if (options.eventId) {
-    const events = await context.store.listWebhookEvents(offerId);
-    if (!events.some((event) => event.id === options.eventId)) {
-      throw httpError(404, "WEBHOOK_EVENT_NOT_FOUND", "webhook event was not found");
-    }
+  if (options.eventId && !(await context.store.getWebhookEvent(offerId, options.eventId))) {
+    throw httpError(404, "WEBHOOK_EVENT_NOT_FOUND", "webhook event was not found");
   }
 
   const policy = context.backgroundWorkers.config;
@@ -1751,15 +1786,15 @@ function normalizeWebhookEvents(events) {
   return normalized;
 }
 
-async function createReconciliationReport(store, offerId, origin) {
-  const resolutions = await store.getResolutions(offerId);
-  const rows = resolutions.map((resolution) => reconciliationRow(publicResolution(resolution, origin, offerId)));
-
+// One page of an offer's payment history, with totals over all of it.
+async function createReconciliationReport(store, offerId, origin, options) {
+  const [groups, page] = await Promise.all([store.resolutionTotals(offerId), store.listResolutionsPage(offerId, options)]);
   return {
     offer_id: offerId,
     generated_at: new Date().toISOString(),
-    totals: reconciliationTotals(rows),
-    rows
+    totals: reconciliationTotals(groups),
+    rows: page.items.map((resolution) => reconciliationRow(publicResolution(resolution, origin, offerId))),
+    ...nextCursor(page)
   };
 }
 
@@ -1786,58 +1821,78 @@ function reconciliationRow(resolution) {
   };
 }
 
-function reconciliationTotals(rows) {
+// Totals from the store's counts per status and asset.
+function reconciliationTotals(groups) {
   const by_status = {};
   const by_asset = {};
+  let resolution_count = 0;
 
-  for (const row of rows) {
-    by_status[row.status] = (by_status[row.status] ?? 0) + 1;
+  for (const group of groups) {
+    resolution_count += group.count;
+    by_status[group.status] = (by_status[group.status] ?? 0) + group.count;
 
-    const assetKey = `${row.asset_type}:${row.asset_symbol}`;
-    const previous = by_asset[assetKey] ?? {
-      asset_type: row.asset_type,
-      asset_symbol: row.asset_symbol,
+    const assetKey = `${group.asset_type}:${group.asset_symbol}`;
+    const asset = by_asset[assetKey] ?? {
+      asset_type: group.asset_type,
+      asset_symbol: group.asset_symbol,
       resolution_count: 0,
       amount_total: "0",
       statuses: {}
     };
-
-    previous.resolution_count += 1;
-    previous.amount_total = (BigInt(previous.amount_total) + BigInt(row.amount ?? "0")).toString();
-    previous.statuses[row.status] = (previous.statuses[row.status] ?? 0) + 1;
-    by_asset[assetKey] = previous;
+    asset.resolution_count += group.count;
+    asset.amount_total = (BigInt(asset.amount_total) + BigInt(group.amount_total)).toString();
+    asset.statuses[group.status] = (asset.statuses[group.status] ?? 0) + group.count;
+    by_asset[assetKey] = asset;
   }
 
-  return {
-    resolution_count: rows.length,
-    by_status,
-    by_asset
-  };
+  return { resolution_count, by_status, by_asset };
 }
 
-function reconciliationCsv(report) {
-  const headers = [
-    "resolution_id",
-    "offer_id",
-    "status",
-    "amount",
-    "asset_type",
-    "asset_symbol",
-    "payment_hash",
-    "invoice_mode",
-    "created_at",
-    "updated_at",
-    "received_at",
-    "settled_at",
-    "expired_at",
-    "failed_at",
-    "cancelled_at",
-    "settlement_reference",
-    "invoice_url",
-    "receipt_url"
-  ];
-  const rows = report.rows.map((row) => headers.map((header) => csvEscape(row[header])).join(","));
-  return [headers.join(","), ...rows].join("\n") + "\n";
+const RECONCILIATION_CSV_COLUMNS = [
+  "resolution_id",
+  "offer_id",
+  "status",
+  "amount",
+  "asset_type",
+  "asset_symbol",
+  "payment_hash",
+  "invoice_mode",
+  "created_at",
+  "updated_at",
+  "received_at",
+  "settled_at",
+  "expired_at",
+  "failed_at",
+  "cancelled_at",
+  "settlement_reference",
+  "invoice_url",
+  "receipt_url"
+];
+
+// Sends an offer's whole payment history as CSV, oldest first. It is read
+// from the store and written a page at a time, so the resolver never holds
+// more than one page of it.
+async function sendReconciliationCsv(response, store, offerId, origin) {
+  response.writeHead(200, {
+    "content-type": "text/csv; charset=utf-8",
+    "content-disposition": `attachment; filename="fiber-offers-${offerId.slice(2, 10)}.csv"`,
+    "cache-control": "no-store"
+  });
+  response.write(`${RECONCILIATION_CSV_COLUMNS.join(",")}\n`);
+  let cursor;
+  do {
+    const page = await store.listResolutionsPage(offerId, { limit: PAGE_LIMIT_MAX, order: "asc", cursor });
+    const lines = page.items.map((resolution) => {
+      const row = reconciliationRow(publicResolution(resolution, origin, offerId));
+      return RECONCILIATION_CSV_COLUMNS.map((column) => csvEscape(row[column])).join(",");
+    });
+    // Wait when the client reads more slowly than the store answers.
+    if (lines.length > 0 && !response.write(`${lines.join("\n")}\n`)) {
+      await new Promise((resolve) => response.once("drain", resolve));
+    }
+    cursor = page.next_cursor;
+  } while (cursor && !response.destroyed);
+  response.end();
 }
 
 function receiptResponse(entry, record, origin) {
@@ -2728,7 +2783,9 @@ async function recurrenceStatus(entry, store, approvalId = undefined) {
   if (!recurrence) {
     return { offer_id: entry.offer.offer_id, enabled: false, revoked: Boolean(entry.disabled) };
   }
-  const resolutions = await store.getResolutions(entry.offer.offer_id);
+  // Cycles that ended unpaid were released and are not read; one subscription's
+  // status reads that subscription's cycles only.
+  const resolutions = await store.getCountedResolutions(entry.offer.offer_id, approvalId ? { approvalId } : {});
   const base = {
     offer_id: entry.offer.offer_id,
     enabled: true,
@@ -2878,15 +2935,6 @@ function sendJson(response, status, body) {
 function sendSvg(response, status, body) {
   response.writeHead(status, {
     "content-type": "image/svg+xml; charset=utf-8",
-    "cache-control": "no-store"
-  });
-  response.end(body);
-}
-
-function sendCsv(response, status, body, filename) {
-  response.writeHead(status, {
-    "content-type": "text/csv; charset=utf-8",
-    "content-disposition": `attachment; filename="${filename}"`,
     "cache-control": "no-store"
   });
   response.end(body);

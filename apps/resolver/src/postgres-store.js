@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { assertInvoiceCapacity } from "./resolution-rules.js";
 import { SecretCipher } from "./secret-cipher.js";
-import { normalizeUsername } from "./store.js";
+import { decodeCursor, encodeCursor, normalizeUsername } from "./store.js";
 
 export class PostgresOfferStore {
   constructor(options = {}) {
@@ -56,6 +56,68 @@ export class PostgresOfferStore {
   async listOffers() {
     const result = await this.pool.query("SELECT * FROM fiber_offers ORDER BY updated_at DESC");
     return result.rows.map(offerRow);
+  }
+
+  // One page of offers in order of creation: { items, next_cursor }. Options:
+  // `limit`, `cursor` (the next_cursor of the page before) and `order`
+  // ("asc" or "desc"). next_cursor is absent on the last page.
+  async listOffersPage(options = {}) {
+    const { items, next_cursor } = await this.#page({
+      table: "fiber_offers",
+      id: "offer_id",
+      where: "true",
+      params: [],
+      row: offerRow,
+      options
+    });
+    return { items, ...(next_cursor ? { next_cursor } : {}) };
+  }
+
+  // The Fiber Address name of each of the given offers that has one.
+  async getUsernamesForOffers(offerIds) {
+    if (offerIds.length === 0) return new Map();
+    const result = await this.pool.query(
+      `SELECT DISTINCT ON (offer_id) offer_id, username FROM fiber_addresses
+       WHERE offer_id = ANY($1::text[]) ORDER BY offer_id, created_at`,
+      [offerIds]
+    );
+    return new Map(result.rows.map((row) => [row.offer_id, row.username]));
+  }
+
+  // Reads one page by keyset: the rows after (or, descending, before) the
+  // cursor's creation time and ID. One more row than asked for tells whether
+  // another page follows. The time travels in the cursor as PostgreSQL wrote
+  // it, to the microsecond, so no row is skipped or repeated.
+  async #page({ table, id, where, params, row, options }) {
+    const descending = options.order === "desc";
+    const limit = options.limit ?? 100;
+    const after = decodeCursor(options.cursor);
+    const direction = descending ? "DESC" : "ASC";
+    const values = [...params];
+    let boundary = "";
+    if (after) {
+      values.push(after[0], after[1]);
+      boundary = `AND (created_at, ${id}) ${descending ? "<" : ">"} ($${values.length - 1}::timestamptz, $${values.length})`;
+    }
+    values.push(limit + 1);
+    const result = await this.pool.query(
+      `SELECT *, created_at::text AS page_key FROM ${table}
+       WHERE ${where} ${boundary}
+       ORDER BY created_at ${direction}, ${id} ${direction}
+       LIMIT $${values.length}`,
+      values
+    ).catch((error) => {
+      // A cursor whose time PostgreSQL cannot read was not issued here.
+      if (error.code === "22007" || error.code === "22008") throw storeError("cursor is not one this resolver issued", "INVALID_CURSOR", 400);
+      throw error;
+    });
+    const rows = result.rows.slice(0, limit);
+    const last = rows[rows.length - 1];
+    return {
+      rows,
+      items: rows.map(row),
+      ...(result.rows.length > limit ? { next_cursor: encodeCursor([last.page_key, last[id]]) } : {})
+    };
   }
 
   async getUsernameForOffer(offerId) {
@@ -264,6 +326,58 @@ export class PostgresOfferStore {
       [offerId, idempotencyKey]
     );
     return result.rows[0] ? resolutionRow(result.rows[0]) : undefined;
+  }
+
+  // One page of an offer's resolutions in order of creation; see listOffersPage.
+  async listResolutionsPage(offerId, options = {}) {
+    const { items, next_cursor } = await this.#page({
+      table: "fiber_resolutions",
+      id: "resolution_id",
+      where: "offer_id = $1",
+      params: [offerId],
+      row: resolutionRow,
+      options
+    });
+    return { items, ...(next_cursor ? { next_cursor } : {}) };
+  }
+
+  // The resolution that issued this invoice string for this offer, if any.
+  async findResolutionByInvoice(offerId, invoice) {
+    const result = await this.pool.query(
+      `SELECT * FROM fiber_resolutions
+       WHERE offer_id = $1 AND invoice IS NOT NULL
+         AND md5(invoice ->> 'invoice') = md5($2) AND invoice ->> 'invoice' = $2
+       LIMIT 1`,
+      [offerId, invoice]
+    );
+    return result.rows[0] ? resolutionRow(result.rows[0]) : undefined;
+  }
+
+  // The resolutions that still count against an offer: all that did not end
+  // unpaid. With `approvalId`, those of that subscription only.
+  async getCountedResolutions(offerId, options = {}) {
+    const result = await this.pool.query(
+      `SELECT * FROM fiber_resolutions
+       WHERE offer_id = $1
+         AND status NOT IN ('invoice_expired', 'invoice_failed', 'invoice_cancelled')
+         AND ($2::text IS NULL OR recurrence ->> 'approval_id' = $2)
+       ORDER BY created_at`,
+      [offerId, options.approvalId ?? null]
+    );
+    return result.rows.map(resolutionRow);
+  }
+
+  // What reconciliation totals are made of: one row per status and asset, with
+  // the number of resolutions and the sum of their amounts.
+  async resolutionTotals(offerId) {
+    const result = await this.pool.query(
+      `SELECT status, asset ->> 'asset_type' AS asset_type, asset ->> 'symbol' AS asset_symbol,
+              count(*)::int AS count, sum(amount::numeric)::text AS amount_total
+       FROM fiber_resolutions WHERE offer_id = $1
+       GROUP BY 1, 2, 3`,
+      [offerId]
+    );
+    return result.rows.map((row) => clean({ ...row, asset_type: row.asset_type ?? undefined, asset_symbol: row.asset_symbol ?? undefined }));
   }
 
   // An offer's invoices that still await an outcome, optionally those of one
@@ -490,6 +604,48 @@ export class PostgresOfferStore {
       byEvent.set(delivery.event_id, group);
     }
     return events.rows.map((row) => eventRow(row, byEvent.get(row.event_id) ?? []));
+  }
+
+  // One page of an offer's events, each with its deliveries, in order of
+  // creation; see listOffersPage.
+  async listWebhookEventsPage(offerId, options = {}) {
+    const { rows, next_cursor } = await this.#page({
+      table: "fiber_webhook_events",
+      id: "event_id",
+      where: "offer_id = $1",
+      params: [offerId],
+      row: (row) => row,
+      options
+    });
+    const deliveries = await this.#deliveriesByEvent(rows.map((row) => row.event_id));
+    return {
+      items: rows.map((row) => eventRow(row, deliveries.get(row.event_id) ?? [])),
+      ...(next_cursor ? { next_cursor } : {})
+    };
+  }
+
+  async getWebhookEvent(offerId, eventId) {
+    const result = await this.pool.query("SELECT * FROM fiber_webhook_events WHERE offer_id = $1 AND event_id = $2", [
+      offerId,
+      eventId
+    ]);
+    if (!result.rows[0]) return undefined;
+    return eventRow(result.rows[0], (await this.#deliveriesByEvent([eventId])).get(eventId) ?? []);
+  }
+
+  async #deliveriesByEvent(eventIds) {
+    const byEvent = new Map();
+    if (eventIds.length === 0) return byEvent;
+    const result = await this.pool.query(
+      "SELECT * FROM fiber_webhook_deliveries WHERE event_id = ANY($1::text[]) ORDER BY created_at",
+      [eventIds]
+    );
+    for (const delivery of result.rows.map(deliveryRow)) {
+      const group = byEvent.get(delivery.event_id) ?? [];
+      group.push(delivery);
+      byEvent.set(delivery.event_id, group);
+    }
+    return byEvent;
   }
 
   // Up to `limit` deliveries to attempt now, the one due longest first, each

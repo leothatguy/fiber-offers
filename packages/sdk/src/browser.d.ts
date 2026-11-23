@@ -93,6 +93,8 @@ export type {
   InvoiceVerificationCheck,
   InvoiceVerificationOutcome,
   JsonObject,
+  ListAllOptions,
+  ListPageOptions,
   OfferId,
   OfferKeyPair,
   OfferListItem,

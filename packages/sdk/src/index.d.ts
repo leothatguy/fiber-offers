@@ -178,8 +178,29 @@ export interface OfferListItem {
   updated_at?: string;
 }
 
+/** Which page of a list to read. */
+export interface ListPageOptions {
+  /** 1 to 500. The resolver's default is 100. */
+  limit?: number;
+  /** The `next_cursor` of the page before. */
+  cursor?: string;
+  /** By time of creation. Offers default to "desc" (newest first), resolutions and events to "asc". */
+  order?: "asc" | "desc";
+}
+
+/** How to read a list to its end. */
+export interface ListAllOptions {
+  order?: "asc" | "desc";
+  /** The `limit` of each request. */
+  pageSize?: number;
+  /** Stop after this many items. */
+  maxItems?: number;
+}
+
 export interface OfferListResponse {
   offers: OfferListItem[];
+  /** Present when another page follows. */
+  next_cursor?: string;
 }
 
 export interface PaymentRequest {
@@ -286,7 +307,9 @@ export class FiberOffersClient {
   ): Promise<{ offer: RegisteredOfferResponse; invoice: InvoiceResolutionResponse }>;
   getOffer(offerId: OfferId): Promise<RegisteredOfferResponse>;
   /** Operator only: the resolver requires its API key. */
-  listOffers(): Promise<OfferListResponse>;
+  listOffers(options?: ListPageOptions): Promise<OfferListResponse>;
+  /** Operator only. Every offer, read a page at a time. */
+  listAllOffers(options?: ListAllOptions): Promise<OfferListItem[]>;
   /** Operator only: the resolver requires its API key. */
   diagnostics(): Promise<ResolverDiagnostics>;
   offerQrUrl(offerId: OfferId, payload?: "link" | "offer"): string;
@@ -296,7 +319,9 @@ export class FiberOffersClient {
     options?: InvoiceRequestOptions
   ): Promise<PaymentReadiness>;
   /** Operator only: the resolver requires its API key. */
-  getResolutions(offerOrId: OfferOrId): Promise<ResolutionListResponse>;
+  getResolutions(offerOrId: OfferOrId, options?: ListPageOptions): Promise<ResolutionListResponse>;
+  /** Operator only. Every resolution of the offer, read a page at a time. */
+  getAllResolutions(offerOrId: OfferOrId, options?: ListAllOptions): Promise<ResolutionRecord[]>;
   /**
    * With a subscription ID: where that subscription stands (no key needed; the
    * ID is known only to its payer). Without one: the summary across all
@@ -308,7 +333,11 @@ export class FiberOffersClient {
   getResolution(offerOrId: OfferOrId, resolutionId: string): Promise<ResolutionRecord>;
   getReceipt(offerOrId: OfferOrId, resolutionId: string): Promise<JsonObject>;
   /** Operator only: the resolver requires its API key. */
-  getReconciliation(offerOrId: OfferOrId): Promise<JsonObject>;
+  /**
+   * Operator only. Totals over the offer's whole history and one page of its
+   * rows (`rows`, `next_cursor`).
+   */
+  getReconciliation(offerOrId: OfferOrId, options?: ListPageOptions): Promise<JsonObject>;
   /** Operator only: the resolver requires its API key. */
   getReconciliationCsv(offerOrId: OfferOrId): Promise<string>;
   /** Operator only: the resolver requires its API key. */
@@ -324,7 +353,9 @@ export class FiberOffersClient {
   /** Operator only: the resolver requires its API key. */
   testWebhook(offerOrId: OfferOrId, webhookId: string): Promise<WebhookDeliveryResult>;
   /** Operator only: the resolver requires its API key. */
-  getWebhookEvents(offerOrId: OfferOrId): Promise<WebhookEventListResponse>;
+  getWebhookEvents(offerOrId: OfferOrId, options?: ListPageOptions): Promise<WebhookEventListResponse>;
+  /** Operator only. Every webhook event of the offer, read a page at a time. */
+  getAllWebhookEvents(offerOrId: OfferOrId, options?: ListAllOptions): Promise<WebhookEventRecord[]>;
   /** Operator only: the resolver requires its API key. */
   deliverWebhookEvents(offerOrId: OfferOrId, options?: WebhookDeliveryOptions): Promise<WebhookDeliveryResult>;
   /** Operator only: the resolver requires its API key. */
@@ -1336,6 +1367,8 @@ export interface ResolutionRecord {
 export interface ResolutionListResponse {
   offer_id: string;
   resolutions: ResolutionRecord[];
+  /** Present when another page follows. */
+  next_cursor?: string;
 }
 
 /** The outcome of asking the merchant node about one resolution. */
@@ -1397,6 +1430,8 @@ export interface WebhookEventRecord {
 export interface WebhookEventListResponse {
   offer_id: string;
   events: WebhookEventRecord[];
+  /** Present when another page follows. */
+  next_cursor?: string;
 }
 
 export interface WebhookDeliveryResult {
