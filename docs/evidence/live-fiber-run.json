@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-11-23T10:05:35.856Z",
+  "generated_at": "2026-11-23T12:00:45.828Z",
   "command": "npm run fiber:e2e-check",
   "git": {
-    "sha": "88b2f5ee35b8158810fec29f304d380d02c407be",
+    "sha": "d29dc70003e8d01a3513d05c837e02680e76fa12",
     "uncommitted_changes": false
   },
   "mode": "real payments",
@@ -41,34 +41,34 @@
       "id": "reusable-ckb",
       "title": "A reusable offer is paid twice with distinct invoices",
       "status": "passed",
-      "duration_ms": 2213,
-      "offer_id": "0x5d823c0449642bd420911a1e6a5fe3e1669112f7ed79a2ad223251fac4976a0f",
+      "duration_ms": 2231,
+      "offer_id": "0x64fbfdbfa8507a339e85ba697f798ee4618be3f9397317b4ee4fe42be06b8995",
       "payments": [
         {
-          "resolution_id": "res_5f88a9f3-56a1-4fd4-a2e2-cb0973ac1cb9",
-          "invoice": "fibt1000000001pxlynfn6vcrczxzat8lhvszx4r6dqevl2wx8s975w3mufwyhh06rxlxpllkv6qnway8jdhrhm577wa0s9tn3u6mdnt9vk27l7zujvzzvyztq83jasnqk0v8v3ut2u9d6mm9f07f24hv8d3yg004tqn7l4wv4py9udn9h53v9xsga6ceullyy9a5wsy6gj6uljfsvnpcxwgaglx0n3skjfdh2npzz2v75vq6z74weye33myh3v4k4s6zklye5059jnh6qsup9yztaatppx9mrtqk7z2vvdmyqk6d4hd5h5h4kf52tlsru08yyc65km4jtrs0ymhdnjt2tvq7jrudcazynsxmtzup6k22esjrtcv9znvludvl7glk73ruqefq8n94j8lrv0way4xursht6zqtckycwxcwwvd6dp4z939lp9wshnu9nnpnvmg6x4vy4u8zf9f2sau4at2r5xr4605gpllcrcnmlv4xsrhxlclsjns8uv32tjzy4kmh74t343qqa96343",
-          "payment_hash": "0xb476154f27e1afe56eb751893170d54b9c6e1c404a700f2636033cbc0bf8a057",
+          "resolution_id": "res_f7507b15-d7fa-498c-8523-436ad590822c",
+          "invoice": "fibt1000000001pxlynfn6vcrczxzat8lhv0mvh0m4lemc62kaxmjfxrzvjm48d6f5anx3u2e9dt4785tnkzzwwj0n82tamfm3m4u7m4vuyadkz83mrwxejzznmj77zyvufuydvhyjj3zt4wpmn64raezxu5e6x0l2mlplqxghh737xj0dndtff4zvm8nvnsp2athsx9cegayfyjc8t3gk58mar4epvmnu539cpjy8lvp3shpe8xaqf5wkrhh0gn8kzjwssecpyzlxsnvjd3kglxy9wafzsyagvd4xjjcp90f7hzm5w2v39znwwjnekezyqr3kqvtczgh3f3j0nxxh4txm725hz06mvcjcf2glartl5nc39vmxm77f6k4g3ygaqe5h0klpp283ecll7hsgqk3ftc6dwfst5wx6aqquhnmy4tgnwu0w98y5qd29l7qjmlz9tyrttlsjffh30uyr4jry8f8055rr52sfgz2xaugm3h8unuhn5mkazvtsruzkf208al0lq6uwxspef9dj4",
+          "payment_hash": "0xb90ea2dbb72a97bb469f0ac387d67524fe561d85915cacbfbf1ff4988ae7616d",
           "verified_before_sending": true,
           "payer_get_payment": {
             "status": "Success",
             "fee": "0x0",
-            "created_at": "0x1a207dda0c6",
-            "last_updated_at": "0x1a207dda106"
+            "created_at": "0x1a2084710b5",
+            "last_updated_at": "0x1a2084710f1"
           },
           "merchant_get_invoice": {
             "status": "Paid"
           }
         },
         {
-          "resolution_id": "res_986ab706-9d80-4bf9-93a0-36e7fb87d96a",
-          "invoice": "fibt1500000001pxlynfn6vcrczxzat8lhvs3ew0vehjx5cy0syp7n6lyzwj2wx9nhs9vxf6ew3z8smtg9re8u3cqc7f4d4x8k50gnuyyxwcrpegpdysw3ccnhk0yuaqut98fzprcg7mj45xhywe73vyfpxxl2gzq89ftwnj9upfvk5ru57ek45563xdnhgxyfqyauh6rjyl35casnrs5uamrduzkl6gsdyce8dlhx2ef6sydxnqf3rk2w34ntag732szg4ywwt2gvtkcc6ywmznw0us3k93wx3sx6uqml7gdaxas7dud2ae0sdw3dwu7q6e9c77wwf2gggzaennvk003hecypl4hfrsm8gswwt3rw7ehtf9n4cxrwu62pxgkf9vz3gfxf7ushaek9h05u4c886g07wxajuvdq9jtrsn3zs26r2uwcxdqe9ea4jpz6hmz3rys6rv2yzxmtm2kgzgmwsez6854y46m4f46f4m4kudgde0h6fd54mvzyz08gk64e75lqr94ejaxqprp2d8q",
-          "payment_hash": "0x998d1be10279e787599e1e6cd44a8941eeb80a9f2929fde6bf49b5183fa18cd3",
+          "resolution_id": "res_ea84e8c3-57ae-4092-a1a2-56d4163faec1",
+          "invoice": "fibt1500000001pxlynfn6vcrczxzat8lhvsvlxk9t4c8qrfd2uf7s7e8e5826la4s9wvgf9ccwew9kv7sy4hmze58asyv3nqa93y95y94ujnl9vx6qgv8v6wjyrx0ftpn8klej22jpqwnfug87mwhhdjdme4d9etz03galycxr4tnna5gkj0ypu2evkrf9e4vg3ua447ey3v9lcy8eyyayqy6grksk3yal0nhfg5zy097uhdcazf596266mqgme0tkt9t70lfulhy0ft4l28kegu4ttrkunrdgqj30fpmf7540ed9dwaaqnr45y3d5enmrh3jarezvvctms9s2njvtq6pg2ntlrhvrkx0z3e6uq9z4ed5ngwtpz6lrdykmqayu4q966sasj3wg8y4yca4y936mdsf9mew7q5qx3xexzrr2l03cm8vlkyrc3lzlnhkyfghvdyggqhrvy6g8vvl7dfqz8drnfl0zyuq0wgn4750gpuu8nh8l4awyrdh8jnf525eyzppgzspu583xx",
+          "payment_hash": "0x1427191deac4eac6c0a3907425dd9071b28b31bc4b4ef836f8bf6461664d8990",
           "verified_before_sending": true,
           "payer_get_payment": {
             "status": "Success",
             "fee": "0x0",
-            "created_at": "0x1a207dda4f9",
-            "last_updated_at": "0x1a207dda54e"
+            "created_at": "0x1a2084714ec",
+            "last_updated_at": "0x1a208471539"
           },
           "merchant_get_invoice": {
             "status": "Paid"
@@ -85,13 +85,13 @@
       "title": "A token invoice is minted with the token's script and verified",
       "status": "passed",
       "duration_ms": 42,
-      "offer_id": "0x951b4b8fdb6cddcdbf87d7dc97ad96a07a0b1f0a92aa1a70a24cdb37d4c4b9e0",
+      "offer_id": "0xade84462b275436822bf38b2aaee320b01093528b9bcc3f0fd76535f8ceaf06a",
       "token": {
         "type_script_hash": "0x45b32a2bc4285d0a09678eb11960ddc8707bc2779887a09d482e9bfe9a2cdf52",
         "name": "RUSD",
         "source": "node_info"
       },
-      "invoice": "fibt1000000001pn9nevmdwtmczxzat8al67wzm6pznf2fqk45mfeyefnmkqkl2mswssw7fny6ttcrhywkzswlee7ne0j7l94hx63thy8d93tj7u35wk43jp84vefc9v9zlycrywzldtj5d8zc62q8eall2zf3klxf3g5gtz06jlh5x2axuam7pxv0agq9gqhxwl7v8qw57rfgv07f7ckzqceqt87uxee7u8xrj8frg6pfp0ypy6aq2g0tkq8qtsd4ry6ywjrzprgc47h333ms2t293a66j3wqyqpg5sha8yjx8qxgjzjr68vwng6kdf8pujsxyy7wzghq3n7kkzf6hdsm98s2e83dm3teug02tudwjxkw8fvmrleae6vlgardhv5qsjkxcpwzjxcnesm0ls4v7hwykmn9y6kkd7adw7794rjkf7pwu3n0lc8rle73k6yx5ew8u7ezclft8degv8xh8l46f8a80m2yvp399vk5sp7586sgkn0w8pgr95mhs355rjslstj3u9rn6mehlysgc2py0vhyn2r6qr7jjkx5qx5v7qpffsvmxlt3pyc2tllqwel0j4l6f0mpcmkqkc3ujaukuakevzed9hx79642epyljy0t5wks6p0hy372lqfuywg5zuld55py0tky6dhzcqxawtdq",
+      "invoice": "fibt1000000001pn9nevmdwtmczxzat8al67d8ucgh2g5epeuzg2yz29j3evfqwgwnvpfq3ervd9f45uaup4f9tmk5p0dhmnw9zh7envpdgl0ezf5efm6qu7syasxd2rx90xartptrgpdl9lz30z7skjux6dz3ef72qzn8s4k5utunps6z28xqe383cd2y5e0qlq08fw389z6eg7ela3euw47kugg7zlzywvqztx0y7c9dzr8grevq8hnfhzgczgy5km8ja2flmx4qz8desj0h0wkakc8nrgtvrzaewpawdc0g6frcx0s7h8eu4kaa6g9hqlpej65jxkxlx3wwp33rh9xhjpshq5ktm3jjv889s0tyfxxh2m2g25mr4ntx33lj6d0ks5tg52hygcwz9he8necl3s6szm94jmsf7cnrx6mav5nxwcnjay2w3s8sty04q30awemvdgqvhuj7yllc4kly4n8palutxdedfv4zmc6g0ntkygzfp4r4z0gq0esa4zk98ylrau2f95rtm2y8ksyvsl0xsg7hz5kn67ken6m2gcy8selfc67qdvkqmm62jn4ypkztldm876dq887shdd2h9kdx0nz0slvyuldy3u0tfvz9wvjr806sxf70wgxfwgxmfuv0273kr4zd7zjdevgp6hc589",
       "verification": [
         "payee:pass",
         "amount:pass",
@@ -106,14 +106,14 @@
       "id": "single-use",
       "title": "A single-use offer is released by a lapsed invoice and used up by payment",
       "status": "passed",
-      "duration_ms": 13130,
-      "offer_id": "0xf350a57d275de2d45dc9ce5610fb6962f445f6199269285d3ea3a4114b74e287",
-      "abandoned_resolution": "res_b9d13b8f-e189-43f3-a471-b98ffbc7cb8c",
+      "duration_ms": 13184,
+      "offer_id": "0xfd4a74126dded8d6a2b1ecdf0b1136235e31df388ba27cf57dc446b47317ac2c",
+      "abandoned_resolution": "res_ff173ac2-7d66-4827-b066-b537a25419d0",
       "while_unpaid": "OFFER_INVOICE_OUTSTANDING",
       "payment": {
         "status": "payment_succeeded",
-        "resolution_id": "res_22880508-7b82-482e-a0b3-8f34b02aaf0a",
-        "payment_hash": "0x84a85ba3a064434db359779b12b6ea737973d0c694c64c1d00122ab8bf0705d7",
+        "resolution_id": "res_11b004a9-695b-48a5-8e68-e1c8e6170254",
+        "payment_hash": "0xd16f3811d562f73476148797aef8f6955f018203cd572ff5e8b410c9ebfcd119",
         "verified_before_sending": true
       },
       "after_payment": "OFFER_ALREADY_USED",
@@ -126,23 +126,23 @@
       "id": "recurring-two-subscribers",
       "title": "Two subscribers each pay their own cycles of one recurring offer",
       "status": "passed",
-      "duration_ms": 11271,
-      "offer_id": "0xe5def0980fafcfdf846002afd93f3b6610fc92ce645db464876d9f4cdba162be",
+      "duration_ms": 11228,
+      "offer_id": "0x642dc7c754e3b2bc993ec5ac82e503c0341af1686140f49950ae02ae2bef05f8",
       "subscriptions": [
         {
-          "subscription_id": "sub_79f3d355f40c29fc45a1831e52a2ef72c9ea6ed0",
+          "subscription_id": "sub_13b2c3c68e4d0cf852868d8858a2078d3088e5d9",
           "cycles_paid": 2,
           "payment_hashes": [
-            "0xa665ac7a672746f95530919f54fb30ae8661fd3a6635018af5cab53a3e3650d7",
-            "0x3665d7780c7d16102a640fc419b3482ddabc9757d2b9b3ba17ccb4a17738a361"
+            "0x235b7cd59fb5f9d56d2cb83f5a7a64a23b367115fb12f50850a26711b9ab518c",
+            "0x3cd046798ca21745699acfeeead694b4a644bf8457b50199f1a29f0b8ab16ba0"
           ]
         },
         {
-          "subscription_id": "sub_154c5bd80fdf221ee9b15729777fc7a8d7b4b19c",
+          "subscription_id": "sub_8443970643063c3672695baa0f02166dde5b1d36",
           "cycles_paid": 2,
           "payment_hashes": [
-            "0xe7c583ec8b544788712c026dc4fe47bbb9ce3d3e43c98670ec915391c4161dd7",
-            "0x7af8ec2e861188bc1f7533dbf325cdf1a832f6f4b7f74abf932bd11b240bf68e"
+            "0x4053c4009b83d8c165c2aa9726d09cc58edc97d6a7d2f80ab73e68e3c01aa3a3",
+            "0xff51c2dec6ae11f8045f509d0310a32a76dfa86a042851f6b4d0daf7d1c14067"
           ]
         }
       ],
@@ -160,10 +160,10 @@
       "id": "invoice-expiry",
       "title": "An unpaid invoice expires on the node and is recorded as expired",
       "status": "passed",
-      "duration_ms": 12095,
-      "offer_id": "0x25c235072e44c4f3de67ab5cf34994c9ecdec8aeb06eea1b50837328d305d15b",
-      "payment_hash": "0x3d3520b90f0becc39dea19035b92321afe2f0f72c0de94f8a1fbf912651453b0",
-      "expires_at": "2026-11-23T10:05:31.445Z",
+      "duration_ms": 12089,
+      "offer_id": "0x2ba78cb552e3649c4b5414e2a7046152cb8389fd3ae8491a872aa8f7a627533e",
+      "payment_hash": "0xc796e2460b405ee7643ec1d493df208ef4279c177af90f7b7e130881995f19d0",
+      "expires_at": "2026-11-23T12:00:41.406Z",
       "node_status": "Expired",
       "resolver_status": "invoice_expired",
       "replay": "INVOICE_EXPIRED"
@@ -172,17 +172,17 @@
       "id": "revocation",
       "title": "A signed revocation stops an offer",
       "status": "passed",
-      "duration_ms": 20,
-      "offer_id": "0xe3d2b157251812307b4611f1a89a22e30f0381533416a70344d8ab65502690f2",
-      "revoked_at": "2026-11-23T10:05:33.000Z",
+      "duration_ms": 22,
+      "offer_id": "0xb7f445026c1933d154bfc654830dd1bb97f57d328ebba05487b8053f444a242a",
+      "revoked_at": "2026-11-23T12:00:43.000Z",
       "after_revocation": "410 OFFER_REVOKED"
     },
     {
       "id": "tamper-rejection",
       "title": "The SDK refuses offers and invoices a resolver substituted",
       "status": "passed",
-      "duration_ms": 42,
-      "victim_offer": "0xbc25824b3adcfc3b7b4008a9f4817cfb26fd1b915b17a46404b1b79457065a39",
+      "duration_ms": 43,
+      "victim_offer": "0x64df679df1808d668e7d6351f2db720b3ce8b969a9b4a9cc90456d9002e0bd23",
       "invoice_swap": "INVOICE_OFFER_MISMATCH",
       "offer_swap": "RESOLVED_OFFER_MISMATCH"
     },
@@ -190,18 +190,18 @@
       "id": "idempotent-retry",
       "title": "A payment that fails in transit is retried on the same invoice",
       "status": "passed",
-      "duration_ms": 1059,
-      "offer_id": "0x944896c1f2f4615088c461209a5bf5c231ed25cf47e2a09d6da28aceb76360f3",
+      "duration_ms": 1055,
+      "offer_id": "0x9bf4ecfa32fb67a0a9c1c03346d970a59bdc0c58366b62d725ab715d8d4c6a85",
       "payment": {
-        "resolution_id": "res_dd491069-ab94-4d6a-b30b-8f6981eec3d6",
-        "invoice": "fibt1000000001pxnxrr5jfc0czxzat8lhtmst8drcfycragteuf732y6sa5007z99um4alswszfl9z5mqyzhpmxwfryz0w9ayl6hj9w2xj737tyf63ryrzu07z58fryrlzwzua3jxhvdp459wf7machc2nq744wqll7hjxkzmqr3nu89rgdyzuddax9t24vq97q8gl68nvau7ajt5lmz95pf2kxwym0gm054g9lhpn3e0kk0gmwj3z6e9mlhja8ngaav8989nz86ap6nrxmhtusgxccnzxfe5m2cfuersmgr4wxwkfn0e3cvsd9ajmvy8u3r7a6y8lw5qu0ur35qpyr9mryz84u0p5p02v0e72732xp346gqqctzv8l5xmf0lmk68d0h9q3xujesrcldetxh86knncqht6g4x6j9du88ntfr8yr8200ttr2f5jtdsvunhr0ttgf8hsvkjdldxr82tf6y64rhpe5p0r2hrv708l6y6r5qr37cs79x3842sh5n8ls25cpw2uhm2",
-        "payment_hash": "0x2329c59499aabeb58b4419c0351dd26b3348d0d182f6eb778da0c55895463707",
+        "resolution_id": "res_3a99b37f-9ef7-4e44-a683-27703748fcfc",
+        "invoice": "fibt1000000001pxnxrr5jfc0czxzat8lhtmnywhrzskxyy5uh8f74avrsxs4ngx78hz94j8cs2gqrmuhncs7dldykzzy5j8d35ynn550r6y9lm4d5f9us7lyva47d6t2l28c3l0zdzh948nljw4h8yqa2l2ex5etm203wr2cl3665zts86c88v2qhyuh3p2jkwlt0nh0t24zl8qj6daf08f7rww4q30hz0j98k6wehnn7krklzr9v4xmspplhk4wzvesd2udqkard4vw0n3csp4cenjel96sz2w3rwhm76dwcp6jr8uz0cxhwe5c9f22w7ttzet9gu8k602jct02ne76r5w50vxec07tdcqredgvhvs3r0dxmly3rcvvw44rgnnucflc6nwd7eev0kru42dexxupy63at35cqllqn3zvxsd8920xnlc3ewnt3m9gz0735a7s8yxmytcmy0athgtkxwp6uldxnj3500u0uh0hgx8ysu0vu8swdqdh7puwjnq7w2xzz7xqpdn6rfl",
+        "payment_hash": "0xf79b4057f55957c323e420f8c94ca976e9b5ee061ac64c1ca8b9d5cd34badc14",
         "verified_before_sending": true,
         "payer_get_payment": {
           "status": "Success",
           "fee": "0x0",
-          "created_at": "0x1a207de383e",
-          "last_updated_at": "0x1a207de387f"
+          "created_at": "0x1a20847a845",
+          "last_updated_at": "0x1a20847a852"
         },
         "merchant_get_invoice": {
           "status": "Paid"
@@ -212,8 +212,8 @@
       "id": "two-replicas-single-use",
       "title": "Two resolver replicas issue one invoice for a single-use offer",
       "status": "passed",
-      "duration_ms": 63,
-      "offer_id": "0x27bba5448348d03764bbf2e1bd492df22351cc367eb304d1db52d38014d79c57",
+      "duration_ms": 66,
+      "offer_id": "0xf5bd352d401fc4f2618f47f5477a4d7c7c452e895ed3ff77aeb70e4a7b97691c",
       "outcomes": [
         "issued",
         "409 OFFER_INVOICE_OUTSTANDING",
@@ -225,16 +225,16 @@
       "id": "fiber-address",
       "title": "A Fiber Address resolves to a verified offer",
       "status": "passed",
-      "duration_ms": 11,
-      "address": "e2e-mwt3o9df@127.0.0.1:39147",
-      "offer_id": "0x2dcf0dd63e80d6238133fc22dbda9a8e3daef40e962722559f28abf1101856bc"
+      "duration_ms": 10,
+      "address": "e2e-mwt7sd4t@127.0.0.1:42251",
+      "offer_id": "0x16927ba42a4cb755c7f1faf6bb4857566774274b8c95b9f44172240e960aa2cc"
     },
     {
       "id": "webhook-delivery",
       "title": "A payment is announced to a merchant webhook, signed",
       "status": "passed",
-      "duration_ms": 1100,
-      "offer_id": "0xa520deaa97509387b611d6d9c4b4e3826a0efd389974085cb704576c5fff25ed",
+      "duration_ms": 1105,
+      "offer_id": "0x2d221ed925cc690f12e8fc1ce59920d66856994793c2f6adf281ae9a02840b12",
       "delivered": [
         "invoice.created",
         "invoice.paid"
@@ -244,8 +244,8 @@
       "id": "access-control",
       "title": "A payer reads their own payment and nothing of the merchant's",
       "status": "passed",
-      "duration_ms": 35,
-      "offer_id": "0xb9c900187e5752f7f86e2584df604085099f2dfdfc2c84662bfc93a091a2b6ba",
+      "duration_ms": 40,
+      "offer_id": "0xb244be97270c3bd726e40b9f649611aaf896e4486f47b35309acd841525acbbc",
       "refused_without_key": [
         "list_offers",
         "register_offer",
@@ -267,7 +267,7 @@
       "id": "network-mismatch",
       "title": "An offer signed for another network is refused",
       "status": "passed",
-      "duration_ms": 3,
+      "duration_ms": 4,
       "node_network": "testnet",
       "offer_network": "mainnet",
       "outcome": "422 OFFER_NETWORK_MISMATCH"
