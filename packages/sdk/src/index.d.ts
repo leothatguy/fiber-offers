@@ -33,7 +33,16 @@ export type {
   UnsignedFiberOffer
 } from "@fiber-offers/protocol";
 
-import type { FiberAsset, FiberOfferInput, IntegerLike, OfferKeyPair, SignedFiberOffer } from "@fiber-offers/protocol";
+import type {
+  FiberAsset,
+  FiberOfferInput,
+  FiberOfferNetwork,
+  FiberOfferRecurrence,
+  IntegerLike,
+  OfferKeyPair,
+  OfferRevocation,
+  SignedFiberOffer
+} from "@fiber-offers/protocol";
 
 export type JsonObject = Record<string, unknown>;
 export type OfferId = string;
@@ -102,17 +111,52 @@ export interface RegisterOfferOptions {
   username?: string;
 }
 
+/**
+ * An offer as a resolver returns it. Only `offer` is signed: verify it, and
+ * check its ID, before relying on anything here.
+ */
 export interface RegisteredOfferResponse {
   offer_id: string;
-  offer?: SignedFiberOffer;
-  encoded_offer?: string;
+  offer: SignedFiberOffer;
+  encoded_offer: string;
   fiber_address?: string;
+  lookup_url?: string;
   payment_link?: string;
+  /** True once the offer is revoked. */
+  disabled?: boolean;
+  revoked_at?: string;
   /** False when the stored offer no longer passes verification and cannot be paid. */
   valid?: boolean;
   invalid_code?: string;
   invalid_reason?: string;
+  created_at?: string;
+  updated_at?: string;
   [key: string]: unknown;
+}
+
+/** What resolving a Fiber Address returns: the offer, and the name that was asked for. */
+export interface FiberAddressResponse extends RegisteredOfferResponse {
+  username: string;
+  address: string;
+}
+
+export interface FiberAddressBinding {
+  username: string;
+  offer_id: string;
+  address: string;
+  lookup_url: string;
+}
+
+/** A demo resolver signs the offer itself and hands back the key it made. */
+export interface DemoOfferResponse extends RegisteredOfferResponse {
+  public_key_pem: string;
+  offer_private_key_pem: string;
+}
+
+export interface RevokedOfferResponse {
+  offer_id: string;
+  revoked: true;
+  revoked_at?: string;
 }
 
 export interface OfferListItem {
@@ -252,14 +296,15 @@ export class FiberOffersClient {
     options?: InvoiceRequestOptions
   ): Promise<PaymentReadiness>;
   /** Operator only: the resolver requires its API key. */
-  getResolutions(offerOrId: OfferOrId): Promise<ResolutionRecord[]>;
+  getResolutions(offerOrId: OfferOrId): Promise<ResolutionListResponse>;
   /**
    * With a subscription ID: where that subscription stands (no key needed; the
    * ID is known only to its payer). Without one: the summary across all
    * subscribers, which is operator only.
    */
   getRecurrenceStatus(offerOrId: OfferOrId, approvalId?: string): Promise<RecurrenceStatus>;
-  revokeOffer(offerOrId: OfferOrId, revocation: JsonObject): Promise<JsonObject>;
+  /** Needs no API key: the revocation is signed by the offer key (`createOfferRevocation`). */
+  revokeOffer(offerOrId: OfferOrId, revocation: OfferRevocation): Promise<RevokedOfferResponse>;
   getResolution(offerOrId: OfferOrId, resolutionId: string): Promise<ResolutionRecord>;
   getReceipt(offerOrId: OfferOrId, resolutionId: string): Promise<JsonObject>;
   /** Operator only: the resolver requires its API key. */
@@ -302,14 +347,14 @@ export class FiberOffersClient {
     options?: InvoiceRequestOptions
   ): Promise<InvoiceResolutionResponse>;
   /** Operator only: the resolver requires its API key. */
-  bindFiberAddress(username: string, offerId: string): Promise<JsonObject>;
-  resolveFiberAddress(address: string): Promise<RegisteredOfferResponse>;
+  bindFiberAddress(username: string, offerId: string): Promise<FiberAddressBinding>;
+  resolveFiberAddress(address: string): Promise<FiberAddressResponse>;
   /**
    * Operator only, and only on a resolver running with RESOLVER_DEMO_MODE=true:
    * the resolver generates the offer's key and signs for you. Use createOffer
    * for anything real, so the key never leaves your side.
    */
-  demoCreateOffer(input: JsonObject): Promise<RegisteredOfferResponse>;
+  demoCreateOffer(input: JsonObject): Promise<DemoOfferResponse>;
 }
 
 export function parseFiberAddress(address: string): FiberAddressParts;
@@ -923,7 +968,7 @@ export interface PaymentReadiness {
   next_action: "fix_request" | "send_payment" | "run_route_dry_run" | "request_invoice" | string;
   topology?: FiberTopologySnapshot;
   route_check?: FiberRouteCheckResult;
-  failure?: FiberPaymentFailure;
+  failure?: FiberPaymentFailure | ReadinessIssue;
 }
 
 export function analyzePaymentReadiness(input?: PaymentReadinessInput): PaymentReadiness;
@@ -1142,8 +1187,15 @@ export class InMemoryRecurringApprovalStore implements RecurringApprovalStore {
   put(approval: RecurringApproval): Promise<RecurringApproval>;
 }
 
+/** The two methods of the browser's `Storage` (`localStorage`) the SDK uses. */
+export interface WebStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
 export class WebStorageRecurringApprovalStore implements RecurringApprovalStore {
-  constructor(options?: { storage?: Storage; key?: string });
+  /** `storage` defaults to `globalThis.localStorage`. */
+  constructor(options?: { storage?: WebStorageLike; key?: string });
   list(): Promise<RecurringApproval[]>;
   get(id: string): Promise<RecurringApproval | undefined>;
   put(approval: RecurringApproval): Promise<RecurringApproval>;
@@ -1164,7 +1216,7 @@ export class FiberRecurringPaymentScheduler {
     resolverClient?: Pick<FiberOffersClient, "getOffer">;
     resolver?: Pick<FiberOffersClient, "getOffer">;
     store?: RecurringApprovalStore;
-    storage?: Storage;
+    storage?: WebStorageLike;
     storageKey?: string;
     now?: () => Date;
     intervalMs?: number;
@@ -1181,8 +1233,9 @@ export class FiberRecurringPaymentScheduler {
     autoStart?: boolean;
     runOnStart?: boolean;
     onEvent?: (event: JsonObject) => void;
-    setInterval?: typeof globalThis.setInterval;
-    clearInterval?: typeof globalThis.clearInterval;
+    /** Timer functions, for a host without the global ones or for a test. */
+    setInterval?: (callback: () => void, milliseconds: number) => unknown;
+    clearInterval?: (timer: any) => void;
   });
   approve(
     offerOrEncoded: SignedFiberOffer | RegisteredOfferResponse | OfferId | string,
@@ -1195,58 +1248,139 @@ export class FiberRecurringPaymentScheduler {
   status(): RecurringSchedulerStatus;
 }
 
-export interface InvoiceResolutionResponse {
-  resolution_id?: string;
-  invoice?: string | { invoice?: string; [key: string]: unknown };
-  payment_hash?: string;
-  amount?: string;
-  asset?: FiberAsset;
-  status?: string;
-  idempotency_key?: string;
-  idempotent_replay?: boolean;
+/** The statuses a resolution moves through (specification, section 10). */
+export type ResolutionStatus =
+  | "invoice_created"
+  | "invoice_received"
+  | "invoice_paid"
+  | "invoice_expired"
+  | "invoice_failed"
+  | "invoice_cancelled";
+
+/** Which cycle of which subscription a resolution is. */
+export interface ResolutionCycle {
+  cycle: number;
+  approval_id: string;
+  interval?: FiberOfferRecurrence["interval"];
+  scheduled_for?: string;
+}
+
+export interface ResolutionStatusChange {
+  /** `invoice_pending` is the resolver's own reservation while it asks the node for the invoice. */
+  status: ResolutionStatus | "invoice_pending";
+  at: string;
+  source?: string;
   [key: string]: unknown;
 }
 
-export interface ResolutionRecord {
-  resolution_id?: string;
-  offer_id?: string;
-  invoice?: string;
+/**
+ * What a resolver answers to an invoice request. None of it is to be trusted:
+ * the payer reads `invoice` with its own node and checks it against the signed
+ * offer, which `FiberPaymentFlowClient` does.
+ */
+export interface InvoiceResolutionResponse {
+  offer_id: string;
+  resolution_id: string;
+  status: ResolutionStatus;
+  amount: string;
+  asset: FiberAsset;
+  /** The Fiber invoice string. */
+  invoice: string;
+  payment_hash: string;
+  expires_at: string;
+  idempotency_key?: string;
+  /** True when this answers an earlier request with the same idempotency key. */
+  idempotent_replay?: boolean;
+  /** Present for a cycle of a recurring offer. */
+  recurrence?: ResolutionCycle;
+  status_history?: ResolutionStatusChange[];
+  [key: string]: unknown;
+}
+
+export interface ResolutionInvoice {
+  /** The Fiber invoice string. */
+  invoice: string;
+  expires_at: string;
   payment_hash?: string;
-  amount?: string;
-  asset?: FiberAsset;
-  status?: string;
-  status_history?: unknown[];
-  settlement?: JsonObject;
+  payment_request?: string;
+  mode?: string;
+  expiry_seconds?: number;
+  mocked?: boolean;
+}
+
+/** One payment attempt, as read by its ID. */
+export interface ResolutionRecord {
+  id: string;
+  offer_id: string;
+  status: ResolutionStatus;
+  amount: string;
+  asset: FiberAsset;
+  payment_hash: string;
+  invoice: ResolutionInvoice;
+  /** Present for a cycle of a recurring offer. */
+  recurrence?: ResolutionCycle;
+  status_history?: ResolutionStatusChange[];
+  invoice_url?: string;
+  receipt_url?: string;
   created_at?: string;
   updated_at?: string;
+  received_at?: string;
+  settled_at?: string;
+  expired_at?: string;
+  failed_at?: string;
+  cancelled_at?: string;
+  settlement?: JsonObject;
   [key: string]: unknown;
 }
 
+export interface ResolutionListResponse {
+  offer_id: string;
+  resolutions: ResolutionRecord[];
+}
+
+/** The outcome of asking the merchant node about one resolution. */
 export interface ResolutionSyncResult {
+  offer_id?: string;
+  resolution_id?: string;
   changed?: boolean;
   previous_status?: string;
   next_status?: string;
+  /** In a batch: true when the resolution was not asked about, with `reason`. */
+  skipped?: boolean;
+  reason?: string;
   resolution?: ResolutionRecord;
   [key: string]: unknown;
 }
 
 export interface BatchResolutionSyncResult {
-  checked?: number;
-  changed?: number;
-  skipped?: number;
-  results?: ResolutionSyncResult[];
+  offer_id: string;
+  checked: number;
+  changed: number;
+  skipped: number;
+  failed: number;
+  results: ResolutionSyncResult[];
+  [key: string]: unknown;
+}
+
+/** One webhook's delivery of one event. */
+export interface WebhookDelivery {
+  webhook_id: string;
+  event_id?: string;
+  url?: string;
+  status: string;
+  attempts: number;
+  response_status?: number;
+  updated_at?: string;
   [key: string]: unknown;
 }
 
 export interface WebhookEventRecord {
-  id?: string;
-  event?: string;
-  status?: string;
-  attempts?: number;
-  last_error?: string;
-  payload?: JsonObject;
-  created_at?: string;
-  updated_at?: string;
+  id: string;
+  offer_id: string;
+  type: WebhookEventType | "webhook.test";
+  payload: JsonObject;
+  created_at: string;
+  deliveries: WebhookDelivery[];
   [key: string]: unknown;
 }
 
@@ -1256,11 +1390,14 @@ export interface WebhookEventListResponse {
 }
 
 export interface WebhookDeliveryResult {
-  attempted?: number;
-  delivered?: number;
-  failed?: number;
-  skipped?: number;
-  events?: WebhookEventRecord[];
+  offer_id: string;
+  attempted: number;
+  delivered: number;
+  failed: number;
+  /** The deliveries made by this call. */
+  deliveries: WebhookDelivery[];
+  /** From `testWebhook`: the test event that was sent. */
+  event_id?: string;
   [key: string]: unknown;
 }
 

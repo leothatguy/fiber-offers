@@ -10,7 +10,9 @@ npm install @fiber-offers/sdk
 ```
 
 The core SDK is ESM and requires Node.js 20.19 or newer. TypeScript declarations
-ship with the package; no separate `@types` package is needed.
+ship with the package; no separate `@types` package is needed, and they do not
+depend on the DOM or Node type libraries. The declarations are checked on every
+test run against the code and against what the reference resolver returns.
 
 ## What the SDK connects
 
@@ -284,7 +286,7 @@ signed offer plus its browser payment link.
 ## Settlement and reconciliation
 
 ```js
-const resolutions = await merchant.getResolutions(offerId);
+const { resolutions } = await merchant.getResolutions(offerId);
 const synced = await merchant.syncResolution(offerId, resolutionId);
 const receipt = await merchant.getReceipt(offerId, resolutionId);
 const csv = await merchant.getReconciliationCsv(offerId);
