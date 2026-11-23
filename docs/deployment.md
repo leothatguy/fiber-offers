@@ -126,6 +126,27 @@ PostgreSQL and Redis data use separate named volumes.
 replica and remain stable across restarts. Simply changing the value makes
 existing webhook secrets undecryptable; change it with the procedure below.
 
+### The container user
+
+Every process in the image runs as the unprivileged `node` user (uid 1000),
+not as root. It can write in two places: the directory of the file store
+(`/app/apps/resolver/data`) and the directory in which the RPC relay keeps its
+socket (`/run/fiber-rpc`). A new volume mounted at either gets the right owner
+by itself.
+
+Upgrading from an image that ran as root:
+
+- **The Compose stack** needs nothing done. The relay's socket now lives in a
+  new volume, `fiber-rpc-relay`. The old one, `fiber-rpc-socket`, held only a
+  socket, is no longer used, and can be removed with `docker volume rm`.
+- **A file store kept in a volume or a bind mount** still belongs to root, and
+  the resolver stops at start with a permission error. Hand it over once:
+
+  ```bash
+  docker run --rm --user root -v YOUR_VOLUME:/app/apps/resolver/data IMAGE \
+    chown -R node:node /app/apps/resolver/data
+  ```
+
 ### Secret encryption and key rotation
 
 Webhook signing secrets are stored as `enc:v2:<salt>:<iv>:<tag>:<ciphertext>`:

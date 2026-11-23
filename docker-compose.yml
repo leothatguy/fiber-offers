@@ -112,7 +112,7 @@ services:
       PROXY_LISTEN_PORT: "18227"
       PROXY_TARGET_PATH: /run/fiber-rpc/merchant.sock
     volumes:
-      - fiber-rpc-socket:/run/fiber-rpc
+      - fiber-rpc-relay:/run/fiber-rpc
     depends_on:
       fiber-rpc-host-relay:
         condition: service_healthy
@@ -132,7 +132,7 @@ services:
       PROXY_TARGET_HOST: ${FIBER_RPC_HOST:-127.0.0.1}
       PROXY_TARGET_PORT: ${FIBER_RPC_PORT:-8227}
     volumes:
-      - fiber-rpc-socket:/run/fiber-rpc
+      - fiber-rpc-relay:/run/fiber-rpc
     healthcheck:
       test: ["CMD", "node", "-e", "const s=require('node:net').connect('/run/fiber-rpc/merchant.sock',()=>{s.end();process.exit(0)});s.setTimeout(2000,()=>process.exit(1));s.on('error',()=>process.exit(1))"]
       interval: 5s
@@ -153,4 +153,7 @@ services:
 volumes:
   fiber-offers-postgres:
   fiber-offers-redis:
-  fiber-rpc-socket:
+  # Holds only the relay's socket. It is owned by the image's "node" user. The
+  # volume of the same purpose from images that ran as root was named
+  # fiber-rpc-socket; it is no longer used and can be removed.
+  fiber-rpc-relay:
