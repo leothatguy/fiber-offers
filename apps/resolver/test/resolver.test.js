@@ -1897,9 +1897,17 @@ test("rate limits repeated public invoice creation", async () => {
     const request = { amount: "1000", asset: { asset_type: "ckb", symbol: "CKB" } };
     const first = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, request);
     const blocked = await postJson(`${baseUrl}/offers/${created.body.offer_id}/invoice`, request);
+    const again = await fetch(`${baseUrl}/offers/${created.body.offer_id}/invoice`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request)
+    });
     assert.equal(first.status, 201);
     assert.equal(blocked.status, 429);
     assert.equal(blocked.body.error.code, "RATE_LIMITED");
+    // The wait is given in the body and in the standard header.
+    assert.ok(blocked.body.error.details.retry_after_seconds >= 1);
+    assert.equal(again.headers.get("retry-after"), String((await again.json()).error.details.retry_after_seconds));
   }, { rateLimitMax: 1 });
 });
 

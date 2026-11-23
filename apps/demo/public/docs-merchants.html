@@ -53,7 +53,7 @@ POST /offers/:offer_id/resolutions/:resolution_id/sync</code></pre>
 
           <section id="webhooks">
             <h2>Subscribe to webhooks</h2>
-            <p>Register an HTTPS endpoint per offer. An omitted event list subscribes to all supported invoice events. The resolver generates a high-entropy signing secret and returns it only in the creation response; store it immediately in your secret manager.</p>
+            <p>Register an HTTPS endpoint per offer. An omitted event list subscribes to all six invoice events: <code>invoice.created</code>, <code>invoice.received</code> (the node holds a payment that has not settled yet), <code>invoice.paid</code>, <code>invoice.expired</code>, <code>invoice.failed</code>, and <code>invoice.cancelled</code>. The resolver generates a high-entropy signing secret and returns it only in the creation response; store it immediately in your secret manager.</p>
             <pre><code>curl -X POST https://resolver.example/offers/0x.../webhooks \
   -H 'content-type: application/json' \
   -H 'Authorization: Bearer change-me' \

@@ -385,6 +385,7 @@ formed or not canonical. Treat both as "do not pay".
 ## Related documentation
 
 - [V1 protocol specification](spec-v1.md)
+- [Conformance test vectors](test-vectors/README.md)
 - [SDK guide](sdk.md)
 - [Resolver API quick reference](api-quick-reference.md)
 - [Architecture](architecture.md)

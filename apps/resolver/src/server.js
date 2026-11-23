@@ -2702,6 +2702,10 @@ function sendError(response, error, logger) {
   const message = status >= 500 && !error.expose ? "internal server error" : error.message;
 
   if (status >= 500) logger.error(error);
+  // The standard way to say when to come back, beside the same number in the body.
+  if (Number.isFinite(error.details?.retry_after_seconds)) {
+    response.setHeader("retry-after", String(error.details.retry_after_seconds));
+  }
 
   // Details of an unexpected server error stay out of the response. Errors the
   // resolver raised on purpose (expose) keep theirs, so a payer can read

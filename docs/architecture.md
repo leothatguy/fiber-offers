@@ -94,8 +94,13 @@ The repository includes a PostgreSQL store, Redis distributed rate limits, BullM
 maintenance workers, migrations, dependency health checks, and a horizontally
 scaled Compose topology. A public production service should still add:
 
-- merchant-scoped API keys;
 - centralized log aggregation and metrics;
-- managed PostgreSQL/Redis backups and secret rotation;
-- queue failure alerting and a dead-letter review process;
-- end-to-end tests against live Fiber nodes.
+- managed PostgreSQL/Redis backups;
+- queue failure alerting and a dead-letter review process.
+
+One resolver serves one merchant node, by design: a resolver holds access to
+its node's invoice RPC, so a resolver shared between merchants would hold
+access to all of their nodes. Each merchant runs their own. The live
+end-to-end check is `npm run fiber:e2e-check`
+([Live Fiber testing](live-fiber-testing.md)); the specification is
+[Fiber Offers v1](spec-v1.md).

@@ -275,7 +275,7 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 
 > **Goal:** Turn `docs/spec-v1.md` into a concise, self-contained, multi-implementation normative specification.
 
-- [ ] **D1. Produce a single concise normative core specification**
+- [x] **D1. Produce a single concise normative core specification** — *done 2026-11-23*
   - **Files:** `docs/spec-v1.md` (and move resolver ops/diagnostics/CSV/webhooks to `docs/resolver-api.md` or `docs/api-quick-reference.md`)
   - **Acceptance criteria:**
     - Uses RFC 2119 (`MUST`, `SHOULD`, `MAY`) language consistently.
@@ -294,6 +294,8 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
       - **amount units** per asset type (shannons for CKB, base units for UDT/RGB++)
       - **recurrence semantics** — schedule anchor, subscriber scope (`D-5`), missed cycles, cancellation by either side
       - **invoice binding and proof of payment** (`A8`), the **QR/deep-link payload** format, and a **privacy considerations** section (what the resolver learns about payers, what is public per `D-6`)
+  - **Outcome:** `docs/spec-v1.md` is rewritten as one normative document in RFC 2119 terms, 18 numbered sections: roles; the offer and the canonical form of every field (with a grammar for `resolver_url`, the definition of `type_script_hash`, amount units, extension and version policy, size limits); canonical JSON; ID and signature; the encoded form, QR codes and payment links; Fiber Address and what trust it carries; the resolver API a wallet depends on (offer, invoice with its required properties, idempotency, node failures, resolution, revocation, subscription status, CORS, error envelope, `429`); what a payer must verify and what counts as proof of payment; the resolution state machine and single-use rules; recurrence, subscriptions and what the interval does and does not mean; revocation; the error code registry with statuses; what is checked where; the trust and threat model; privacy; prior art (`D4`); conformance. Every normative statement was checked against the code; one was wrong and corrected (a second revocation is answered `409`, not accepted silently). Operational features a wallet does not depend on moved to the new `docs/resolver-api.md`. Rate-limited responses now carry a `Retry-After` header, since the spec requires one.
+  - **Stated honestly in the spec:** a resolver does not enforce a recurrence interval (payment is payer-initiated; the interval schedules the payer's wallet); a merchant cannot end a single subscription in v1; Bech32m's four-error guarantee does not hold at this length; a Fiber Address is only as trustworthy as TLS for its domain; the resolver sees who pays.
 
 - [x] **D2. Publish fixed, language-agnostic conformance test vectors** — *done 2026-11-23*
   - **Files:** `docs/test-vectors/` (JSON vectors) + `packages/protocol/test/vectors.test.js`
@@ -304,18 +306,20 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
   - **Independent verifier (the second criterion of `D6`):** `docs/test-vectors/verify.py` is a second implementation in Python, written from the rules and sharing no code with the package: canonical JSON, Bech32m, Ed25519 checks, every canonical-form rule, the CKB type script hash, request, revocation and subscription checks. It passes all 169 of its checks, agreeing with the JavaScript on every case and, compared one by one, for the same reason. It runs in the test suite where Python and `cryptography` are installed.
   - **Found by writing it:** defining the canonical `resolver_url` as "whatever a WHATWG URL parser prints" cannot be implemented in a language without that parser. The form is now a small grammar any language can check (`F-052`).
 
-- [ ] **D3. Reconcile all documentation contradictions**
+- [x] **D3. Reconcile all documentation contradictions** — *done 2026-11-23*
   - **Files:** `docs/spec-v1.md`, `docs/protocol.md`, `docs/architecture.md`, `docs/deployment.md`, `docs/api-quick-reference.md`, `apps/demo/public/docs-*.html`
   - **Acceptance criteria:**
     - Document `invoice.received` in webhook event lists.
     - Include `recurrence` and `expiry` in schema examples.
     - Remove stale `spec-v1.md:327` claim that PostgreSQL / distributed jobs / rate limiting aren't implemented.
     - Align all docs with D-2 (single-use) and A-5 (expiry) behavior.
+  - **Outcome:** `invoice.received` is in every webhook event list (`resolver-api.md`, `sdk.md`, the hosted merchants page). The spec's example offer carries `recurrence` and `expiry`. The stale "deployment boundary" paragraph claiming no database-backed store, distributed jobs or rate limiting is gone with the rewrite. Single-use and expiry behaviour are stated once, in the spec, and the other documents link to it. `architecture.md` no longer lists merchant-scoped keys as missing (single-merchant is the design, `D-9`) or live end-to-end tests as missing. Remaining staleness in the `README.md` feature lists is left to `F5`, which rewrites the quick start.
 
-- [ ] **D4. Add prior-art & design-rationale section**
+- [x] **D4. Add prior-art & design-rationale section** — *done 2026-11-23*
   - **Files:** `docs/spec-v1.md` or `docs/architecture.md`
   - **Acceptance criteria:**
     - Concise comparison table/section contrasting Fiber Offers with **BOLT12**, **LNURL-pay / Lightning Address (LUD-16)**, and **Fiber native invoices**, explaining why HTTP resolution + lifecycle keys were chosen and what trade-offs they imply.
+  - **Outcome:** Section 17 of the spec: a comparison table across nine properties, and the reasons for HTTP (Fiber has no onion messaging or blinded paths, so a BOLT12-style design cannot be deployed), for a separate offer key (the node's RPC does not sign arbitrary messages), for JSON and PEM (readable, about three times the size of a binary form, which is what `D-4` would decide), and for one resolver address (a single point of failure, to be addressed by `E6`).
 
 - [ ] **D5. Publish machine-readable schemas and keep types honest** *(audit #2, `F-023`)*
   - **Problem:** The only definition of an offer, a revocation, or a resolver response is prose plus the JavaScript validator. `packages/*/src/*.d.ts` are hand-maintained (944 lines in the SDK) and never type-checked against the implementation.
@@ -324,12 +328,13 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
     - Schemas are published with the spec and every `D2` test vector validates against them in the test suite.
     - A type test (`tsc --noEmit` over a usage file) runs in CI so declarations cannot drift from the code.
 
-- [ ] **D6. Give the format an ecosystem path** *(audit #2, `F-024`)*
+- [~] **D6. Give the format an ecosystem path** *(audit #2, `F-024`)* — *independent verifier done 2026-11-23; submission for outside review waits for the owner*
   - **Problem:** Critique 2 calls the custom format prototype-level ecosystem infrastructure. A rewritten spec is still a single-author document with one implementation.
   - **Files:** `docs/spec-v1.md`, `docs/architecture.md`, external proposal
   - **Acceptance criteria:**
     - The spec is submitted for review where Fiber and CKB wallet developers work (CKB RFC process or the Fiber repository discussions), and feedback is tracked in this plan's findings log.
     - A second, independent verifier (any other language) decodes, canonicalizes and verifies all `D2` vectors, proving the spec is implementable without reading the JavaScript.
+  - **Status:** the second criterion is met by `docs/test-vectors/verify.py` (see `D2`). The first, submitting the spec for outside review, is an outward-facing step that waits for the owner's go-ahead.
 
 ---
 
@@ -628,3 +633,4 @@ Phases are ordered by user impact and dependency: fix broken payment/security be
 | 2026-11-23 | Phase G confirmed live | `fix(sdk): report a refused CSV request with the resolver's error code`, then `docs(evidence): record the live run with the access split` | 13 of 13 live cases pass on Fiber `v0.10.1` testnet with PostgreSQL, run from a clean tree at `bf024fa`. The resolver has an API key in this run: the payer's client is refused on nine merchant routes, reads only its own resolution and receipt, and webhook delivery goes through the guarded transport. The first run failed one case and found `F-049`. Suite: 207 of 207. |
 | 2026-11-23 | `C1`–`C4` done — Phase C complete | `fix(protocol): give every offer one canonical form and one identity`, `feat(resolver): render offer QR codes in the compact uppercase form`, `fix(resolver): flag stored offers that no longer pass verification` | Branch `fix/phase-c-signing-canonical-form-and-decoding-hardening`. Fixes `F-004`, `F-005`, `F-021`, `F-022`, `F-050`. Decisions on unknown fields, `http`, unbounded amounts, numbers in metadata and limits are recorded under `C3`. Offer QR codes shrink from version 27 to 22. Suite: 226 of 226. |
 | 2026-11-23 | Phase C confirmed live; `D2` done | `docs(evidence): record the live run under the stricter offer rules`, `test(protocol): publish conformance vectors with an independent verifier` | 13 of 13 live cases pass under the Phase C rules. Branch `docs/phase-d-normative-specification-and-conformance-vectors`: 92 frozen vectors, checked by the package and by an independent Python implementation (169 checks). Fixes `F-052`. Suite: 237 of 237. |
+| 2026-11-23 | `D1`, `D3`, `D4` done | `docs(spec): rewrite the specification as one normative document` | Normative spec in 18 sections, operational API split into `docs/resolver-api.md`, documentation contradictions reconciled, prior art and rationale added. `D5` (schemas, type test) is the remaining code item of Phase D; `D6` needs the owner. Suite: 237 of 237. |

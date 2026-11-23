@@ -313,9 +313,14 @@ const webhook = await merchant.createWebhook(offerId, {
 await merchant.testWebhook(offerId, webhook.id);
 ```
 
+The events are `invoice.created`, `invoice.received` (the node holds a payment
+that has not settled yet), `invoice.paid`, `invoice.expired`, `invoice.failed`
+and `invoice.cancelled`. Leave `events` out to receive all six.
+
 The client also supports listing, updating, deleting, testing, rotating secrets,
 viewing delivery events, and triggering delivery. Keep returned webhook secrets
-in server-side secret storage.
+in server-side secret storage. See [Resolver API](resolver-api.md#webhooks) for
+the delivery format and how to verify its signature.
 
 ## Topology and route diagnostics
 

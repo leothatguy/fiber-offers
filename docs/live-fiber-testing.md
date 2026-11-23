@@ -320,6 +320,7 @@ npm run fiber:e2e-check
 | `two-replicas-single-use` | Two resolver replicas sharing PostgreSQL issue exactly one invoice under four concurrent requests |
 | `fiber-address` | `user@host` resolves to the registered, verified offer |
 | `webhook-delivery` | `invoice.created` and `invoice.paid` reach a merchant endpoint with valid HMAC signatures |
+| `access-control` | A payer without the resolver's API key reads its own resolution and receipt, and is refused on every merchant route |
 | `network-mismatch` | An offer signed for another network is refused |
 
 A case that cannot run in the current setup is reported as skipped with its

@@ -22,6 +22,9 @@ without it. Routes marked **demo** exist only when the resolver runs with
 `RESOLVER_DEMO_MODE=true`. Everything else is the payment path and is open.
 See [Deployment](deployment.md#what-is-public-and-what-needs-the-key).
 
+The routes a wallet depends on are specified in [Fiber Offers v1](spec-v1.md#7-resolver-api).
+What the rest return is described in [Resolver API](resolver-api.md).
+
 ## Health And Diagnostics
 
 ```text
