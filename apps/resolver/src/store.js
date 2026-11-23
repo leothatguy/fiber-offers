@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { assertInvoiceCapacity } from "./resolution-rules.js";
 import { SecretCipher } from "./secret-cipher.js";
 
@@ -35,6 +35,10 @@ export class InMemoryOfferStore {
       created_at: previous?.created_at ?? now,
       updated_at: now,
       disabled: previous?.disabled ?? false,
+      // Registering a revoked offer again does not un-revoke it, and keeps the
+      // proof of when and by whom it was revoked.
+      ...(previous?.revoked_at !== undefined ? { revoked_at: previous.revoked_at } : {}),
+      ...(previous?.revocation !== undefined ? { revocation: previous.revocation } : {}),
       ownership: options.ownership ?? previous?.ownership
     };
 
@@ -480,7 +484,19 @@ export class JsonOfferStore extends InMemoryOfferStore {
 
     try {
       const raw = await readFile(this.filePath, "utf8");
-      this.state = await decryptStoredSecrets(JSON.parse(raw), this.cipher);
+      let stored;
+      try {
+        stored = JSON.parse(raw);
+      } catch (error) {
+        // Refuse to carry on: the next save would replace the file with an
+        // empty store. `loaded` stays false, so nothing is written.
+        throw storeError(
+          `the store file ${this.filePath} is not valid JSON (${error.message}); restore it from a backup`,
+          "STORE_FILE_CORRUPT",
+          500
+        );
+      }
+      this.state = await decryptStoredSecrets(stored, this.cipher);
       this.state.offers ??= {};
       this.state.usernames ??= {};
       this.state.resolutions ??= {};
@@ -490,6 +506,7 @@ export class JsonOfferStore extends InMemoryOfferStore {
       if (error.code !== "ENOENT") throw error;
     }
 
+    await this.#removeLeftoverTemporaryFiles();
     this.loaded = true;
   }
 
@@ -501,10 +518,60 @@ export class JsonOfferStore extends InMemoryOfferStore {
       .catch(() => {})
       .then(async () => {
         const snapshot = JSON.stringify(await encryptStoredSecrets(this.state, this.cipher), null, 2);
-        await mkdir(dirname(this.filePath), { recursive: true });
-        await writeFile(this.filePath, `${snapshot}\n`);
+        await this.#replaceFile(`${snapshot}\n`);
       });
     return this.writeQueue;
+  }
+
+  // Waits for writes already asked for. Called when the resolver shuts down.
+  async close() {
+    await this.writeQueue.catch(() => {});
+  }
+
+  // Replaces the store file in one step. The new contents go to a temporary
+  // file beside it, are flushed to disk, and only then take the file's name,
+  // so a crash or a full disk leaves the previous file whole instead of a
+  // half-written one. The file is private to the resolver's user: it holds
+  // payment records and encrypted webhook secrets.
+  async #replaceFile(contents) {
+    const directory = dirname(this.filePath);
+    await mkdir(directory, { recursive: true });
+    const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    let handle;
+    try {
+      handle = await open(temporary, "wx", 0o600);
+      await handle.writeFile(contents);
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await rename(temporary, this.filePath);
+    } catch (error) {
+      await handle?.close().catch(() => {});
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+    // Flush the directory so the rename itself survives a power loss. Not
+    // every platform allows a directory to be opened; the rename has still
+    // happened.
+    try {
+      const directoryHandle = await open(directory, "r");
+      await directoryHandle.sync().finally(() => directoryHandle.close());
+    } catch {
+      // Best effort.
+    }
+  }
+
+  // A crash between writing a temporary file and renaming it leaves that file
+  // behind. It was never the store, so it is removed.
+  async #removeLeftoverTemporaryFiles() {
+    const directory = dirname(this.filePath);
+    const prefix = `${basename(this.filePath)}.`;
+    const names = await readdir(directory).catch(() => []);
+    await Promise.all(
+      names
+        .filter((name) => name.startsWith(prefix) && name.endsWith(".tmp"))
+        .map((name) => rm(join(directory, name), { force: true }).catch(() => {}))
+    );
   }
 
   // Rewrites every stored secret under the current encryption key, then proves

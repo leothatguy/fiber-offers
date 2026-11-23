@@ -30,7 +30,7 @@ services:
 
   migrate:
     build: .
-    command: ["npm", "run", "db:migrate"]
+    command: ["node", "apps/resolver/src/migrate.js"]
     environment: &resolver-environment
       # The values below are for local use. In production the resolver refuses
       # to start with them; use docker-compose.production.yml, which requires
@@ -89,7 +89,7 @@ services:
 
   worker:
     build: .
-    command: ["npm", "run", "worker"]
+    command: ["node", "apps/resolver/src/queue-worker.js"]
     environment:
       <<: *resolver-environment
       RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS: ${RESOLVER_SETTLEMENT_SYNC_INTERVAL_MS:-3000}

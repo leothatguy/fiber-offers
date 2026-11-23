@@ -322,6 +322,35 @@ With Docker, point `FIBER_RPC_URL` at the host or service address reachable from
 
 The current deployment boundary is one resolver instance to one merchant node. For multi-tenant hosting, store encrypted node profiles server-side, bind each offer to an authenticated tenant, and resolve the node profile from that ownership record. Do not accept RPC URLs or credentials in public offer and invoice requests.
 
+## The File Store
+
+Without `DATABASE_URL` the resolver keeps everything in one JSON file, at
+`RESOLVER_DATA_PATH` (by default `apps/resolver/data/offers.json`). It suits a
+single process on one machine. In production it must be asked for with
+`RESOLVER_ALLOW_JSON_STORE=true`; use PostgreSQL for more than one replica or a
+separate worker.
+
+- Each change replaces the file in one step: the new contents are written to a
+  temporary file beside it, flushed to disk, then renamed over it. A crash or a
+  full disk leaves the previous file whole.
+- The file is readable only by the resolver's user (mode `0600`).
+- A file that is not valid JSON stops the resolver with `STORE_FILE_CORRUPT`
+  instead of being replaced by an empty store. Restore it from a backup.
+- Back the file up by copying it; a copy is always a complete, consistent store.
+
+## Stopping and Restarting
+
+On `SIGTERM` or `SIGINT` the resolver and the worker stop taking new
+connections, answer the requests already in progress, let a background pass
+that is running finish, flush pending writes, close the database and Redis
+connections, and exit with status 0. Requests still unanswered after
+`RESOLVER_SHUTDOWN_TIMEOUT_MS` (default 8000) are cut off, so the process is
+gone before Docker's ten-second kill. The image starts Node directly so the
+signal reaches it.
+
+A payer whose request was cut off can retry it with the same idempotency key
+and gets the same invoice.
+
 ## Response Headers
 
 The resolver sets these on every response itself, so they do not depend on the

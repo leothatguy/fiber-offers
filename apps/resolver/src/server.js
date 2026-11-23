@@ -75,7 +75,7 @@ export function createStoreFromEnv(env = process.env, options = {}) {
         maxConnections: env.DATABASE_POOL_MAX,
         ...encryption
       })
-    : new JsonOfferStore(options.dataPath ?? defaultDataPath, encryption);
+    : new JsonOfferStore(options.dataPath ?? env.RESOLVER_DATA_PATH ?? defaultDataPath, encryption);
 }
 
 export function createServer(options = {}) {
@@ -174,11 +174,36 @@ export function createServer(options = {}) {
   server.backgroundWorkers = backgroundWorkers;
   server.startBackgroundWorkers = () => backgroundWorkers.start();
   server.stopBackgroundWorkers = () => backgroundWorkers.stop();
-  server.on("close", () => {
+  // Stops the workers, lets a pass that is already running finish, then closes
+  // the rate limiter and the store. Runs once however it is reached.
+  let resourcesClosed;
+  const closeResources = () =>
+    (resourcesClosed ??= (async () => {
+      backgroundWorkers.stop();
+      await backgroundWorkers.idle();
+      const results = await Promise.allSettled([context.rateLimiter.close?.(), store.close?.()]);
+      for (const result of results) if (result.status === "rejected") logger.error?.(result.reason);
+    })());
+  server.on("close", closeResources);
+
+  // Graceful stop: take no new connections, let requests in progress finish
+  // (for at most `timeoutMs`), then close everything behind them.
+  server.shutdown = async ({ timeoutMs = 8000 } = {}) => {
     backgroundWorkers.stop();
-    context.rateLimiter.close?.().catch((error) => logger.error?.(error));
-    store.close?.().catch((error) => logger.error?.(error));
-  });
+    const closed = new Promise((resolveClosed) => server.close(() => resolveClosed()));
+    // A connection that is idle now, or becomes idle when its request ends, is
+    // closed; one still waiting on a response is left to finish.
+    const sweep = setInterval(() => server.closeIdleConnections(), 50);
+    const deadline = setTimeout(() => server.closeAllConnections(), timeoutMs);
+    server.closeIdleConnections();
+    try {
+      await closed;
+    } finally {
+      clearInterval(sweep);
+      clearTimeout(deadline);
+    }
+    await closeResources();
+  };
   if (backgroundWorkers.enabled) backgroundWorkers.start();
   return server;
 }
@@ -1910,9 +1935,21 @@ function createBackgroundWorkers(context, options = {}) {
   let settlementTimer;
   let webhookTimer;
 
+  // Passes in progress, so shutdown can wait for them before closing the store.
+  const inFlight = new Set();
+
   async function runTask(task, fn) {
     if (task.running) return task.last_result ?? { skipped: true, reason: "already_running" };
+    const pass = executeTask(task, fn);
+    inFlight.add(pass);
+    try {
+      return await pass;
+    } finally {
+      inFlight.delete(pass);
+    }
+  }
 
+  async function executeTask(task, fn) {
     task.running = true;
     task.last_started_at = new Date().toISOString();
     task.last_error = undefined;
@@ -1964,6 +2001,10 @@ function createBackgroundWorkers(context, options = {}) {
       settlementTimer = undefined;
       webhookTimer = undefined;
       state.running = false;
+    },
+    // Resolves when no pass is running.
+    async idle() {
+      await Promise.allSettled([...inFlight]);
     },
     status() {
       return {
@@ -2892,4 +2933,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       );
     }
   });
+
+  // A deploy or restart sends SIGTERM. Requests in progress are answered and
+  // pending writes reach the store before the process exits.
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.once(signal, () => {
+      console.log(`${signal} received: finishing requests in progress, then stopping`);
+      // Under Docker's default of ten seconds between SIGTERM and SIGKILL.
+      server.shutdown({ timeoutMs: positiveInteger(process.env.RESOLVER_SHUTDOWN_TIMEOUT_MS, 8000) }).then(
+        () => process.exit(0),
+        (error) => {
+          console.error(error);
+          process.exit(1);
+        }
+      );
+    });
+  }
 }
