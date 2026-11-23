@@ -15,6 +15,7 @@
     "dev:fiber:pair": "RESOLVER_DEMO_MODE=true FIBER_RPC_URL=http://127.0.0.1:8227 MERCHANT_FIBER_RPC_URL=http://127.0.0.1:8227 PAYER_FIBER_RPC_URL=http://127.0.0.1:8229 RESOLVER_WORKERS_ENABLED=true RESOLVER_WORKERS_RUN_ON_START=true node apps/resolver/src/server.js",
     "dev:mock": "RESOLVER_DEMO_MODE=true FIBER_INVOICE_MODE=mock RESOLVER_WORKERS_ENABLED=false node apps/resolver/src/server.js",
     "db:migrate": "node apps/resolver/src/migrate.js",
+    "secrets:rotate": "node apps/resolver/src/rotate-secrets.js",
     "worker": "node apps/resolver/src/queue-worker.js",
     "stack:up": "NODE_ENV=development RESOLVER_DEMO_MODE=true docker compose up --build",
     "stack:down": "docker compose down",

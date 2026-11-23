@@ -47,6 +47,8 @@ services:
       FIBER_RPC_TIMEOUT_MS: ${FIBER_RPC_TIMEOUT_MS:-15000}
       RESOLVER_API_KEY: ${RESOLVER_API_KEY:-local-dev-api-key}
       RESOLVER_SECRET_ENCRYPTION_KEY: ${RESOLVER_SECRET_ENCRYPTION_KEY:-local-dev-encryption-key-change-me}
+      # Set only while changing the encryption key; see docs/deployment.md.
+      RESOLVER_SECRET_ENCRYPTION_KEY_PREVIOUS: ${RESOLVER_SECRET_ENCRYPTION_KEY_PREVIOUS:-}
       # Public demos only; see "Demo mode" in docs/deployment.md.
       RESOLVER_DEMO_MODE: ${RESOLVER_DEMO_MODE:-false}
       RESOLVER_PUBLIC_OPERATOR_ACCESS: ${RESOLVER_PUBLIC_OPERATOR_ACCESS:-false}

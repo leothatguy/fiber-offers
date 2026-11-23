@@ -61,15 +61,26 @@ const healthCacheMs = 5000;
 
 export { InMemoryOfferStore, JsonOfferStore, PostgresOfferStore, createRateLimiter as createMemoryRateLimiter };
 
-export function createServer(options = {}) {
-  const encryptionKey = options.encryptionKey ?? process.env.RESOLVER_SECRET_ENCRYPTION_KEY;
-  const store = options.store ?? (process.env.DATABASE_URL
+// The store the environment configures: PostgreSQL when DATABASE_URL is set,
+// the JSON file otherwise. Also used by rotate-secrets.js, so the rotation
+// command always works on the store the resolver itself would open.
+export function createStoreFromEnv(env = process.env, options = {}) {
+  const encryption = {
+    encryptionKey: options.encryptionKey ?? env.RESOLVER_SECRET_ENCRYPTION_KEY,
+    // Still accepted for reading while secrets are re-encrypted under a new key.
+    previousEncryptionKey: options.previousEncryptionKey ?? env.RESOLVER_SECRET_ENCRYPTION_KEY_PREVIOUS
+  };
+  return env.DATABASE_URL
     ? new PostgresOfferStore({
-        connectionString: process.env.DATABASE_URL,
-        maxConnections: process.env.DATABASE_POOL_MAX,
-        encryptionKey
+        connectionString: env.DATABASE_URL,
+        maxConnections: env.DATABASE_POOL_MAX,
+        ...encryption
       })
-    : new JsonOfferStore(options.dataPath ?? defaultDataPath, { encryptionKey }));
+    : new JsonOfferStore(options.dataPath ?? defaultDataPath, encryption);
+}
+
+export function createServer(options = {}) {
+  const store = options.store ?? createStoreFromEnv(process.env, options);
   const invoiceAdapter = options.invoiceAdapter ?? createInvoiceAdapter(process.env);
   const staticRoot = options.staticRoot ?? defaultStaticRoot;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -1503,11 +1514,12 @@ function webhookEventTypeForStatus(status) {
 function normalizeWebhookInput(body, context) {
   const url = normalizeWebhookUrl(body.url, context);
   const events = normalizeWebhookEvents(body.events);
-  return {
-    url,
-    events,
-    secret: typeof body.secret === "string" && body.secret.length > 0 ? body.secret : createWebhookSigningSecret()
-  };
+  const supplied = typeof body.secret === "string" && body.secret.length > 0 ? body.secret : undefined;
+  // "enc:" marks a value the store has already encrypted.
+  if (supplied?.startsWith("enc:")) {
+    throw httpError(400, "INVALID_WEBHOOK_SECRET", "a webhook secret must not start with \"enc:\"");
+  }
+  return { url, events, secret: supplied ?? createWebhookSigningSecret() };
 }
 
 function normalizeWebhookUpdate(body, context) {

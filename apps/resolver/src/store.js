@@ -1,7 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { assertInvoiceCapacity } from "./resolution-rules.js";
+import { SecretCipher } from "./secret-cipher.js";
 
 export class InMemoryOfferStore {
   constructor(initialState = undefined) {
@@ -466,7 +467,10 @@ export class JsonOfferStore extends InMemoryOfferStore {
   constructor(filePath, options = {}) {
     super();
     this.filePath = filePath;
-    this.encryptionKey = options.encryptionKey ? createHash("sha256").update(options.encryptionKey).digest() : undefined;
+    this.cipher = new SecretCipher({
+      key: options.encryptionKey,
+      previousKeys: [options.previousEncryptionKey]
+    });
     this.loaded = false;
     this.writeQueue = Promise.resolve();
   }
@@ -476,7 +480,7 @@ export class JsonOfferStore extends InMemoryOfferStore {
 
     try {
       const raw = await readFile(this.filePath, "utf8");
-      this.state = decryptStoredSecrets(JSON.parse(raw), this.encryptionKey);
+      this.state = await decryptStoredSecrets(JSON.parse(raw), this.cipher);
       this.state.offers ??= {};
       this.state.usernames ??= {};
       this.state.resolutions ??= {};
@@ -491,14 +495,39 @@ export class JsonOfferStore extends InMemoryOfferStore {
 
   async save() {
     await this.load();
-    const snapshot = JSON.stringify(encryptStoredSecrets(this.state, this.encryptionKey), null, 2);
+    // The snapshot is taken when its turn to write comes, so writes land in
+    // the order they were asked for and each one carries the latest state.
     this.writeQueue = this.writeQueue
       .catch(() => {})
       .then(async () => {
+        const snapshot = JSON.stringify(await encryptStoredSecrets(this.state, this.cipher), null, 2);
         await mkdir(dirname(this.filePath), { recursive: true });
         await writeFile(this.filePath, `${snapshot}\n`);
       });
     return this.writeQueue;
+  }
+
+  // Rewrites every stored secret under the current encryption key, then proves
+  // the file can be read with that key alone. Used by `npm run secrets:rotate`.
+  async reencryptSecrets() {
+    if (!this.cipher.enabled) {
+      throw storeError("RESOLVER_SECRET_ENCRYPTION_KEY is required to re-encrypt secrets", "ENCRYPTION_KEY_REQUIRED", 500);
+    }
+    const before = { plaintext: 0, v1: 0, v2: 0 };
+    try {
+      const stored = JSON.parse(await readFile(this.filePath, "utf8"));
+      for (const webhook of Object.values(stored.webhooks ?? {}).flat()) before[SecretCipher.formatOf(webhook.secret)] += 1;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    await this.save();
+    const secrets = Object.values(this.state.webhooks ?? {}).flat().length;
+    if (secrets > 0) {
+      const rewritten = JSON.parse(await readFile(this.filePath, "utf8"));
+      await decryptStoredSecrets(rewritten, this.cipher.currentKeyOnly());
+    }
+    return { backend: "json", secrets, reencrypted: secrets, stored_as_before: before };
   }
 
   async healthCheck() {
@@ -507,33 +536,17 @@ export class JsonOfferStore extends InMemoryOfferStore {
   }
 }
 
-function encryptStoredSecrets(state, key) {
+async function encryptStoredSecrets(state, cipher) {
   const snapshot = clone(state);
-  if (!key) return snapshot;
   for (const webhook of Object.values(snapshot.webhooks ?? {}).flat()) {
-    if (typeof webhook.secret !== "string" || webhook.secret.startsWith("enc:v1:")) continue;
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const ciphertext = Buffer.concat([cipher.update(webhook.secret, "utf8"), cipher.final()]);
-    webhook.secret = `enc:v1:${iv.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${ciphertext.toString("base64url")}`;
+    webhook.secret = await cipher.encrypt(webhook.secret);
   }
   return snapshot;
 }
 
-function decryptStoredSecrets(state, key) {
+async function decryptStoredSecrets(state, cipher) {
   for (const webhook of Object.values(state.webhooks ?? {}).flat()) {
-    if (typeof webhook.secret !== "string" || !webhook.secret.startsWith("enc:v1:")) continue;
-    if (!key) throw storeError("encrypted webhook secrets require RESOLVER_SECRET_ENCRYPTION_KEY", "ENCRYPTION_KEY_REQUIRED", 500);
-    const [, version, ivValue, tagValue, ciphertextValue] = webhook.secret.split(":");
-    if (version !== "v1" || !ivValue || !tagValue || !ciphertextValue) {
-      throw storeError("stored webhook secret has an invalid encrypted format", "INVALID_ENCRYPTED_SECRET", 500);
-    }
-    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivValue, "base64url"));
-    decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-    webhook.secret = Buffer.concat([
-      decipher.update(Buffer.from(ciphertextValue, "base64url")),
-      decipher.final()
-    ]).toString("utf8");
+    webhook.secret = await cipher.decrypt(webhook.secret);
   }
   return state;
 }

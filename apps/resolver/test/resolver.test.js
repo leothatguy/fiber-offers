@@ -1857,7 +1857,7 @@ test("encrypts webhook signing secrets in JSON persistence", async () => {
     });
     const raw = await readFile(path, "utf8");
     assert.doesNotMatch(raw, /plaintext-must-not-persist/);
-    assert.match(raw, /enc:v1:/);
+    assert.match(raw, /enc:v2:/);
 
     const reloaded = new JsonOfferStore(path, { encryptionKey: "test-encryption-key" });
     assert.equal((await reloaded.listWebhooks(offer.offer_id))[0].secret, "whsec_plaintext-must-not-persist");

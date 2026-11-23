@@ -1,6 +1,7 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { assertInvoiceCapacity } from "./resolution-rules.js";
+import { SecretCipher } from "./secret-cipher.js";
 import { normalizeUsername } from "./store.js";
 
 export class PostgresOfferStore {
@@ -10,9 +11,10 @@ export class PostgresOfferStore {
       max: Number(options.maxConnections ?? process.env.DATABASE_POOL_MAX ?? 10)
     });
     this.ownsPool = !options.pool;
-    this.encryptionKey = options.encryptionKey
-      ? createHash("sha256").update(options.encryptionKey).digest()
-      : undefined;
+    this.cipher = new SecretCipher({
+      key: options.encryptionKey,
+      previousKeys: [options.previousEncryptionKey]
+    });
   }
 
   async close() {
@@ -320,9 +322,9 @@ export class PostgresOfferStore {
     const result = await this.pool.query(
       `INSERT INTO fiber_webhooks (webhook_id, offer_id, url, events, secret, secret_hint)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [id, offerId, webhook.url, json(webhook.events), encryptSecret(webhook.secret, this.encryptionKey), webhookSecretHint(webhook.secret)]
+      [id, offerId, webhook.url, json(webhook.events), await this.cipher.encrypt(webhook.secret), webhookSecretHint(webhook.secret)]
     );
-    return webhookRow(result.rows[0], this.encryptionKey);
+    return webhookRow(result.rows[0], this.cipher);
   }
 
   async listWebhooks(offerId) {
@@ -330,7 +332,7 @@ export class PostgresOfferStore {
       "SELECT * FROM fiber_webhooks WHERE offer_id = $1 ORDER BY created_at",
       [offerId]
     );
-    return result.rows.map((row) => webhookRow(row, this.encryptionKey));
+    return Promise.all(result.rows.map((row) => webhookRow(row, this.cipher)));
   }
 
   async getWebhook(offerId, webhookId) {
@@ -338,7 +340,7 @@ export class PostgresOfferStore {
       "SELECT * FROM fiber_webhooks WHERE offer_id = $1 AND webhook_id = $2",
       [offerId, webhookId]
     );
-    return result.rows[0] ? webhookRow(result.rows[0], this.encryptionKey) : undefined;
+    return result.rows[0] ? webhookRow(result.rows[0], this.cipher) : undefined;
   }
 
   async updateWebhook(offerId, webhookId, update) {
@@ -350,10 +352,44 @@ export class PostgresOfferStore {
        WHERE offer_id=$1 AND webhook_id=$2 RETURNING *`,
       [
         offerId, webhookId, update.url ?? current.url, json(update.events ?? current.events),
-        update.disabled ?? current.disabled, encryptSecret(nextSecret, this.encryptionKey), webhookSecretHint(nextSecret)
+        update.disabled ?? current.disabled, await this.cipher.encrypt(nextSecret), webhookSecretHint(nextSecret)
       ]
     );
-    return webhookRow(result.rows[0], this.encryptionKey);
+    return webhookRow(result.rows[0], this.cipher);
+  }
+
+  // Rewrites every stored secret under the current encryption key, in one
+  // transaction, after proving each new value can be read with that key alone.
+  // Used by `npm run secrets:rotate`.
+  async reencryptSecrets() {
+    if (!this.cipher.enabled) {
+      throw storeError("RESOLVER_SECRET_ENCRYPTION_KEY is required to re-encrypt secrets", "ENCRYPTION_KEY_REQUIRED", 500);
+    }
+    const currentOnly = this.cipher.currentKeyOnly();
+    const before = { plaintext: 0, v1: 0, v2: 0 };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = (await client.query("SELECT webhook_id, secret FROM fiber_webhooks ORDER BY webhook_id FOR UPDATE")).rows;
+      for (const row of rows) {
+        if (row.secret === null) continue;
+        before[SecretCipher.formatOf(row.secret)] += 1;
+        const plaintext = await this.cipher.decrypt(row.secret);
+        const rewritten = await this.cipher.encrypt(plaintext);
+        if ((await currentOnly.decrypt(rewritten)) !== plaintext) {
+          throw storeError("a re-encrypted secret did not read back", "SECRET_REENCRYPTION_FAILED", 500);
+        }
+        await client.query("UPDATE fiber_webhooks SET secret=$2 WHERE webhook_id=$1", [row.webhook_id, rewritten]);
+      }
+      await client.query("COMMIT");
+      const secrets = before.plaintext + before.v1 + before.v2;
+      return { backend: "postgresql", secrets, reencrypted: secrets, stored_as_before: before };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async deleteWebhook(offerId, webhookId) {
@@ -362,7 +398,7 @@ export class PostgresOfferStore {
       [offerId, webhookId]
     );
     if (!result.rows[0]) throw storeError("webhook subscription does not exist", "WEBHOOK_NOT_FOUND", 404);
-    return webhookRow(result.rows[0], this.encryptionKey);
+    return webhookRow(result.rows[0], this.cipher);
   }
 
   async addWebhookEvent(offerId, event, options = {}) {
@@ -493,13 +529,13 @@ function resolutionRow(row) {
   });
 }
 
-function webhookRow(row, key) {
+async function webhookRow(row, cipher) {
   return {
     id: row.webhook_id,
     offer_id: row.offer_id,
     url: row.url,
     events: row.events,
-    secret: decryptSecret(row.secret, key),
+    secret: await cipher.decrypt(row.secret),
     secret_hint: row.secret_hint,
     disabled: row.disabled,
     created_at: iso(row.created_at),
@@ -554,24 +590,6 @@ function statusTimestamps(status, update, now) {
     failed_at: status === "invoice_failed" ? update.failed_at ?? now : null,
     cancelled_at: status === "invoice_cancelled" ? update.cancelled_at ?? now : null
   };
-}
-
-function encryptSecret(value, key) {
-  if (!key || value.startsWith("enc:v1:")) return value;
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return `enc:v1:${iv.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${ciphertext.toString("base64url")}`;
-}
-
-function decryptSecret(value, key) {
-  if (!value?.startsWith("enc:v1:")) return value;
-  if (!key) throw storeError("encrypted webhook secrets require RESOLVER_SECRET_ENCRYPTION_KEY", "ENCRYPTION_KEY_REQUIRED", 500);
-  const [, version, iv, tag, ciphertext] = value.split(":");
-  if (version !== "v1") throw storeError("unsupported encrypted webhook secret", "INVALID_ENCRYPTED_SECRET", 500);
-  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
 }
 
 function webhookSecretHint(secret) {

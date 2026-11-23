@@ -114,9 +114,38 @@ instance, one Redis instance, a one-shot migration service, and a BullMQ worker.
 PostgreSQL and Redis data use separate named volumes.
 
 `RESOLVER_SECRET_ENCRYPTION_KEY` must be identical on every API and worker
-replica and remain stable across restarts. Rotate it with an explicit data
-reencryption procedure; simply changing the value makes existing webhook secrets
-undecryptable.
+replica and remain stable across restarts. Simply changing the value makes
+existing webhook secrets undecryptable; change it with the procedure below.
+
+### Secret encryption and key rotation
+
+Webhook signing secrets are stored as `enc:v2:<salt>:<iv>:<tag>:<ciphertext>`:
+AES-256-GCM under a key derived from `RESOLVER_SECRET_ENCRYPTION_KEY` with
+scrypt and the salt stored beside the value. Someone holding a copy of the
+database cannot test guesses at the configured key cheaply.
+
+To change the key:
+
+1. Set `RESOLVER_SECRET_ENCRYPTION_KEY` to the new key and
+   `RESOLVER_SECRET_ENCRYPTION_KEY_PREVIOUS` to the old one on every API and
+   worker replica, and restart them together. They now read secrets under
+   either key and write under the new one.
+2. Run `npm run secrets:rotate` with the same two variables (and
+   `DATABASE_URL`). It rewrites every stored secret under the new key, checks
+   that each one reads back with the new key alone, and prints how many it
+   rewrote. With PostgreSQL this is one transaction: on any failure nothing is
+   changed.
+3. Remove `RESOLVER_SECRET_ENCRYPTION_KEY_PREVIOUS` and restart.
+
+Restart replicas together in step 1: a replica still on the old key alone
+cannot read a secret another replica has already written under the new one, and
+its webhook deliveries for that secret fail until it restarts (they are retried).
+
+Upgrading from a version that wrote `enc:v1:` values: those are still read, and
+new values are written as `enc:v2:`. Upgrade every replica together (an older
+replica cannot read `enc:v2:`), then run `npm run secrets:rotate` once, with no
+previous key, to rewrite the old values. The same command encrypts secrets that
+were stored as plaintext before a key was configured.
 
 Compose defaults to live Fiber RPC mode. `fiber-rpc-host-relay` reaches the host's
 loopback FNN at `127.0.0.1:8227` and writes through a private shared Unix socket;
